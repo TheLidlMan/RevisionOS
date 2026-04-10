@@ -19,16 +19,39 @@ import {
 import { getModule, deleteDocument, generateCards, exportAnki, exportJson } from '../api/client';
 import type { Document } from '../types';
 
+const glass = {
+  background: 'rgba(255,248,240,0.04)',
+  border: '1px solid rgba(139,115,85,0.15)',
+  borderRadius: '12px',
+  backdropFilter: 'blur(20px)',
+} as const;
+
+const accentBtn = {
+  background: '#c4956a',
+  color: '#1a1714',
+  borderRadius: '8px',
+  fontWeight: 500 as const,
+  border: 'none',
+};
+
+const secondaryBtn = {
+  ...glass,
+  color: '#f5f0e8',
+  fontWeight: 300 as const,
+};
+
 function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    done: 'bg-green-500/10 text-green-400',
-    processing: 'bg-yellow-500/10 text-yellow-400',
-    pending: 'bg-gray-500/10 text-gray-400',
-    failed: 'bg-red-500/10 text-red-400',
+  const colors: Record<string, { bg: string; color: string }> = {
+    done: { bg: 'rgba(120,180,120,0.1)', color: 'rgba(120,180,120,0.9)' },
+    processing: { bg: 'rgba(196,149,106,0.1)', color: '#c4956a' },
+    pending: { bg: 'rgba(245,240,232,0.06)', color: 'rgba(245,240,232,0.5)' },
+    failed: { bg: 'rgba(220,120,100,0.1)', color: 'rgba(220,120,100,0.9)' },
   };
+  const s = colors[status] ?? colors.pending;
   return (
     <span
-      className={`text-xs px-2 py-0.5 rounded-full ${styles[status] ?? styles.pending}`}
+      style={{ background: s.bg, color: s.color, borderRadius: '9999px', fontWeight: 300, fontSize: '0.75rem' }}
+      className="px-2 py-0.5"
     >
       {status}
     </span>
@@ -69,7 +92,7 @@ export default function ModuleView() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin text-teal" />
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: '#c4956a' }} />
       </div>
     );
   }
@@ -77,10 +100,11 @@ export default function ModuleView() {
   if (error || !mod) {
     return (
       <div className="p-8 text-center">
-        <p className="text-red-400">Failed to load module.</p>
+        <p style={{ color: 'rgba(220,120,100,0.8)' }}>Failed to load module.</p>
         <button
           onClick={() => navigate('/')}
-          className="mt-4 text-teal hover:underline text-sm"
+          style={{ color: '#c4956a' }}
+          className="mt-4 text-sm hover:underline"
         >
           Go back
         </button>
@@ -90,17 +114,27 @@ export default function ModuleView() {
 
   const masteryColor =
     mod.mastery_pct >= 80
-      ? 'text-green-400'
+      ? 'rgba(120,180,120,0.9)'
       : mod.mastery_pct >= 50
-        ? 'text-yellow-400'
-        : 'text-red-400';
+        ? '#c4956a'
+        : 'rgba(220,120,100,0.8)';
+
+  const kpiIcons = [
+    { icon: FileText, color: '#c4956a', label: 'Documents', value: mod.total_documents },
+    { icon: Layers, color: 'rgba(196,149,106,0.7)', label: 'Flashcards', value: mod.total_cards },
+    { icon: Clock, color: '#c4956a', label: 'Due Cards', value: mod.due_cards },
+    { icon: TrendingUp, color: masteryColor, label: 'Mastery', value: `${Math.round(mod.mastery_pct)}%` },
+  ];
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
       {/* Back */}
       <button
         onClick={() => navigate('/')}
-        className="flex items-center gap-1 text-sm text-gray-400 hover:text-white mb-6 transition-colors"
+        className="flex items-center gap-1 text-sm mb-6 transition-colors"
+        style={{ color: 'rgba(245,240,232,0.5)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = '#f5f0e8')}
+        onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(245,240,232,0.5)')}
       >
         <ArrowLeft className="w-4 h-4" />
         Back to Dashboard
@@ -113,50 +147,39 @@ export default function ModuleView() {
           style={{ backgroundColor: mod.color }}
         />
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">{mod.name}</h1>
+          <h1
+            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+            className="text-2xl"
+          >
+            {mod.name}
+          </h1>
           {mod.description && (
-            <p className="text-gray-400 mt-1">{mod.description}</p>
+            <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="mt-1">
+              {mod.description}
+            </p>
           )}
         </div>
       </div>
 
       {/* Stats bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-        <div className="bg-navy-light rounded-xl border border-gray-800 p-4 flex items-center gap-3">
-          <FileText className="w-5 h-5 text-blue-400" />
-          <div>
-            <p className="text-sm text-gray-400">Documents</p>
-            <p className="text-xl font-bold">{mod.total_documents}</p>
+        {kpiIcons.map(({ icon: Icon, color, label, value }) => (
+          <div key={label} style={glass} className="p-4 flex items-center gap-3">
+            <Icon className="w-5 h-5" style={{ color }} />
+            <div>
+              <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>{label}</p>
+              <p style={{ color: '#f5f0e8', fontWeight: 200, fontSize: '1.5rem' }}>{value}</p>
+            </div>
           </div>
-        </div>
-        <div className="bg-navy-light rounded-xl border border-gray-800 p-4 flex items-center gap-3">
-          <Layers className="w-5 h-5 text-purple-400" />
-          <div>
-            <p className="text-sm text-gray-400">Flashcards</p>
-            <p className="text-xl font-bold">{mod.total_cards}</p>
-          </div>
-        </div>
-        <div className="bg-navy-light rounded-xl border border-gray-800 p-4 flex items-center gap-3">
-          <Clock className="w-5 h-5 text-teal" />
-          <div>
-            <p className="text-sm text-gray-400">Due Cards</p>
-            <p className="text-xl font-bold">{mod.due_cards}</p>
-          </div>
-        </div>
-        <div className="bg-navy-light rounded-xl border border-gray-800 p-4 flex items-center gap-3">
-          <TrendingUp className={`w-5 h-5 ${masteryColor}`} />
-          <div>
-            <p className="text-sm text-gray-400">Mastery</p>
-            <p className="text-xl font-bold">{Math.round(mod.mastery_pct)}%</p>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-3 mb-8">
         <button
           onClick={() => navigate(`/upload?module=${id}`)}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+          style={secondaryBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-all hover:opacity-80"
         >
           <Upload className="w-4 h-4" />
           Upload Documents
@@ -164,25 +187,28 @@ export default function ModuleView() {
         <button
           onClick={() => generateMutation.mutate()}
           disabled={generateMutation.isPending}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors disabled:opacity-50"
+          style={secondaryBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-all hover:opacity-80 disabled:opacity-50"
         >
           {generateMutation.isPending ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
-            <Sparkles className="w-4 h-4 text-yellow-400" />
+            <Sparkles className="w-4 h-4" style={{ color: '#c4956a' }} />
           )}
           Generate Flashcards
         </button>
         <button
           onClick={() => navigate(`/flashcards/${id}`)}
-          className="flex items-center gap-2 bg-teal hover:bg-teal-dark text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={accentBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-opacity hover:opacity-90"
         >
           <Play className="w-4 h-4" />
           Start Review
         </button>
         <button
           onClick={() => navigate(`/quiz?module=${id}`)}
-          className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{ ...accentBtn, background: 'rgba(196,149,106,0.7)' }}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-opacity hover:opacity-90"
         >
           <Brain className="w-4 h-4" />
           Take Quiz
@@ -197,7 +223,8 @@ export default function ModuleView() {
             a.click();
             URL.revokeObjectURL(url);
           }}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+          style={secondaryBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-all hover:opacity-80"
         >
           <Download className="w-4 h-4" />
           Export Anki
@@ -212,51 +239,69 @@ export default function ModuleView() {
             a.click();
             URL.revokeObjectURL(url);
           }}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+          style={secondaryBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-all hover:opacity-80"
         >
           <Download className="w-4 h-4" />
           Export JSON
         </button>
         <button
           onClick={() => navigate(`/knowledge-graph?module=${id}`)}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+          style={secondaryBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-all hover:opacity-80"
         >
-          <Share2 className="w-4 h-4 text-teal" />
+          <Share2 className="w-4 h-4" style={{ color: '#c4956a' }} />
           View Knowledge Graph
         </button>
         <button
           onClick={() => navigate(`/curriculum?module=${id}`)}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+          style={secondaryBtn}
+          className="flex items-center gap-2 px-4 py-2 text-sm transition-all hover:opacity-80"
         >
-          <Calendar className="w-4 h-4 text-teal" />
+          <Calendar className="w-4 h-4" style={{ color: '#c4956a' }} />
           Generate Study Plan
         </button>
       </div>
 
       {/* Generate result */}
       {generateMutation.isSuccess && (
-        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 mb-6 text-sm text-green-400">
-          ✅ Generated {generateMutation.data.generated} flashcards!
+        <div
+          style={{ background: 'rgba(120,180,120,0.06)', border: '1px solid rgba(120,180,120,0.15)', borderRadius: '12px' }}
+          className="p-4 mb-6"
+        >
+          <p style={{ color: 'rgba(120,180,120,0.9)', fontWeight: 300, fontSize: '0.9rem' }}>
+            ✅ Generated {generateMutation.data.generated} flashcards!
+          </p>
         </div>
       )}
       {generateMutation.isError && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-6 text-sm text-red-400">
-          Failed to generate flashcards. Make sure you have documents and an API key configured.
+        <div
+          style={{ background: 'rgba(220,120,100,0.06)', border: '1px solid rgba(220,120,100,0.15)', borderRadius: '12px' }}
+          className="p-4 mb-6"
+        >
+          <p style={{ color: 'rgba(220,120,100,0.8)', fontWeight: 300, fontSize: '0.9rem' }}>
+            Failed to generate flashcards. Make sure you have documents and an API key configured.
+          </p>
         </div>
       )}
 
       {/* Documents table */}
-      <h2 className="text-lg font-semibold mb-4">Documents</h2>
+      <h2
+        style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+        className="text-lg mb-4"
+      >
+        Documents
+      </h2>
       {mod.documents && mod.documents.length > 0 ? (
-        <div className="bg-navy-light rounded-xl border border-gray-800 overflow-hidden">
-          <table className="w-full text-sm">
+        <div style={{ ...glass, overflow: 'hidden' }}>
+          <table className="w-full" style={{ fontSize: '0.9rem' }}>
             <thead>
-              <tr className="border-b border-gray-800 text-gray-400">
-                <th className="text-left px-4 py-3 font-medium">Filename</th>
-                <th className="text-left px-4 py-3 font-medium">Type</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-                <th className="text-right px-4 py-3 font-medium">Words</th>
-                <th className="text-right px-4 py-3 font-medium">Date</th>
+              <tr style={{ borderBottom: '1px solid rgba(139,115,85,0.15)' }}>
+                <th style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }} className="text-left px-4 py-3">Filename</th>
+                <th style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }} className="text-left px-4 py-3">Type</th>
+                <th style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }} className="text-left px-4 py-3">Status</th>
+                <th style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }} className="text-right px-4 py-3">Words</th>
+                <th style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }} className="text-right px-4 py-3">Date</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -264,19 +309,19 @@ export default function ModuleView() {
               {mod.documents.map((doc: Document) => (
                 <tr
                   key={doc.id}
-                  className="border-b border-gray-800/50 last:border-b-0"
+                  style={{ borderBottom: '1px solid rgba(139,115,85,0.08)' }}
                 >
-                  <td className="px-4 py-3 text-white">{doc.filename}</td>
-                  <td className="px-4 py-3 text-gray-400 uppercase text-xs">
+                  <td className="px-4 py-3" style={{ color: '#f5f0e8', fontWeight: 300 }}>{doc.filename}</td>
+                  <td className="px-4 py-3" style={{ color: 'rgba(245,240,232,0.5)', textTransform: 'uppercase', fontSize: '0.75rem', fontWeight: 300 }}>
                     {doc.file_type}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={doc.processing_status} />
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-400">
+                  <td className="px-4 py-3 text-right" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>
                     {doc.word_count.toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-400">
+                  <td className="px-4 py-3 text-right" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>
                     {doc.created_at
                       ? new Date(doc.created_at).toLocaleDateString()
                       : '—'}
@@ -284,7 +329,10 @@ export default function ModuleView() {
                   <td className="px-4 py-3 text-right">
                     <button
                       onClick={() => deleteMutation.mutate(doc.id)}
-                      className="text-gray-500 hover:text-red-400 transition-colors"
+                      style={{ color: 'rgba(245,240,232,0.25)' }}
+                      className="transition-colors"
+                      onMouseEnter={(e) => (e.currentTarget.style.color = 'rgba(220,120,100,0.8)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(245,240,232,0.25)')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -295,12 +343,13 @@ export default function ModuleView() {
           </table>
         </div>
       ) : (
-        <div className="text-center py-12 bg-navy-light rounded-xl border border-gray-800">
-          <p className="text-gray-400">
+        <div style={glass} className="text-center py-12">
+          <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>
             No documents yet.{' '}
             <button
               onClick={() => navigate(`/upload?module=${id}`)}
-              className="text-teal hover:underline"
+              style={{ color: '#c4956a' }}
+              className="hover:underline"
             >
               Upload one
             </button>

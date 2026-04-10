@@ -23,18 +23,33 @@ import {
 } from '../api/client';
 import type { ConceptConfidence, ConceptDetail } from '../types';
 
-function confidenceColor(score: number): string {
-  if (score < 40) return 'bg-red-500/20 border-red-500/40 text-red-400';
-  if (score < 60) return 'bg-orange-500/20 border-orange-500/40 text-orange-400';
-  if (score < 75) return 'bg-yellow-500/20 border-yellow-500/40 text-yellow-400';
-  if (score < 85) return 'bg-green-500/20 border-green-500/40 text-green-400';
-  return 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400';
+const glass = {
+  background: 'rgba(255,248,240,0.04)',
+  border: '1px solid rgba(139,115,85,0.15)',
+  borderRadius: '12px',
+  backdropFilter: 'blur(20px)',
+} as const;
+
+function confidenceStyle(score: number): React.CSSProperties {
+  if (score < 40) return { background: 'rgba(220,120,100,0.12)', border: '1px solid rgba(220,120,100,0.25)', borderRadius: '12px' };
+  if (score < 60) return { background: 'rgba(210,160,90,0.12)', border: '1px solid rgba(210,160,90,0.25)', borderRadius: '12px' };
+  if (score < 75) return { background: 'rgba(196,149,106,0.12)', border: '1px solid rgba(196,149,106,0.25)', borderRadius: '12px' };
+  if (score < 85) return { background: 'rgba(140,180,120,0.12)', border: '1px solid rgba(140,180,120,0.25)', borderRadius: '12px' };
+  return { background: 'rgba(120,180,120,0.12)', border: '1px solid rgba(120,180,120,0.25)', borderRadius: '12px' };
+}
+
+function confidenceTextColor(score: number): string {
+  if (score < 40) return 'rgba(220,120,100,0.9)';
+  if (score < 60) return 'rgba(210,160,90,0.9)';
+  if (score < 75) return '#c4956a';
+  if (score < 85) return 'rgba(140,180,120,0.9)';
+  return 'rgba(120,180,120,0.9)';
 }
 
 function TrendIcon({ trend }: { trend: ConceptConfidence['trend'] }) {
-  if (trend === 'improving') return <TrendingUp className="w-3.5 h-3.5 text-green-400" />;
-  if (trend === 'declining') return <TrendingDown className="w-3.5 h-3.5 text-red-400" />;
-  return <Minus className="w-3.5 h-3.5 text-gray-500" />;
+  if (trend === 'improving') return <TrendingUp className="w-3.5 h-3.5" style={{ color: 'rgba(120,180,120,0.9)' }} />;
+  if (trend === 'declining') return <TrendingDown className="w-3.5 h-3.5" style={{ color: 'rgba(220,120,100,0.8)' }} />;
+  return <Minus className="w-3.5 h-3.5" style={{ color: 'rgba(245,240,232,0.25)' }} />;
 }
 
 export default function WeaknessMap() {
@@ -75,8 +90,13 @@ export default function WeaknessMap() {
     <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full relative">
       {/* Header */}
       <div className="flex items-center gap-3 mb-8">
-        <Map className="w-6 h-6 text-teal" />
-        <h1 className="text-2xl font-bold">Weakness Map</h1>
+        <Map className="w-6 h-6" style={{ color: '#c4956a' }} />
+        <h1
+          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+          className="text-2xl"
+        >
+          Weakness Map
+        </h1>
       </div>
 
       {/* Controls */}
@@ -84,7 +104,15 @@ export default function WeaknessMap() {
         <select
           value={moduleId}
           onChange={(e) => setModuleId(e.target.value)}
-          className="bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-teal transition-colors"
+          style={{
+            background: 'rgba(255,248,240,0.04)',
+            border: '1px solid rgba(139,115,85,0.15)',
+            borderRadius: '8px',
+            color: '#f5f0e8',
+            fontWeight: 300,
+            fontSize: '0.9rem',
+          }}
+          className="px-3 py-2.5 focus:outline-none transition-colors"
         >
           <option value="">All Modules</option>
           {modules?.map((m) => (
@@ -94,7 +122,13 @@ export default function WeaknessMap() {
 
         <button
           onClick={() => setShowMastered(!showMastered)}
-          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 text-sm text-gray-300 transition-colors"
+          style={{
+            ...glass,
+            color: showMastered ? '#c4956a' : 'rgba(245,240,232,0.5)',
+            fontWeight: 300,
+            fontSize: '0.9rem',
+          }}
+          className="flex items-center gap-2 px-3 py-2 transition-all"
         >
           {showMastered ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
           {showMastered ? 'Showing Mastered' : 'Mastered Hidden'}
@@ -102,7 +136,8 @@ export default function WeaknessMap() {
 
         <button
           onClick={() => navigate(`/quiz?mode=weakness_drill${moduleId ? `&module=${moduleId}` : ''}`)}
-          className="ml-auto flex items-center gap-2 bg-teal hover:bg-teal-dark text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{ background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500, border: 'none' }}
+          className="ml-auto flex items-center gap-2 px-4 py-2 text-sm transition-opacity hover:opacity-90"
         >
           <Zap className="w-4 h-4" />
           Start Optimal Session
@@ -112,17 +147,17 @@ export default function WeaknessMap() {
       {/* Stats bar */}
       {weaknessData && (
         <div className="grid grid-cols-3 gap-4 mb-8">
-          <div className="bg-navy-light rounded-xl border border-gray-800 p-4 text-center">
-            <p className="text-2xl font-bold">{weaknessData.total_concepts}</p>
-            <p className="text-sm text-gray-400">Total Concepts</p>
+          <div style={glass} className="p-4 text-center">
+            <p style={{ color: '#f5f0e8', fontWeight: 200, fontSize: '2rem' }}>{weaknessData.total_concepts}</p>
+            <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>Total Concepts</p>
           </div>
-          <div className="bg-navy-light rounded-xl border border-gray-800 p-4 text-center">
-            <p className="text-2xl font-bold text-red-400">{weaknessData.weak_count}</p>
-            <p className="text-sm text-gray-400">Weak</p>
+          <div style={glass} className="p-4 text-center">
+            <p style={{ color: 'rgba(220,120,100,0.8)', fontWeight: 200, fontSize: '2rem' }}>{weaknessData.weak_count}</p>
+            <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>Weak</p>
           </div>
-          <div className="bg-navy-light rounded-xl border border-gray-800 p-4 text-center">
-            <p className="text-2xl font-bold text-green-400">{weaknessData.mastered_count}</p>
-            <p className="text-sm text-gray-400">Mastered</p>
+          <div style={glass} className="p-4 text-center">
+            <p style={{ color: 'rgba(120,180,120,0.8)', fontWeight: 200, fontSize: '2rem' }}>{weaknessData.mastered_count}</p>
+            <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>Mastered</p>
           </div>
         </div>
       )}
@@ -130,11 +165,11 @@ export default function WeaknessMap() {
       {/* Heatmap grid */}
       {isLoading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-teal" />
+          <Loader2 className="w-6 h-6 animate-spin" style={{ color: '#c4956a' }} />
         </div>
       ) : displayed.length === 0 ? (
-        <div className="text-center py-16 bg-navy-light rounded-xl border border-gray-800">
-          <p className="text-gray-400">No concepts to display. Upload documents and generate content first.</p>
+        <div style={glass} className="text-center py-16">
+          <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>No concepts to display. Upload documents and generate content first.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -142,16 +177,24 @@ export default function WeaknessMap() {
             <button
               key={concept.id}
               onClick={() => setSelectedConceptId(concept.id)}
-              className={`rounded-xl border p-4 text-left transition-all hover:scale-[1.02] ${confidenceColor(concept.confidence_score)} ${
-                selectedConceptId === concept.id ? 'ring-2 ring-teal' : ''
-              }`}
+              style={{
+                ...confidenceStyle(concept.confidence_score),
+                backdropFilter: 'blur(20px)',
+                textAlign: 'left' as const,
+                transition: 'all 0.2s',
+                outline: selectedConceptId === concept.id ? '2px solid #c4956a' : 'none',
+                outlineOffset: '2px',
+              }}
+              className="p-4 hover:scale-[1.02]"
             >
-              <p className="text-sm font-medium truncate mb-2">{concept.name}</p>
+              <p style={{ color: '#f5f0e8', fontWeight: 400, fontSize: '0.85rem' }} className="truncate mb-2">{concept.name}</p>
               <div className="flex items-center justify-between">
-                <span className="text-lg font-bold">{Math.round(concept.confidence_score)}%</span>
+                <span style={{ color: confidenceTextColor(concept.confidence_score), fontWeight: 600, fontSize: '1.1rem' }}>
+                  {Math.round(concept.confidence_score)}%
+                </span>
                 <TrendIcon trend={concept.trend} />
               </div>
-              <div className="mt-2 text-xs opacity-70">
+              <div style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }} className="mt-2">
                 {concept.review_count} reviews
               </div>
             </button>
@@ -167,7 +210,8 @@ export default function WeaknessMap() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.5 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black z-40"
+              className="fixed inset-0 z-40"
+              style={{ background: '#0f0f0f' }}
               onClick={() => setSelectedConceptId(null)}
             />
             <motion.div
@@ -175,14 +219,26 @@ export default function WeaknessMap() {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 h-full w-full max-w-md bg-navy-light border-l border-gray-800 z-50 overflow-y-auto"
+              className="fixed right-0 top-0 h-full w-full max-w-md z-50 overflow-y-auto"
+              style={{
+                background: '#1a1714',
+                borderLeft: '1px solid rgba(139,115,85,0.15)',
+              }}
             >
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-lg font-bold">Concept Detail</h2>
+                  <h2
+                    style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+                    className="text-lg"
+                  >
+                    Concept Detail
+                  </h2>
                   <button
                     onClick={() => setSelectedConceptId(null)}
-                    className="text-gray-400 hover:text-white transition-colors"
+                    style={{ color: 'rgba(245,240,232,0.5)' }}
+                    className="transition-colors"
+                    onMouseEnter={(e) => (e.currentTarget.style.color = '#f5f0e8')}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(245,240,232,0.5)')}
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -190,7 +246,7 @@ export default function WeaknessMap() {
 
                 {detailLoading ? (
                   <div className="flex justify-center py-12">
-                    <Loader2 className="w-5 h-5 animate-spin text-teal" />
+                    <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#c4956a' }} />
                   </div>
                 ) : conceptDetail ? (
                   <ConceptDetailPanel
@@ -220,26 +276,31 @@ function ConceptDetailPanel({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-xl font-bold mb-1">{detail.name}</h3>
+        <h3
+          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+          className="text-xl mb-1"
+        >
+          {detail.name}
+        </h3>
         {detail.definition && (
-          <p className="text-gray-400 text-sm">{detail.definition}</p>
+          <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>{detail.definition}</p>
         )}
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-navy-lighter rounded-lg p-3">
-          <p className="text-xs text-gray-500 mb-1">Accuracy</p>
-          <p className="text-lg font-bold">{Math.round(detail.accuracy_rate)}%</p>
+        <div style={{ ...glass, borderRadius: '8px' }} className="p-3">
+          <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }} className="mb-1">Accuracy</p>
+          <p style={{ color: '#c4956a', fontWeight: 200, fontSize: '1.5rem' }}>{Math.round(detail.accuracy_rate)}%</p>
         </div>
-        <div className="bg-navy-lighter rounded-lg p-3">
-          <p className="text-xs text-gray-500 mb-1">Reviews</p>
-          <p className="text-lg font-bold">{detail.review_count}</p>
+        <div style={{ ...glass, borderRadius: '8px' }} className="p-3">
+          <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }} className="mb-1">Reviews</p>
+          <p style={{ color: '#f5f0e8', fontWeight: 200, fontSize: '1.5rem' }}>{detail.review_count}</p>
         </div>
       </div>
 
       {detail.last_reviewed && (
-        <p className="text-xs text-gray-500">
+        <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }}>
           Last reviewed: {new Date(detail.last_reviewed).toLocaleDateString()}
         </p>
       )}
@@ -247,15 +308,15 @@ function ConceptDetailPanel({
       {/* Flashcards */}
       {detail.flashcards.length > 0 && (
         <div>
-          <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+          <h4 className="flex items-center gap-2 mb-2" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 400, fontSize: '0.85rem' }}>
             <BookOpen className="w-4 h-4" />
             Flashcards ({detail.flashcards.length})
           </h4>
           <div className="space-y-2">
             {detail.flashcards.map((fc) => (
-              <div key={fc.id} className="bg-navy-lighter rounded-lg p-3 text-sm">
-                <p className="text-gray-300 truncate">{fc.front}</p>
-                <p className="text-xs text-gray-500 mt-1">
+              <div key={fc.id} style={{ ...glass, borderRadius: '8px' }} className="p-3">
+                <p style={{ color: '#f5f0e8', fontWeight: 300, fontSize: '0.85rem' }} className="truncate">{fc.front}</p>
+                <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }} className="mt-1">
                   {fc.state} · {fc.reps} reps
                 </p>
               </div>
@@ -267,15 +328,15 @@ function ConceptDetailPanel({
       {/* Questions */}
       {detail.questions.length > 0 && (
         <div>
-          <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+          <h4 className="flex items-center gap-2 mb-2" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 400, fontSize: '0.85rem' }}>
             <HelpCircle className="w-4 h-4" />
             Questions ({detail.questions.length})
           </h4>
           <div className="space-y-2">
             {detail.questions.map((q) => (
-              <div key={q.id} className="bg-navy-lighter rounded-lg p-3 text-sm">
-                <p className="text-gray-300 truncate">{q.question_text}</p>
-                <p className="text-xs text-gray-500 mt-1">
+              <div key={q.id} style={{ ...glass, borderRadius: '8px' }} className="p-3">
+                <p style={{ color: '#f5f0e8', fontWeight: 300, fontSize: '0.85rem' }} className="truncate">{q.question_text}</p>
+                <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }} className="mt-1">
                   {q.difficulty} · {q.times_correct}/{q.times_answered} correct
                 </p>
               </div>
@@ -288,7 +349,8 @@ function ConceptDetailPanel({
       <button
         onClick={onDrill}
         disabled={drilling}
-        className="w-full bg-teal hover:bg-teal-dark disabled:opacity-50 text-white rounded-lg px-4 py-3 font-medium transition-colors flex items-center justify-center gap-2"
+        style={{ background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500, border: 'none' }}
+        className="w-full px-4 py-3 transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
       >
         {drilling ? (
           <Loader2 className="w-4 h-4 animate-spin" />

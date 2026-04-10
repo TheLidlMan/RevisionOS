@@ -21,6 +21,21 @@ import type {
 
 type Phase = 'config' | 'quiz' | 'results';
 
+const glass = {
+  background: 'rgba(255,248,240,0.04)',
+  border: '1px solid rgba(139,115,85,0.15)',
+  borderRadius: '12px',
+  backdropFilter: 'blur(20px)',
+} as const;
+
+const accentBtn = {
+  background: '#c4956a',
+  color: '#1a1714',
+  borderRadius: '8px',
+  fontWeight: 500,
+  border: 'none',
+} as const;
+
 export default function QuizMode() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -124,20 +139,31 @@ export default function QuizMode() {
     return (
       <div className="p-6 lg:p-8 max-w-2xl mx-auto w-full">
         <div className="flex items-center gap-3 mb-8">
-          <Brain className="w-6 h-6 text-purple-400" />
-          <h1 className="text-2xl font-bold">Quiz Mode</h1>
+          <Brain className="w-6 h-6" style={{ color: '#c4956a' }} />
+          <h1
+            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+            className="text-2xl"
+          >
+            Quiz Mode
+          </h1>
         </div>
 
-        <div className="bg-navy-light rounded-xl border border-gray-800 p-6 space-y-6">
+        <div style={glass} className="p-6 space-y-6">
           {/* Module */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Module
             </label>
             <select
               value={moduleId}
               onChange={(e) => setModuleId(e.target.value)}
-              className="w-full bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-teal transition-colors"
+              style={{
+                background: 'rgba(255,248,240,0.04)',
+                border: '1px solid rgba(139,115,85,0.15)',
+                borderRadius: '8px',
+                color: '#f5f0e8',
+              }}
+              className="w-full px-3 py-2.5 focus:outline-none transition-colors"
             >
               <option value="">Choose a module…</option>
               {modules?.map((m) => (
@@ -150,7 +176,7 @@ export default function QuizMode() {
 
           {/* Number of questions */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Number of Questions
             </label>
             <div className="flex gap-2">
@@ -158,11 +184,12 @@ export default function QuizMode() {
                 <button
                   key={n}
                   onClick={() => setNumQuestions(n)}
-                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                  style={
                     numQuestions === n
-                      ? 'bg-teal text-white'
-                      : 'bg-navy-lighter border border-gray-700 text-gray-300 hover:border-gray-500'
-                  }`}
+                      ? { background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500, border: 'none' }
+                      : { ...glass, color: '#f5f0e8', fontWeight: 300 }
+                  }
+                  className="px-4 py-2 text-sm transition-all"
                 >
                   {n}
                 </button>
@@ -173,7 +200,14 @@ export default function QuizMode() {
                 max={50}
                 value={numQuestions}
                 onChange={(e) => setNumQuestions(parseInt(e.target.value) || 10)}
-                className="w-20 bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-teal"
+                style={{
+                  background: 'rgba(255,248,240,0.04)',
+                  border: '1px solid rgba(139,115,85,0.15)',
+                  borderRadius: '8px',
+                  color: '#f5f0e8',
+                  fontWeight: 300,
+                }}
+                className="w-20 px-3 py-2 text-sm focus:outline-none"
                 placeholder="Custom"
               />
             </div>
@@ -181,7 +215,7 @@ export default function QuizMode() {
 
           {/* Difficulty */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Difficulty
             </label>
             <div className="flex gap-2">
@@ -189,11 +223,12 @@ export default function QuizMode() {
                 <button
                   key={d}
                   onClick={() => setDifficulty(d)}
-                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                  style={
                     difficulty === d
-                      ? 'bg-teal text-white'
-                      : 'bg-navy-lighter border border-gray-700 text-gray-300 hover:border-gray-500'
-                  }`}
+                      ? { background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500, border: 'none' }
+                      : { ...glass, color: '#f5f0e8', fontWeight: 300 }
+                  }
+                  className="px-4 py-2 text-sm transition-all"
                 >
                   {d.charAt(0) + d.slice(1).toLowerCase()}
                 </button>
@@ -203,7 +238,7 @@ export default function QuizMode() {
 
           {/* Mode */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Mode
             </label>
             <div className="flex gap-2">
@@ -215,11 +250,12 @@ export default function QuizMode() {
                 <button
                   key={value}
                   onClick={() => setMode(value)}
-                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                  style={
                     mode === value
-                      ? 'bg-teal text-white'
-                      : 'bg-navy-lighter border border-gray-700 text-gray-300 hover:border-gray-500'
-                  }`}
+                      ? { background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500, border: 'none' }
+                      : { ...glass, color: '#f5f0e8', fontWeight: 300 }
+                  }
+                  className="px-4 py-2 text-sm transition-all"
                 >
                   {label}
                 </button>
@@ -228,7 +264,7 @@ export default function QuizMode() {
           </div>
 
           {startMutation.isError && (
-            <p className="text-red-400 text-sm">
+            <p style={{ color: 'rgba(220,120,100,0.8)', fontSize: '0.9rem', fontWeight: 300 }}>
               Failed to start quiz. Make sure you have questions generated for this module.
             </p>
           )}
@@ -236,7 +272,8 @@ export default function QuizMode() {
           <button
             onClick={handleStart}
             disabled={!moduleId || startMutation.isPending}
-            className="w-full bg-teal hover:bg-teal-dark disabled:opacity-50 text-white rounded-lg px-4 py-3 font-medium transition-colors flex items-center justify-center gap-2"
+            style={accentBtn}
+            className="w-full px-4 py-3 transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {startMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -253,38 +290,70 @@ export default function QuizMode() {
   // Results phase
   if (phase === 'results' && results) {
     const pct = results.total_items > 0 ? Math.round(results.score_pct) : 0;
+    const ringR = 70;
+    const circumference = 2 * Math.PI * ringR;
+    const offset = circumference - (pct / 100) * circumference;
+
     return (
       <div className="p-6 lg:p-8 max-w-2xl mx-auto w-full">
         <div className="flex flex-col items-center text-center py-12">
-          <Trophy className="w-16 h-16 text-yellow-400 mb-4" />
-          <h2 className="text-3xl font-bold mb-2">Quiz Complete!</h2>
-          <p className="text-5xl font-bold text-teal my-6">{pct}%</p>
+          <Trophy className="w-16 h-16 mb-4" style={{ color: '#c4956a' }} />
+          <h2
+            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+            className="text-3xl mb-6"
+          >
+            Quiz Complete!
+          </h2>
+
+          {/* Score ring */}
+          <div className="relative mb-8" style={{ width: 180, height: 180 }}>
+            <svg viewBox="0 0 180 180" style={{ width: '100%', height: '100%' }}>
+              <circle cx="90" cy="90" r={ringR} fill="none" stroke="rgba(139,115,85,0.15)" strokeWidth="8" />
+              <circle
+                cx="90"
+                cy="90"
+                r={ringR}
+                fill="none"
+                stroke="#c4956a"
+                strokeWidth="8"
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={offset}
+                transform="rotate(-90 90 90)"
+                style={{ transition: 'stroke-dashoffset 1s ease' }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span style={{ color: '#c4956a', fontWeight: 200, fontSize: '3rem' }}>{pct}%</span>
+            </div>
+          </div>
 
           <div className="grid grid-cols-3 gap-6 mb-8">
-            <div>
-              <p className="text-2xl font-bold text-green-400">
+            <div style={glass} className="p-4">
+              <p style={{ color: 'rgba(120,180,120,0.8)', fontWeight: 200, fontSize: '2rem' }}>
                 {results.correct}
               </p>
-              <p className="text-sm text-gray-400">Correct</p>
+              <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>Correct</p>
             </div>
-            <div>
-              <p className="text-2xl font-bold text-red-400">
+            <div style={glass} className="p-4">
+              <p style={{ color: 'rgba(220,120,100,0.8)', fontWeight: 200, fontSize: '2rem' }}>
                 {results.incorrect}
               </p>
-              <p className="text-sm text-gray-400">Incorrect</p>
+              <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>Incorrect</p>
             </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-400">
+            <div style={glass} className="p-4">
+              <p style={{ color: '#f5f0e8', fontWeight: 200, fontSize: '2rem' }}>
                 {results.total_items}
               </p>
-              <p className="text-sm text-gray-400">Total</p>
+              <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.8rem' }}>Total</p>
             </div>
           </div>
 
           <div className="flex gap-3">
             <button
               onClick={() => navigate('/')}
-              className="bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+              style={{ ...glass, color: '#f5f0e8', fontWeight: 300 }}
+              className="px-4 py-2 text-sm transition-all hover:opacity-80"
             >
               Back to Dashboard
             </button>
@@ -294,7 +363,8 @@ export default function QuizMode() {
                 setSession(null);
                 setResults(null);
               }}
-              className="bg-teal hover:bg-teal-dark text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              style={accentBtn}
+              className="px-4 py-2 text-sm transition-opacity hover:opacity-90"
             >
               Try Again
             </button>
@@ -313,19 +383,25 @@ export default function QuizMode() {
     <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <span className="text-sm text-gray-400">
+        <span style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>
           Question {questionIdx + 1} of {session.questions.length}
         </span>
-        <span className="text-sm font-medium text-teal">
+        <span style={{ color: '#c4956a', fontWeight: 500, fontSize: '0.9rem' }}>
           Score: {score}/{questionIdx + (answerResult ? 1 : 0)}
         </span>
       </div>
 
       {/* Progress */}
-      <div className="h-1 bg-navy-lighter rounded-full mb-8 overflow-hidden">
+      <div
+        className="mb-8 overflow-hidden"
+        style={{ height: '3px', background: 'rgba(255,248,240,0.06)', borderRadius: '4px' }}
+      >
         <div
-          className="h-full bg-teal rounded-full transition-all duration-300"
           style={{
+            height: '100%',
+            background: '#c4956a',
+            borderRadius: '4px',
+            transition: 'width 0.3s ease',
             width: `${((questionIdx + (answerResult ? 1 : 0)) / session.questions.length) * 100}%`,
           }}
         />
@@ -338,12 +414,16 @@ export default function QuizMode() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
-          className="bg-navy-light rounded-xl border border-gray-800 p-6 mb-6"
+          style={glass}
+          className="p-6 mb-6"
         >
-          <span className="text-xs text-gray-500 uppercase mb-2 inline-block">
+          <span style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase' }} className="mb-2 inline-block">
             {question.difficulty}
           </span>
-          <p className="text-lg mb-6 whitespace-pre-wrap">
+          <p
+            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontSize: '1.1rem', lineHeight: 1.7 }}
+            className="mb-6 whitespace-pre-wrap"
+          >
             {question.question_text}
           </p>
 
@@ -351,26 +431,45 @@ export default function QuizMode() {
           {question.options && (
             <div className="space-y-3">
               {question.options.map((opt, idx) => {
-                let optClass =
-                  'bg-navy-lighter border border-gray-700 hover:border-gray-500 text-gray-200';
+                let optStyle: React.CSSProperties = {
+                  ...glass,
+                  color: '#f5f0e8',
+                  fontWeight: 300,
+                  textAlign: 'left' as const,
+                  width: '100%',
+                  cursor: 'pointer',
+                };
 
                 if (answerResult) {
                   if (opt === answerResult.correct_answer) {
-                    optClass =
-                      'bg-green-500/10 border border-green-500/30 text-green-400';
-                  } else if (
-                    opt === selectedAnswer &&
-                    !answerResult.is_correct
-                  ) {
-                    optClass =
-                      'bg-red-500/10 border border-red-500/30 text-red-400';
+                    optStyle = {
+                      ...optStyle,
+                      background: 'rgba(120,180,120,0.1)',
+                      border: '1px solid rgba(120,180,120,0.3)',
+                      color: 'rgba(120,180,120,0.9)',
+                    };
+                  } else if (opt === selectedAnswer && !answerResult.is_correct) {
+                    optStyle = {
+                      ...optStyle,
+                      background: 'rgba(220,120,100,0.1)',
+                      border: '1px solid rgba(220,120,100,0.3)',
+                      color: 'rgba(220,120,100,0.9)',
+                    };
                   } else {
-                    optClass =
-                      'bg-navy-lighter border border-gray-800 text-gray-500';
+                    optStyle = {
+                      ...optStyle,
+                      background: 'rgba(255,248,240,0.02)',
+                      border: '1px solid rgba(139,115,85,0.08)',
+                      color: 'rgba(245,240,232,0.25)',
+                    };
                   }
                 } else if (opt === selectedAnswer) {
-                  optClass =
-                    'bg-teal/10 border border-teal text-teal';
+                  optStyle = {
+                    ...optStyle,
+                    background: 'rgba(196,149,106,0.15)',
+                    border: '1px solid rgba(196,149,106,0.4)',
+                    color: '#c4956a',
+                  };
                 }
 
                 return (
@@ -380,9 +479,10 @@ export default function QuizMode() {
                       if (!answerResult) setSelectedAnswer(opt);
                     }}
                     disabled={!!answerResult}
-                    className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-all ${optClass}`}
+                    style={optStyle}
+                    className="px-4 py-3 text-sm transition-all"
                   >
-                    <span className="font-mono mr-2 opacity-50">
+                    <span style={{ fontFamily: 'monospace', marginRight: '8px', opacity: 0.5 }}>
                       {String.fromCharCode(65 + idx)}.
                     </span>
                     {opt}
@@ -399,28 +499,25 @@ export default function QuizMode() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className={`rounded-xl border p-4 mb-6 ${
-            answerResult.is_correct
-              ? 'bg-green-500/10 border-green-500/20'
-              : 'bg-red-500/10 border-red-500/20'
-          }`}
+          style={{
+            ...glass,
+            background: answerResult.is_correct ? 'rgba(120,180,120,0.06)' : 'rgba(220,120,100,0.06)',
+            border: answerResult.is_correct ? '1px solid rgba(120,180,120,0.2)' : '1px solid rgba(220,120,100,0.2)',
+          }}
+          className="p-4 mb-6"
         >
           <div className="flex items-center gap-2 mb-2">
             {answerResult.is_correct ? (
-              <CheckCircle className="w-5 h-5 text-green-400" />
+              <CheckCircle className="w-5 h-5" style={{ color: 'rgba(120,180,120,0.9)' }} />
             ) : (
-              <XCircle className="w-5 h-5 text-red-400" />
+              <XCircle className="w-5 h-5" style={{ color: 'rgba(220,120,100,0.9)' }} />
             )}
-            <span
-              className={`font-medium ${
-                answerResult.is_correct ? 'text-green-400' : 'text-red-400'
-              }`}
-            >
+            <span style={{ fontWeight: 500, color: answerResult.is_correct ? 'rgba(120,180,120,0.9)' : 'rgba(220,120,100,0.9)' }}>
               {answerResult.is_correct ? 'Correct!' : 'Incorrect'}
             </span>
           </div>
           {answerResult.explanation && (
-            <p className="text-sm text-gray-300">{answerResult.explanation}</p>
+            <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>{answerResult.explanation}</p>
           )}
         </motion.div>
       )}
@@ -431,7 +528,8 @@ export default function QuizMode() {
           <button
             onClick={handleSubmitAnswer}
             disabled={!selectedAnswer || answerMutation.isPending}
-            className="bg-teal hover:bg-teal-dark disabled:opacity-50 text-white rounded-lg px-6 py-2.5 text-sm font-medium transition-colors flex items-center gap-2"
+            style={accentBtn}
+            className="px-6 py-2.5 text-sm transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
           >
             {answerMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -443,7 +541,8 @@ export default function QuizMode() {
           <button
             onClick={handleNext}
             disabled={completeMutation.isPending}
-            className="bg-teal hover:bg-teal-dark disabled:opacity-50 text-white rounded-lg px-6 py-2.5 text-sm font-medium transition-colors flex items-center gap-2"
+            style={accentBtn}
+            className="px-6 py-2.5 text-sm transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
           >
             {completeMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />

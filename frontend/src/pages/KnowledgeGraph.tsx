@@ -5,10 +5,17 @@ import { Share2, Loader2 } from 'lucide-react';
 import { getModules, getKnowledgeGraph } from '../api/client';
 import type { GraphNode } from '../types';
 
+const glass = {
+  background: 'rgba(255,248,240,0.04)',
+  border: '1px solid rgba(139,115,85,0.15)',
+  borderRadius: '12px',
+  backdropFilter: 'blur(20px)',
+} as const;
+
 function masteryColor(mastery: number): string {
-  if (mastery < 40) return '#ef4444';
-  if (mastery < 70) return '#eab308';
-  return '#22c55e';
+  if (mastery < 40) return 'rgba(220,120,100,0.85)';
+  if (mastery < 70) return '#c4956a';
+  return 'rgba(120,180,120,0.85)';
 }
 
 function nodeRadius(importance: number): number {
@@ -53,8 +60,13 @@ export default function KnowledgeGraph() {
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8">
-        <Share2 className="w-6 h-6 text-teal" />
-        <h1 className="text-2xl font-bold">Knowledge Graph</h1>
+        <Share2 className="w-6 h-6" style={{ color: '#c4956a' }} />
+        <h1
+          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+          className="text-2xl"
+        >
+          Knowledge Graph
+        </h1>
       </div>
 
       {/* Module selector */}
@@ -62,7 +74,15 @@ export default function KnowledgeGraph() {
         <select
           value={moduleId}
           onChange={(e) => setModuleId(e.target.value)}
-          className="bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-teal transition-colors"
+          style={{
+            background: 'rgba(255,248,240,0.04)',
+            border: '1px solid rgba(139,115,85,0.15)',
+            borderRadius: '8px',
+            color: '#f5f0e8',
+            fontWeight: 300,
+            fontSize: '0.9rem',
+          }}
+          className="px-3 py-2.5 focus:outline-none transition-colors"
         >
           <option value="">Select a module…</option>
           {modules?.map((m) => (
@@ -72,22 +92,24 @@ export default function KnowledgeGraph() {
       </div>
 
       {!moduleId ? (
-        <div className="text-center py-16 bg-navy-light rounded-xl border border-gray-800">
-          <Share2 className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-          <p className="text-gray-400">Select a module to view its knowledge graph.</p>
+        <div style={glass} className="text-center py-16">
+          <Share2 className="w-12 h-12 mx-auto mb-4" style={{ color: 'rgba(245,240,232,0.15)' }} />
+          <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>Select a module to view its knowledge graph.</p>
         </div>
       ) : isLoading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-teal" />
+          <Loader2 className="w-6 h-6 animate-spin" style={{ color: '#c4956a' }} />
         </div>
       ) : !graph || graph.nodes.length === 0 ? (
-        <div className="text-center py-16 bg-navy-light rounded-xl border border-gray-800">
-          <p className="text-gray-400">No concepts found for this module.</p>
+        <div style={glass} className="text-center py-16">
+          <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>No concepts found for this module.</p>
         </div>
       ) : (
-        <div className="bg-navy-light rounded-xl border border-gray-800 p-4 overflow-hidden">
+        <div style={glass} className="p-4 overflow-hidden">
           {graph.module_name && (
-            <p className="text-sm text-gray-400 mb-2">Module: {graph.module_name}</p>
+            <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.85rem' }} className="mb-2">
+              Module: {graph.module_name}
+            </p>
           )}
           <svg
             viewBox={`0 0 ${layout.width} ${layout.height}`}
@@ -106,7 +128,7 @@ export default function KnowledgeGraph() {
                   y1={from.y}
                   x2={to.x}
                   y2={to.y}
-                  stroke="#30363d"
+                  stroke="rgba(139,115,85,0.3)"
                   strokeWidth={1.5}
                   strokeOpacity={0.6}
                 />
@@ -132,14 +154,15 @@ export default function KnowledgeGraph() {
                     r={r}
                     fill={masteryColor(node.mastery)}
                     opacity={isHovered ? 1 : 0.7}
-                    stroke={isHovered ? '#fff' : 'transparent'}
+                    stroke={isHovered ? '#f5f0e8' : 'transparent'}
                     strokeWidth={2}
                   />
                   <text
                     x={pos.x}
                     y={pos.y + r + 14}
                     textAnchor="middle"
-                    className="text-[10px] fill-gray-400"
+                    fill="rgba(245,240,232,0.5)"
+                    style={{ fontSize: '10px' }}
                   >
                     {node.name.length > 16 ? node.name.slice(0, 14) + '…' : node.name}
                   </text>
@@ -150,26 +173,33 @@ export default function KnowledgeGraph() {
 
           {/* Tooltip */}
           {hoveredNode && (
-            <div className="mt-2 bg-navy-lighter rounded-lg border border-gray-700 px-4 py-2 inline-block">
-              <p className="text-sm font-medium">{hoveredNode.name}</p>
-              <p className="text-xs text-gray-400">
+            <div
+              style={{
+                ...glass,
+                borderRadius: '8px',
+                display: 'inline-block',
+              }}
+              className="mt-2 px-4 py-2"
+            >
+              <p style={{ color: '#f5f0e8', fontWeight: 400, fontSize: '0.9rem' }}>{hoveredNode.name}</p>
+              <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.75rem' }}>
                 Mastery: {Math.round(hoveredNode.mastery)}% · Importance: {hoveredNode.importance}
               </p>
             </div>
           )}
 
           {/* Legend */}
-          <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
+          <div className="flex items-center gap-4 mt-4" style={{ fontSize: '0.75rem', color: 'rgba(245,240,232,0.35)' }}>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-red-500" />
+              <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(220,120,100,0.85)' }} />
               <span>&lt; 40% mastery</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <div className="w-3 h-3 rounded-full" style={{ background: '#c4956a' }} />
               <span>40-70%</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(120,180,120,0.85)' }} />
               <span>&gt; 70%</span>
             </div>
           </div>
