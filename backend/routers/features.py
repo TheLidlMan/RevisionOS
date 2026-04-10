@@ -387,9 +387,8 @@ def _fsrs_retention(stability: float, days: float) -> float:
 
 def _strip_html(html: str) -> str:
     """Crude HTML → plain-text conversion."""
-    # Remove script elements (handles </script>, </script >, </script\n>, etc.)
-    text = re.sub(r"<\s*script[\s>].*?<\s*/\s*script[\s>]", "", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<\s*style[\s>].*?<\s*/\s*style[\s>]", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<\s*script[\s>].*?<\s*/\s*script\s*>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<\s*style[\s>].*?<\s*/\s*style\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
@@ -1426,7 +1425,7 @@ def exam_timeline(
     sorted_cards = sorted(cards, key=lambda c: c.stability or 0.0)
 
     total_cards = len(sorted_cards)
-    plan_days = max(days_until, 1)
+    plan_days = min(max(days_until, 1), 180)  # cap at 180 days to prevent excessive output
 
     daily_plan: list[DailyPlan] = []
     for day_offset in range(plan_days):
