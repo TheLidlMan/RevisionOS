@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
+import KeyboardShortcuts from './components/KeyboardShortcuts';
 import Dashboard from './pages/Dashboard';
 import ModuleView from './pages/ModuleView';
 import UploadCenter from './pages/UploadCenter';
@@ -78,6 +79,7 @@ export default function App() {
         </Routes>
       </main>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <KeyboardShortcuts />
     </div>
   );
 }
