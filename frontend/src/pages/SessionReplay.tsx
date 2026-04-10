@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
@@ -19,12 +18,6 @@ const glass = {
   border: '1px solid rgba(139,115,85,0.15)',
   borderRadius: '12px',
   backdropFilter: 'blur(20px)',
-} as const;
-
-const labelStyle = {
-  color: 'rgba(245,240,232,0.5)',
-  fontWeight: 300,
-  fontSize: '0.9rem',
 } as const;
 
 function formatDate(dateStr: string): string {

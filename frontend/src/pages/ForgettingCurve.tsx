@@ -26,12 +26,6 @@ const inputStyle = {
   color: '#f5f0e8',
 } as const;
 
-const labelStyle = {
-  color: 'rgba(245,240,232,0.5)',
-  fontWeight: 300,
-  fontSize: '0.9rem',
-} as const;
-
 // ── SVG Chart Component ──
 function RetentionChart({ data }: { data: ForgettingCurveData }) {
   const points = data.data_points;

@@ -23,7 +23,6 @@ import {
   Clock,
   History,
   TrendingUp,
-  Keyboard,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { useAuthStore } from '../store/auth';

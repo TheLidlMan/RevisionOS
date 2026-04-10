@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import {
   Brain,
   Loader2,
-  CheckCircle,
   AlertCircle,
   Send,
   RotateCcw,

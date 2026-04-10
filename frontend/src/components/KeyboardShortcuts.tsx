@@ -49,7 +49,6 @@ export default function KeyboardShortcuts() {
   const [gPressed, setGPressed] = useState(false);
   const gTimeoutRef = { current: null as ReturnType<typeof setTimeout> | null };
 
-  const handleOpen = useCallback(() => setIsOpen(true), []);
   const handleClose = useCallback(() => setIsOpen(false), []);
 
   useEffect(() => {
