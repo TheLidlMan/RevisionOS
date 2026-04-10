@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #0d1117;
+  --color-navy-light: #161b22;
+  --color-navy-lighter: #21262d;
+  --color-teal: #00b4d8;
+  --color-teal-dark: #0096b7;
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-navy text-white min-h-screen;
+    margin: 0;
+  }
+}
