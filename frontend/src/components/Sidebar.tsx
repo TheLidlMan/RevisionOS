@@ -11,12 +11,20 @@ import {
   BarChart3,
   Share2,
   Calendar,
+  Trophy,
+  Users,
+  Link2,
+  LogIn,
+  LogOut,
+  User,
 } from 'lucide-react';
 import { useAppStore } from '../store';
+import { useAuthStore } from '../store/auth';
 import { getModules } from '../api/client';
 
 export default function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useAppStore();
+  const { user, logout } = useAuthStore();
   const location = useLocation();
 
   const { data: modules } = useQuery({
@@ -31,6 +39,9 @@ export default function Sidebar() {
     { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/knowledge-graph', icon: Share2, label: 'Knowledge Graph' },
     { to: '/curriculum', icon: Calendar, label: 'Study Plan' },
+    { to: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
+    { to: '/collaboration', icon: Users, label: 'Study Rooms' },
+    { to: '/integrations', icon: Link2, label: 'Integrations' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 
@@ -104,6 +115,26 @@ export default function Sidebar() {
           </div>
         )}
       </nav>
+
+      {/* User section */}
+      {sidebarOpen && (
+        <div className="px-3 py-3 border-t border-gray-800">
+          {user ? (
+            <div className="flex items-center gap-2">
+              <User className="w-5 h-5 text-teal shrink-0" />
+              <span className="text-sm text-gray-300 truncate flex-1">{user.display_name}</span>
+              <button onClick={logout} className="text-gray-500 hover:text-red-400" title="Sign out">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <NavLink to="/login" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white">
+              <LogIn className="w-5 h-5" />
+              Sign In
+            </NavLink>
+          )}
+        </div>
+      )}
 
       {/* Toggle button */}
       <button

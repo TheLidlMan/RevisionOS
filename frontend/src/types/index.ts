@@ -387,3 +387,68 @@ export interface CurriculumData {
   exam_date?: string;
   weeks: CurriculumWeek[];
 }
+
+// ---- Auth ----
+export interface AuthUser {
+  id: string;
+  email: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface AuthState {
+  token: string | null;
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, displayName: string) => Promise<void>;
+  logout: () => void;
+  loadFromStorage: () => void;
+}
+
+// ---- Social / Leaderboard ----
+export interface LeaderboardEntry {
+  rank: number;
+  user_id: string;
+  display_name: string;
+  streak: number;
+  mastery_pct: number;
+  total_reviews: number;
+  total_sessions: number;
+}
+
+export interface LeaderboardData {
+  entries: LeaderboardEntry[];
+  your_rank: number | null;
+}
+
+// ---- Collaboration ----
+export interface StudyRoom {
+  id: string;
+  name: string;
+  module_id: string;
+  room_type: string;
+  host_id: string;
+  host_name: string;
+  participants: { user_id: string; display_name: string }[];
+  created_at: string;
+}
+
+// ---- Content Map ----
+export interface ContentMapTopic {
+  id: string;
+  name: string;
+  definition: string;
+  importance_score: number;
+  flashcard_count: number;
+  question_count: number;
+  has_content: boolean;
+}
+
+export interface ContentMapData {
+  module_id: string;
+  topics: ContentMapTopic[];
+  total_topics: number;
+  covered_topics: number;
+  uncovered_topics: number;
+}

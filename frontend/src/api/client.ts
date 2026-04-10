@@ -39,6 +39,15 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Auth interceptor
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem('revisionos_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // Modules
 export const getModules = () =>
   client.get<Module[]>('/modules').then((r) => r.data);
@@ -225,3 +234,53 @@ export const importJson = (file: File) => {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then((r) => r.data);
 };
+
+// ---- Auth ----
+export const authRegister = (email: string, password: string, display_name: string) =>
+  client.post('/auth/register', { email, password, display_name }).then((r) => r.data);
+
+export const authLogin = (email: string, password: string) =>
+  client.post('/auth/login', { email, password }).then((r) => r.data);
+
+export const authMe = () =>
+  client.get('/auth/me').then((r) => r.data);
+
+export const updateProfile = (data: { display_name?: string; password?: string }) =>
+  client.patch('/auth/me', data).then((r) => r.data);
+
+// ---- Social / Leaderboard ----
+export const getLeaderboard = (timeframe?: string) =>
+  client.get('/social/leaderboard', { params: { timeframe } }).then((r) => r.data);
+
+export const shareModule = (moduleId: string) =>
+  client.post('/social/share-module', { module_id: moduleId }).then((r) => r.data);
+
+export const getSharedModules = () =>
+  client.get('/social/shared-modules').then((r) => r.data);
+
+// ---- Integrations ----
+export const importFromNotion = (notionToken: string, pageId: string, moduleId: string) =>
+  client.post('/integrations/notion/import', { notion_token: notionToken, page_id: pageId, module_id: moduleId }).then((r) => r.data);
+
+export const importFromGoogleDrive = (accessToken: string, fileId: string, moduleId: string) =>
+  client.post('/integrations/google-drive/import', { access_token: accessToken, file_id: fileId, module_id: moduleId }).then((r) => r.data);
+
+// ---- Collaboration ----
+export const createRoom = (moduleId: string, name: string, roomType?: string) =>
+  client.post('/collab/rooms', { module_id: moduleId, name, room_type: roomType || 'study' }).then((r) => r.data);
+
+export const getRooms = () =>
+  client.get('/collab/rooms').then((r) => r.data);
+
+export const deleteRoom = (roomId: string) =>
+  client.delete(`/collab/rooms/${roomId}`).then((r) => r.data);
+
+// ---- Content Map ----
+export const getContentMap = (moduleId: string) =>
+  client.get(`/concepts/content-map/${moduleId}`).then((r) => r.data);
+
+export const indexDocument = (documentId: string) =>
+  client.post(`/documents/${documentId}/index`).then((r) => r.data);
+
+export const generateQuestionsForConcept = (conceptId: string, numQuestions?: number) =>
+  client.post(`/concepts/${conceptId}/generate-questions`, null, { params: { num_questions: numQuestions || 5 } }).then((r) => r.data);

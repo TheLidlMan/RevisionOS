@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import Dashboard from './pages/Dashboard';
@@ -12,9 +12,20 @@ import WeaknessMap from './pages/WeaknessMap';
 import Analytics from './pages/Analytics';
 import KnowledgeGraph from './pages/KnowledgeGraph';
 import CurriculumPage from './pages/CurriculumPage';
+import LoginPage from './pages/LoginPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import CollaborationPage from './pages/CollaborationPage';
+import IntegrationsPage from './pages/IntegrationsPage';
+import { useAuthStore } from './store/auth';
 
 export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
+  const location = useLocation();
+  const { loadFromStorage } = useAuthStore();
+
+  useEffect(() => {
+    loadFromStorage();
+  }, [loadFromStorage]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -26,6 +37,11 @@ export default function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // Full-screen pages without sidebar
+  if (location.pathname === '/login') {
+    return <LoginPage />;
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -42,6 +58,9 @@ export default function App() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
           <Route path="/curriculum" element={<CurriculumPage />} />
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
+          <Route path="/collaboration" element={<CollaborationPage />} />
+          <Route path="/integrations" element={<IntegrationsPage />} />
         </Routes>
       </main>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
