@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import settings
+from config import settings, get_cors_origins
 from database import create_tables
 
 from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
@@ -17,10 +17,9 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — allow all origins for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

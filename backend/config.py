@@ -22,6 +22,7 @@ PERSISTED_SETTINGS_MAP = {
 class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     DATABASE_URL: str = "sqlite:///./revisionos.db"
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
     MAX_CONTEXT_TOKENS: int = 800000
@@ -41,6 +42,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_cors_origins() -> list[str]:
+    return [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
 
 
 def _load_persisted_settings() -> dict:
