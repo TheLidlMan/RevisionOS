@@ -32,6 +32,14 @@ class LeaderboardResponse(BaseModel):
     your_rank: int | None = None
 
 
+def _get_timeframe_cutoff(timeframe: str) -> datetime | None:
+    if timeframe == "week":
+        return datetime.utcnow() - timedelta(days=7)
+    if timeframe == "month":
+        return datetime.utcnow() - timedelta(days=30)
+    return None
+
+
 @router.get("/leaderboard", response_model=LeaderboardResponse)
 def get_leaderboard(
     timeframe: str = "all",
@@ -41,11 +49,7 @@ def get_leaderboard(
     """Global leaderboard ranked by total reviews."""
     users = db.query(User).filter(User.is_active == True).all()
 
-    cutoff = None
-    if timeframe == "week":
-        cutoff = datetime.utcnow() - timedelta(days=7)
-    elif timeframe == "month":
-        cutoff = datetime.utcnow() - timedelta(days=30)
+    cutoff = _get_timeframe_cutoff(timeframe)
 
     review_counts_query = db.query(
         ReviewLog.user_id,

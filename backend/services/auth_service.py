@@ -65,7 +65,7 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session 
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication user not found or inactive",
+            detail="Authenticated user not found or inactive",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user

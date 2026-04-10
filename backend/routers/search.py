@@ -161,7 +161,7 @@ def search(
                             module_name=_get_module_name(db, module_cache, flashcard.module_id, user),
                         )
 
-                if result and (not result.module_id or result.module_name):
+                if result and (result.module_id is None or result.module_name):
                     semantic_results.append(result)
 
             if semantic_results:
