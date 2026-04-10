@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Trophy, Medal, Flame, Loader2 } from 'lucide-react';
+import { Trophy, Flame, Loader2 } from 'lucide-react';
 import { getLeaderboard } from '../api/client';
 import { useAuthStore } from '../store/auth';
 
