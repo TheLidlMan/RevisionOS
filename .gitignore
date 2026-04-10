@@ -1,6 +1,33 @@
 __pycache__/
 *.pyc
-backend/revisionos.db
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Database
+*.db
 backend/uploads/
 backend/settings.json
+
+# Environment
 .env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+data/
