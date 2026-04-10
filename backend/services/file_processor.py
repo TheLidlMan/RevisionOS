@@ -133,16 +133,18 @@ def _extract_docx(file_path: str) -> str:
 
 def extract_image_text(file_path: str) -> str:
     """Extract text from an image using Groq vision model."""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
+    safe_path = _validate_path(file_path)
+
+    if not os.path.exists(safe_path):
+        raise FileNotFoundError(f"File not found: {safe_path}")
 
     if not settings.GROQ_API_KEY:
         raise ValueError("Groq API key not configured for image OCR")
 
-    with open(file_path, "rb") as f:
+    with open(safe_path, "rb") as f:
         image_data = base64.b64encode(f.read()).decode("utf-8")
 
-    ext = os.path.splitext(file_path)[1].lower()
+    ext = os.path.splitext(safe_path)[1].lower()
     mime_map = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
     mime_type = mime_map.get(ext, "image/png")
 
@@ -178,8 +180,10 @@ def extract_image_text(file_path: str) -> str:
 
 def transcribe_audio(file_path: str) -> str:
     """Transcribe audio using Groq Whisper API."""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
+    safe_path = _validate_path(file_path)
+
+    if not os.path.exists(safe_path):
+        raise FileNotFoundError(f"File not found: {safe_path}")
 
     if not settings.GROQ_API_KEY:
         raise ValueError("Groq API key not configured for audio transcription")
@@ -188,8 +192,8 @@ def transcribe_audio(file_path: str) -> str:
         "Authorization": f"Bearer {settings.GROQ_API_KEY}",
     }
 
-    with open(file_path, "rb") as f:
-        files = {"file": (os.path.basename(file_path), f)}
+    with open(safe_path, "rb") as f:
+        files = {"file": (os.path.basename(safe_path), f)}
         data = {"model": "whisper-large-v3"}
 
         with httpx.Client(timeout=120.0) as client:

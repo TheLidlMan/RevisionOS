@@ -245,7 +245,15 @@ def import_folder(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    # Validate and resolve the folder path
     folder_path = os.path.realpath(body.path)
+
+    # Block access to sensitive system directories
+    BLOCKED_PREFIXES = ("/etc", "/proc", "/sys", "/dev", "/boot", "/root", "/var/run")
+    for prefix in BLOCKED_PREFIXES:
+        if folder_path.startswith(prefix):
+            raise HTTPException(status_code=403, detail="Access to system directories is not allowed")
+
     if not os.path.exists(folder_path):
         raise HTTPException(status_code=400, detail="Path does not exist")
     if not os.path.isdir(folder_path):
@@ -261,7 +269,11 @@ def import_folder(
 
     for root, _dirs, filenames in os.walk(folder_path):
         for fname in filenames:
-            src_path = os.path.join(root, fname)
+            src_path = os.path.realpath(os.path.join(root, fname))
+            # Ensure resolved source is still within the folder_path (no symlink escape)
+            if not src_path.startswith(folder_path):
+                continue
+
             ext = os.path.splitext(fname)[1].lower()
             file_type = FOLDER_IMPORT_EXTENSIONS.get(ext)
             if not file_type:
@@ -273,7 +285,7 @@ def import_folder(
 
             try:
                 import shutil
-                shutil.copy2(src_path, dest_path)
+                shutil.copy2(src_path, dest_path)  # noqa: S202  src_path validated above
 
                 doc = Document(
                     id=file_id,
