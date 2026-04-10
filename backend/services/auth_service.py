@@ -42,7 +42,7 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session 
             return None
     except JWTError:
         return None
-    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
     return user
 
 
