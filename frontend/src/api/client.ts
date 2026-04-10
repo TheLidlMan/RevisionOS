@@ -32,6 +32,20 @@ import type {
   KnowledgeGraphData,
   SearchResponse,
   CurriculumData,
+  ForgettingCurveData,
+  SessionEstimate,
+  ConceptGapResponse,
+  ElaborationResponse,
+  FreeRecallResult,
+  ExamSession,
+  ExamSubmitResult,
+  CalibrationData,
+  WritingPrompt,
+  WritingGradeResult,
+  RetentionForecastData,
+  ExamTimeline,
+  SessionReplayData,
+  MasteryHeatmapData,
 } from '../types';
 
 const client = axios.create({
@@ -284,3 +298,76 @@ export const indexDocument = (documentId: string) =>
 
 export const generateQuestionsForConcept = (conceptId: string, numQuestions?: number) =>
   client.post(`/concepts/${conceptId}/generate-questions`, null, { params: { num_questions: numQuestions || 5 } }).then((r) => r.data);
+
+// ---- Feature: Forgetting Curve ----
+export const getForgettingCurve = (cardId: string) =>
+  client.get<ForgettingCurveData>(`/flashcards/${cardId}/forgetting-curve`).then((r) => r.data);
+
+// ---- Feature: Session Estimator ----
+export const getSessionEstimate = (moduleId?: string) =>
+  client.get<SessionEstimate>('/session-estimate', { params: { module_id: moduleId } }).then((r) => r.data);
+
+// ---- Feature: Concept Gap Detection ----
+export const detectConceptGaps = (moduleId: string) =>
+  client.post<ConceptGapResponse>(`/modules/${moduleId}/detect-gaps`).then((r) => r.data);
+
+// ---- Feature: Cross-Module Synthesis Cards ----
+export const generateSynthesisCards = (moduleIds: string[], numCards: number = 5) =>
+  client.post<{ generated: number; cards: Flashcard[] }>('/synthesis-cards', { module_ids: moduleIds, num_cards: numCards }).then((r) => r.data);
+
+// ---- Feature: Elaboration Prompts ----
+export const getElaborationPrompts = (cardId: string) =>
+  client.post<ElaborationResponse>(`/flashcards/${cardId}/elaborate`).then((r) => r.data);
+
+// ---- Feature: Free Recall ----
+export const submitFreeRecall = (moduleId: string, topic: string, userText: string) =>
+  client.post<FreeRecallResult>(`/modules/${moduleId}/free-recall`, { topic, user_text: userText }).then((r) => r.data);
+
+// ---- Feature: YouTube Ingest ----
+export const ingestYouTube = (moduleId: string, youtubeUrl: string) =>
+  client.post<Document>('/documents/youtube', { module_id: moduleId, youtube_url: youtubeUrl }).then((r) => r.data);
+
+// ---- Feature: Web Clipper ----
+export const clipUrl = (moduleId: string, url: string) =>
+  client.post<Document>('/documents/clip-url', { module_id: moduleId, url }).then((r) => r.data);
+
+// ---- Feature: Timed Exam ----
+export const startExam = (moduleId: string, timeLimitMinutes: number, numQuestions: number = 20) =>
+  client.post<ExamSession>('/exam/start', { module_id: moduleId, time_limit_minutes: timeLimitMinutes, num_questions: numQuestions }).then((r) => r.data);
+
+export const submitExam = (sessionId: string, answers: { question_id: string; user_answer: string }[]) =>
+  client.post<ExamSubmitResult>(`/exam/${sessionId}/submit`, { answers }).then((r) => r.data);
+
+// ---- Feature: Confidence Rating ----
+export const submitConfidence = (cardId: string, confidence: number) =>
+  client.post(`/flashcards/${cardId}/confidence`, { confidence }).then((r) => r.data);
+
+export const getCalibration = () =>
+  client.get<CalibrationData>('/analytics/calibration').then((r) => r.data);
+
+// ---- Feature: Image Occlusion ----
+export const createImageOcclusionCards = (moduleId: string, imageUrl: string, occlusions: { x: number; y: number; width: number; height: number; label: string }[]) =>
+  client.post<{ created: number; cards: Flashcard[] }>('/flashcards/image-occlusion', { module_id: moduleId, image_url: imageUrl, occlusions }).then((r) => r.data);
+
+// ---- Feature: Writing Practice ----
+export const getWritingPrompt = (moduleId: string) =>
+  client.post<WritingPrompt>(`/modules/${moduleId}/writing-prompt`).then((r) => r.data);
+
+export const gradeWriting = (question: string, markScheme: string, userResponse: string) =>
+  client.post<WritingGradeResult>('/writing/grade', { question, mark_scheme: markScheme, user_response: userResponse }).then((r) => r.data);
+
+// ---- Feature: Retention Forecast ----
+export const getRetentionForecast = () =>
+  client.get<RetentionForecastData>('/analytics/retention-forecast').then((r) => r.data);
+
+// ---- Feature: Exam Revision Timeline ----
+export const getExamTimeline = (moduleId: string, examDate: string) =>
+  client.post<ExamTimeline>(`/modules/${moduleId}/exam-timeline`, { exam_date: examDate }).then((r) => r.data);
+
+// ---- Feature: Session Replay ----
+export const getSessionReplay = (sessionId: string) =>
+  client.get<SessionReplayData>(`/sessions/${sessionId}/replay`).then((r) => r.data);
+
+// ---- Feature: Mastery Heatmap ----
+export const getMasteryHeatmap = (days: number = 90) =>
+  client.get<MasteryHeatmapData>('/analytics/mastery-heatmap', { params: { days } }).then((r) => r.data);
