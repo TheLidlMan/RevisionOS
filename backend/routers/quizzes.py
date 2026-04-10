@@ -1,0 +1,424 @@
+import json
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
+from config import settings
+from database import get_db
+from models.quiz_question import QuizQuestion
+from models.quiz_session import StudySession
+from models.review_log import ReviewLog
+from models.module import Module
+from models.document import Document
+from services import ai_service
+
+router = APIRouter(tags=["quizzes"])
+
+
+# ---------- Pydantic schemas ----------
+
+class QuestionResponse(BaseModel):
+    id: str
+    module_id: str
+    concept_id: Optional[str] = None
+    question_text: str
+    question_type: str
+    options: Optional[list[str]] = None
+    correct_answer: str
+    explanation: Optional[str] = None
+    difficulty: str
+    source_document_id: Optional[str] = None
+    times_answered: int = 0
+    times_correct: int = 0
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class QuestionForQuiz(BaseModel):
+    """Question sent during a quiz (no correct_answer exposed)."""
+    id: str
+    question_text: str
+    question_type: str
+    options: Optional[list[str]] = None
+    difficulty: str
+
+
+class GenerateQuizRequest(BaseModel):
+    module_id: str
+    question_types: list[str] = ["MCQ"]
+    difficulty: str = "MEDIUM"
+    num_questions: int = 10
+    mode: str = "random"  # random, weakness_drill, unseen
+
+
+class GenerateQuizResponse(BaseModel):
+    generated: int
+    questions: list[QuestionResponse]
+
+
+class StartSessionRequest(BaseModel):
+    module_id: Optional[str] = None
+    session_type: str = "QUIZ"
+    question_ids: list[str] = []
+
+
+class SessionResponse(BaseModel):
+    id: str
+    module_id: Optional[str] = None
+    session_type: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    total_items: int = 0
+    correct: int = 0
+    incorrect: int = 0
+    skipped: int = 0
+    score_pct: float = 0.0
+    questions: list[QuestionForQuiz] = []
+
+    model_config = {"from_attributes": True}
+
+
+class AnswerRequest(BaseModel):
+    question_id: str
+    user_answer: str
+
+
+class AnswerResponse(BaseModel):
+    is_correct: bool
+    explanation: Optional[str] = None
+    correct_answer: str
+    ai_feedback: Optional[dict] = None
+
+
+class SessionResultsResponse(BaseModel):
+    id: str
+    session_type: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    total_items: int
+    correct: int
+    incorrect: int
+    skipped: int
+    score_pct: float
+    review_logs: list[dict] = []
+
+
+# ---------- Helpers ----------
+
+def _question_to_response(q: QuizQuestion) -> QuestionResponse:
+    options = None
+    if q.options:
+        try:
+            options = json.loads(q.options)
+        except (json.JSONDecodeError, TypeError):
+            options = None
+    return QuestionResponse(
+        id=q.id,
+        module_id=q.module_id,
+        concept_id=q.concept_id,
+        question_text=q.question_text,
+        question_type=q.question_type,
+        options=options,
+        correct_answer=q.correct_answer,
+        explanation=q.explanation,
+        difficulty=q.difficulty,
+        source_document_id=q.source_document_id,
+        times_answered=q.times_answered,
+        times_correct=q.times_correct,
+        created_at=q.created_at,
+    )
+
+
+def _question_for_quiz(q: QuizQuestion) -> QuestionForQuiz:
+    options = None
+    if q.options:
+        try:
+            options = json.loads(q.options)
+        except (json.JSONDecodeError, TypeError):
+            options = None
+    return QuestionForQuiz(
+        id=q.id,
+        question_text=q.question_text,
+        question_type=q.question_type,
+        options=options,
+        difficulty=q.difficulty,
+    )
+
+
+# ---------- Endpoints ----------
+
+@router.get("/api/questions", response_model=list[QuestionResponse])
+def list_questions(
+    module_id: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(QuizQuestion)
+    if module_id:
+        query = query.filter(QuizQuestion.module_id == module_id)
+    if difficulty:
+        query = query.filter(QuizQuestion.difficulty == difficulty.upper())
+    if type:
+        query = query.filter(QuizQuestion.question_type == type.upper())
+    questions = query.order_by(QuizQuestion.created_at.desc()).all()
+    return [_question_to_response(q) for q in questions]
+
+
+@router.post("/api/quizzes/generate", response_model=GenerateQuizResponse)
+async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)):
+    module = db.query(Module).filter(Module.id == body.module_id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    docs = (
+        db.query(Document)
+        .filter(Document.module_id == body.module_id, Document.processing_status == "done")
+        .all()
+    )
+    if not docs:
+        raise HTTPException(status_code=400, detail="No processed documents found in this module")
+
+    all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
+    max_chars = settings.MAX_CONTEXT_TOKENS * 3
+    if len(all_text) > max_chars:
+        all_text = all_text[:max_chars]
+
+    generated = await ai_service.generate_quiz_questions(
+        text=all_text,
+        num_questions=body.num_questions,
+        question_types=body.question_types,
+        difficulty=body.difficulty,
+        subject=module.name,
+    )
+
+    created_questions = []
+    for qdata in generated:
+        q_type = qdata.get("type", qdata.get("question_type", "MCQ")).upper()
+        if q_type not in ("MCQ", "SHORT_ANSWER", "TRUE_FALSE", "FILL_BLANK", "EXAM_STYLE"):
+            q_type = "MCQ"
+
+        options = qdata.get("options")
+        options_json = json.dumps(options) if options else None
+
+        diff = qdata.get("difficulty", body.difficulty).upper()
+        if diff not in ("EASY", "MEDIUM", "HARD", "EXAM"):
+            diff = "MEDIUM"
+
+        question = QuizQuestion(
+            module_id=body.module_id,
+            question_text=qdata.get("question_text", qdata.get("question", "")),
+            question_type=q_type,
+            options=options_json,
+            correct_answer=qdata.get("correct_answer", ""),
+            explanation=qdata.get("explanation", ""),
+            difficulty=diff,
+            source_document_id=docs[0].id if docs else None,
+        )
+        db.add(question)
+        created_questions.append(question)
+
+    db.commit()
+    for q in created_questions:
+        db.refresh(q)
+
+    return GenerateQuizResponse(
+        generated=len(created_questions),
+        questions=[_question_to_response(q) for q in created_questions],
+    )
+
+
+@router.post("/api/quizzes/sessions", response_model=SessionResponse)
+def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db)):
+    session = StudySession(
+        module_id=body.module_id,
+        session_type=body.session_type.upper(),
+        started_at=datetime.utcnow(),
+        total_items=len(body.question_ids),
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    questions = []
+    if body.question_ids:
+        questions = (
+            db.query(QuizQuestion)
+            .filter(QuizQuestion.id.in_(body.question_ids))
+            .all()
+        )
+    elif body.module_id:
+        questions = (
+            db.query(QuizQuestion)
+            .filter(QuizQuestion.module_id == body.module_id)
+            .limit(20)
+            .all()
+        )
+        session.total_items = len(questions)
+        db.commit()
+
+    return SessionResponse(
+        id=session.id,
+        module_id=session.module_id,
+        session_type=session.session_type,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        total_items=session.total_items,
+        correct=session.correct,
+        incorrect=session.incorrect,
+        skipped=session.skipped,
+        score_pct=session.score_pct,
+        questions=[_question_for_quiz(q) for q in questions],
+    )
+
+
+@router.post("/api/quizzes/sessions/{session_id}/answer", response_model=AnswerResponse)
+async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db)):
+    session = db.query(StudySession).filter(StudySession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    question = db.query(QuizQuestion).filter(QuizQuestion.id == body.question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    # Determine correctness
+    is_correct = False
+    ai_feedback = None
+
+    if question.question_type in ("MCQ", "TRUE_FALSE"):
+        is_correct = body.user_answer.strip().lower() == question.correct_answer.strip().lower()
+    elif question.question_type in ("SHORT_ANSWER", "EXAM_STYLE", "FILL_BLANK"):
+        # Simple exact match check first
+        if body.user_answer.strip().lower() == question.correct_answer.strip().lower():
+            is_correct = True
+        elif settings.GROQ_API_KEY:
+            try:
+                ai_feedback = await ai_service.grade_answer(
+                    question.question_text,
+                    question.correct_answer,
+                    body.user_answer,
+                )
+                score = ai_feedback.get("score", 0)
+                is_correct = score >= 60
+            except Exception:
+                # Fall back to simple match
+                is_correct = body.user_answer.strip().lower() == question.correct_answer.strip().lower()
+
+    # Update question stats
+    question.times_answered += 1
+    if is_correct:
+        question.times_correct += 1
+
+    # Create review log
+    rating = "GOOD" if is_correct else "AGAIN"
+    log = ReviewLog(
+        session_id=session_id,
+        item_id=question.id,
+        item_type="QUESTION",
+        rating=rating,
+        was_correct=is_correct,
+        user_answer=body.user_answer,
+        answered_at=datetime.utcnow(),
+    )
+    db.add(log)
+
+    # Update session counters
+    if is_correct:
+        session.correct += 1
+    else:
+        session.incorrect += 1
+
+    db.commit()
+
+    return AnswerResponse(
+        is_correct=is_correct,
+        explanation=question.explanation,
+        correct_answer=question.correct_answer,
+        ai_feedback=ai_feedback,
+    )
+
+
+@router.post("/api/quizzes/sessions/{session_id}/complete", response_model=SessionResultsResponse)
+def complete_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(StudySession).filter(StudySession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session.ended_at = datetime.utcnow()
+    total = session.correct + session.incorrect + session.skipped
+    if total > 0:
+        session.score_pct = round((session.correct / total) * 100, 1)
+    session.total_items = total
+    db.commit()
+    db.refresh(session)
+
+    logs = db.query(ReviewLog).filter(ReviewLog.session_id == session_id).all()
+    log_dicts = [
+        {
+            "id": l.id,
+            "item_id": l.item_id,
+            "item_type": l.item_type,
+            "rating": l.rating,
+            "was_correct": l.was_correct,
+            "user_answer": l.user_answer,
+            "answered_at": l.answered_at.isoformat() if l.answered_at else None,
+        }
+        for l in logs
+    ]
+
+    return SessionResultsResponse(
+        id=session.id,
+        session_type=session.session_type,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        total_items=session.total_items,
+        correct=session.correct,
+        incorrect=session.incorrect,
+        skipped=session.skipped,
+        score_pct=session.score_pct,
+        review_logs=log_dicts,
+    )
+
+
+@router.get("/api/quizzes/sessions/{session_id}/results", response_model=SessionResultsResponse)
+def get_session_results(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(StudySession).filter(StudySession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    logs = db.query(ReviewLog).filter(ReviewLog.session_id == session_id).all()
+    log_dicts = [
+        {
+            "id": l.id,
+            "item_id": l.item_id,
+            "item_type": l.item_type,
+            "rating": l.rating,
+            "was_correct": l.was_correct,
+            "user_answer": l.user_answer,
+            "answered_at": l.answered_at.isoformat() if l.answered_at else None,
+        }
+        for l in logs
+    ]
+
+    return SessionResultsResponse(
+        id=session.id,
+        session_type=session.session_type,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        total_items=session.total_items,
+        correct=session.correct,
+        incorrect=session.incorrect,
+        skipped=session.skipped,
+        score_pct=session.score_pct,
+        review_logs=log_dicts,
+    )
