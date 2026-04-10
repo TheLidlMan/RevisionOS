@@ -18,8 +18,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 
 def _get_secret_key() -> str:
     secret_key = settings.JWT_SECRET.strip()
+    if not secret_key:
+        raise RuntimeError("JWT_SECRET must be set")
     if len(secret_key) < 32:
-        raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
+        raise RuntimeError("JWT_SECRET must be at least 32 characters long")
     return secret_key
 
 

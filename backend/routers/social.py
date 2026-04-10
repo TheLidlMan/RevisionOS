@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,10 +33,11 @@ class LeaderboardResponse(BaseModel):
 
 
 def _get_timeframe_cutoff(timeframe: str) -> datetime | None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if timeframe == "week":
-        return datetime.utcnow() - timedelta(days=7)
+        return now - timedelta(days=7)
     if timeframe == "month":
-        return datetime.utcnow() - timedelta(days=30)
+        return now - timedelta(days=30)
     return None
 
 
@@ -101,7 +102,7 @@ def get_leaderboard(
             continue
 
         streak = 0
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         user_session_dates = streak_dates.get(u.id, set())
         for i in range(365):
             check_date = today - timedelta(days=i)

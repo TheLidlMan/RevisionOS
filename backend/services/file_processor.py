@@ -13,8 +13,13 @@ def _validate_path(file_path: str) -> str:
     """Ensure the file path is within the uploads directory to prevent path traversal."""
     upload_dir = os.path.realpath(settings.UPLOAD_DIR)
     resolved = os.path.realpath(file_path)
+    upload_drive = os.path.splitdrive(upload_dir)[0].lower()
+    resolved_drive = os.path.splitdrive(resolved)[0].lower()
     try:
-        within_upload_dir = os.path.commonpath([upload_dir, resolved]) == upload_dir
+        within_upload_dir = (
+            (not upload_drive or upload_drive == resolved_drive)
+            and os.path.commonpath([upload_dir, resolved]) == upload_dir
+        )
     except ValueError:
         within_upload_dir = False
     if not within_upload_dir:
