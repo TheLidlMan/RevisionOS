@@ -15,6 +15,8 @@ export default function ThemeToggle() {
   return (
     <button
       onClick={() => setDark((d) => !d)}
+      aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-pressed={dark}
       style={{
         display: 'flex',
         alignItems: 'center',

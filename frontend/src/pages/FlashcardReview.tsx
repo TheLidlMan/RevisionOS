@@ -17,8 +17,22 @@ function extractClozeAnswer(back: string): string {
   return back.trim();
 }
 
-function renderClozeQuestion(front: string): string {
-  return front.replace(/_{3,}/g, '<span style="display:inline-block;min-width:120px;border-bottom:2px dashed var(--accent);margin:0 4px"></span>');
+function renderClozeQuestion(front: string) {
+  return front.split(/(_{3,})/g).map((part, index) => (
+    /_{3,}/.test(part) ? (
+      <span
+        key={`blank-${index}`}
+        style={{
+          display: 'inline-block',
+          minWidth: 120,
+          borderBottom: '2px dashed var(--accent)',
+          margin: '0 4px',
+        }}
+      />
+    ) : (
+      <span key={`text-${index}`}>{part}</span>
+    )
+  ));
 }
 
 export default function FlashcardReview() {
@@ -30,7 +44,8 @@ export default function FlashcardReview() {
   const [isCorrect, setIsCorrect] = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
-  const [startTime] = useState(Date.now());
+  const [startTime] = useState(() => Date.now());
+  const [completedAt, setCompletedAt] = useState<number | null>(null);
   const [done, setDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -45,29 +60,37 @@ export default function FlashcardReview() {
       reviewFlashcard(id, rating),
   });
 
-  const handleSubmit = useCallback(() => {
-    if (!cards || submitted) return;
+  const handleSubmit = useCallback(async () => {
+    if (!cards || submitted || reviewMutation.isPending) return;
     const card = cards[currentIdx];
     const correctAnswer = extractClozeAnswer(card.back);
     const correct = userAnswer.trim().toLowerCase() === correctAnswer.toLowerCase();
-    setIsCorrect(correct);
-    setSubmitted(true);
-    if (correct) setCorrectCount((c) => c + 1);
     const rating: Rating = correct ? 'GOOD' : 'AGAIN';
-    reviewMutation.mutate({ id: card.id, rating });
-  }, [cards, currentIdx, userAnswer, submitted, reviewMutation]);
+    reviewMutation.reset();
+    try {
+      await reviewMutation.mutateAsync({ id: card.id, rating });
+      setIsCorrect(correct);
+      setSubmitted(true);
+      if (correct) setCorrectCount((c) => c + 1);
+    } catch {
+      return;
+    }
+  }, [cards, currentIdx, reviewMutation, submitted, userAnswer]);
 
   const handleNext = useCallback(() => {
+    if (reviewMutation.isPending) return;
     setReviewed((r) => r + 1);
     setUserAnswer('');
     setSubmitted(false);
     setIsCorrect(false);
+    reviewMutation.reset();
     if (cards && currentIdx + 1 >= cards.length) {
+      setCompletedAt(Date.now());
       setDone(true);
     } else {
       setCurrentIdx((i) => i + 1);
     }
-  }, [cards, currentIdx]);
+  }, [cards, currentIdx, reviewMutation]);
 
   useEffect(() => {
     if (!submitted && inputRef.current) {
@@ -82,7 +105,7 @@ export default function FlashcardReview() {
         if (submitted) {
           handleNext();
         } else if (userAnswer.trim()) {
-          handleSubmit();
+          void handleSubmit();
         }
       }
     };
@@ -119,7 +142,7 @@ export default function FlashcardReview() {
   }
 
   if (done) {
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const elapsed = Math.round(((completedAt ?? startTime) - startTime) / 1000);
     const mins = Math.floor(elapsed / 60);
     const secs = elapsed % 60;
     const accuracy = reviewed > 0 ? Math.round((correctCount / reviewed) * 100) : 0;
@@ -159,6 +182,7 @@ export default function FlashcardReview() {
               setIsCorrect(false);
               setReviewed(0);
               setCorrectCount(0);
+              setCompletedAt(null);
               setDone(false);
             }}
             className="scholar-btn flex items-center gap-2"
@@ -229,8 +253,9 @@ export default function FlashcardReview() {
               lineHeight: 1.7,
             }}
             className="text-center whitespace-pre-wrap"
-            dangerouslySetInnerHTML={{ __html: renderClozeQuestion(card.front) }}
-          />
+          >
+            {renderClozeQuestion(card.front)}
+          </p>
         </motion.div>
       </AnimatePresence>
 
@@ -241,9 +266,9 @@ export default function FlashcardReview() {
             ref={inputRef}
             type="text"
             value={userAnswer}
-            onChange={(e) => !submitted && setUserAnswer(e.target.value)}
+            onChange={(e) => !submitted && !reviewMutation.isPending && setUserAnswer(e.target.value)}
             placeholder="Type your answer..."
-            disabled={submitted}
+            disabled={submitted || reviewMutation.isPending}
             style={{
               ...glass,
               width: '100%',
@@ -270,6 +295,11 @@ export default function FlashcardReview() {
             </div>
           )}
         </div>
+        {reviewMutation.isError && (
+          <p className="mt-3 text-sm" style={{ color: 'rgba(220,120,100,0.9)' }}>
+            Couldn&apos;t save this review. Please try again.
+          </p>
+        )}
       </div>
 
       {/* Feedback */}
@@ -297,15 +327,16 @@ export default function FlashcardReview() {
       <div className="flex justify-center">
         {!submitted ? (
           <button
-            onClick={handleSubmit}
-            disabled={!userAnswer.trim()}
+            onClick={() => void handleSubmit()}
+            disabled={!userAnswer.trim() || reviewMutation.isPending}
             className="scholar-btn disabled:opacity-50 px-8 py-3"
           >
-            Check Answer
+            {reviewMutation.isPending ? 'Saving...' : 'Check Answer'}
           </button>
         ) : (
           <button
             onClick={handleNext}
+            disabled={reviewMutation.isPending}
             className="scholar-btn px-8 py-3"
           >
             {currentIdx + 1 >= cards.length ? 'Finish' : 'Next Card'}

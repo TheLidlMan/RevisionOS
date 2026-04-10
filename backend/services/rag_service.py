@@ -39,6 +39,11 @@ def get_document_summaries(db: Session, module_id: str, user_id: Optional[str] =
 
 def retrieve_document_chunks(db: Session, document_id: str, chunk_size: int = 4000, overlap: int = 200) -> list[str]:
     """Split a document into overlapping chunks for processing."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than 0")
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("overlap must be between 0 and chunk_size - 1")
+
     from models.document import Document
 
     doc = db.query(Document).filter(Document.id == document_id).first()
@@ -48,12 +53,13 @@ def retrieve_document_chunks(db: Session, document_id: str, chunk_size: int = 40
     text = doc.raw_text
     chunks = []
     start = 0
+    step = chunk_size - overlap
     while start < len(text):
         end = start + chunk_size
         chunk = text[start:end]
         if chunk.strip():
             chunks.append(chunk)
-        start = end - overlap
+        start += step
         if start >= len(text):
             break
 

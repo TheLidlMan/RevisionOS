@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -112,6 +113,28 @@ class SessionResultsResponse(BaseModel):
 
 
 # ---------- Helpers ----------
+
+
+def _get_owned_session(db: Session, session_id: str, user: Optional[User]) -> StudySession:
+    session_query = db.query(StudySession).filter(StudySession.id == session_id)
+    if user:
+        session_query = session_query.filter(StudySession.user_id == user.id)
+    else:
+        session_query = session_query.filter(StudySession.user_id.is_(None))
+
+    session = session_query.first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+def _run_generate_quiz_for_module_background(module_id: str, user_id: Optional[str] = None):
+    asyncio.run(_generate_quiz_for_module(module_id, user_id))
+
+
+def _run_generate_next_quiz_background(module_id: str, completed_session_id: str):
+    asyncio.run(_generate_next_quiz_background(module_id, completed_session_id))
+
 
 def _question_to_response(q: QuizQuestion) -> QuestionResponse:
     options = None
@@ -240,12 +263,17 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
 
 @router.post("/api/quizzes/sessions", response_model=SessionResponse)
-def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db)):
+def start_quiz_session(
+    body: StartSessionRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
     session = StudySession(
         module_id=body.module_id,
         session_type=body.session_type.upper(),
         started_at=datetime.utcnow(),
         total_items=len(body.question_ids),
+        user_id=user.id if user else None,
     )
     db.add(session)
     db.commit()
@@ -284,10 +312,13 @@ def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db))
 
 
 @router.post("/api/quizzes/sessions/{session_id}/answer", response_model=AnswerResponse)
-async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def submit_answer(
+    session_id: str,
+    body: AnswerRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    session = _get_owned_session(db, session_id, user)
 
     question = db.query(QuizQuestion).filter(QuizQuestion.id == body.question_id).first()
     if not question:
@@ -351,10 +382,13 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
 
 
 @router.post("/api/quizzes/sessions/{session_id}/complete", response_model=SessionResultsResponse)
-def complete_session(session_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+def complete_session(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    session = _get_owned_session(db, session_id, user)
 
     session.ended_at = datetime.utcnow()
     total = session.correct + session.incorrect + session.skipped
@@ -368,7 +402,7 @@ def complete_session(session_id: str, background_tasks: BackgroundTasks, db: Ses
     # Trigger background generation of next quiz
     if session.module_id and settings.GROQ_API_KEY:
         background_tasks.add_task(
-            _generate_next_quiz_background,
+            _run_generate_next_quiz_background,
             session.module_id,
             session_id,
         )
@@ -403,9 +437,7 @@ def complete_session(session_id: str, background_tasks: BackgroundTasks, db: Ses
 
 @router.get("/api/quizzes/sessions/{session_id}/results", response_model=SessionResultsResponse)
 def get_session_results(session_id: str, db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = _get_owned_session(db, session_id, user)
 
     logs = db.query(ReviewLog).filter(ReviewLog.session_id == session_id).all()
     log_dicts = [
@@ -458,9 +490,11 @@ async def _generate_quiz_for_module(module_id: str, user_id: str = None):
             return
 
         questions = await ai_service.generate_quiz_questions(
-            combined_text,
-            module.name,
+            text=combined_text,
             num_questions=settings.QUESTIONS_PER_DOCUMENT,
+            question_types=["MCQ"],
+            difficulty="MEDIUM",
+            subject=module.name,
         )
 
         for q_data in questions:

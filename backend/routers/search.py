@@ -95,9 +95,20 @@ def search(
             from services import vector_service
 
             if search_type == "exact":
-                vector_results = vector_service.search_exact(q, db, module_id=module_id, top_k=limit)
+                vector_results = vector_service.search_exact(
+                    db,
+                    q,
+                    top_k=limit,
+                    user_id=user.id if user else None,
+                    module_id=module_id,
+                )
             else:
-                vector_results = vector_service.search_semantic(q, db, module_id=module_id, top_k=limit)
+                vector_results = vector_service.search_semantic(
+                    db,
+                    q,
+                    top_k=limit,
+                    user_id=user.id if user else None,
+                )
 
             if vector_results:
                 semantic_results: list[SearchResult] = []

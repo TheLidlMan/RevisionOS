@@ -167,9 +167,9 @@ async def upload_document(
 
         # Pre-generate quiz questions in background
         if background_tasks and settings.GROQ_API_KEY:
-            from routers.quizzes import _generate_quiz_for_module
+            from routers.quizzes import _run_generate_quiz_for_module_background
             background_tasks.add_task(
-                _generate_quiz_for_module,
+                _run_generate_quiz_for_module_background,
                 module_id,
                 user.id if user else None,
             )

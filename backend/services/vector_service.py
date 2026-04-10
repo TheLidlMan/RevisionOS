@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _model = None
 EMBEDDING_DIM = 384
+_ALLOWED_EMBEDDING_TABLES = {"concepts", "documents"}
 
 
 def _get_model():
@@ -53,16 +54,21 @@ def embed_texts(texts: list[str]) -> Optional[list[list[float]]]:
         return None
 
 
-def store_embedding(db: Session, table: str, item_id: str, embedding: list[float]):
+def store_embedding(db: Session, table: str, item_id: str, embedding: list[float], commit: bool = True):
     """Store an embedding vector in the DB (base64-encoded for portability)."""
     import base64, struct
+
+    if table not in _ALLOWED_EMBEDDING_TABLES:
+        raise ValueError(f"Unsupported embedding table: {table}")
+
     blob = struct.pack(f'{len(embedding)}f', *embedding)
     encoded = base64.b64encode(blob).decode('ascii')
     db.execute(
         text(f"UPDATE {table} SET embedding = :vec WHERE id = :id"),
         {"vec": encoded, "id": item_id},
     )
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def _decode_embedding(encoded: str) -> Optional[list[float]]:
@@ -238,7 +244,7 @@ def build_index_from_db(db: Session) -> int:
         txt = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
         emb = embed_text(txt)
         if emb:
-            store_embedding(db, "concepts", c.id, emb)
+            store_embedding(db, "concepts", c.id, emb, commit=False)
             total += 1
 
     documents = db.query(Document).filter(Document.raw_text.isnot(None)).all()
@@ -246,8 +252,11 @@ def build_index_from_db(db: Session) -> int:
         txt = d.summary or f"{d.filename}: {(d.raw_text or '')[:500]}"
         emb = embed_text(txt)
         if emb:
-            store_embedding(db, "documents", d.id, emb)
+            store_embedding(db, "documents", d.id, emb, commit=False)
             total += 1
+
+    if total:
+        db.commit()
 
     logger.info(f"Built embeddings for {total} items")
     return total

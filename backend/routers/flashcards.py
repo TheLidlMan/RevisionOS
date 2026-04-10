@@ -1,3 +1,4 @@
+import math
 import json
 import uuid
 from datetime import datetime
@@ -281,10 +282,15 @@ async def generate_cards_for_module(
         num_cards = (body.num_cards if body and body.num_cards else settings.CARDS_PER_DOCUMENT)
         generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
     else:
-        # Chunked generation: 25 cards per chunk for massive output
-        cards_per_chunk = 25
+        num_cards = (body.num_cards if body and body.num_cards else settings.CARDS_PER_DOCUMENT)
+        chunk_count = min(len(chunks), max(1, num_cards))
+        selected_chunks = chunks[:chunk_count]
+        cards_per_chunk = max(1, math.ceil(num_cards / chunk_count))
         generated_cards_data = await ai_service.generate_flashcards_chunked(
-            chunks, module.name, cards_per_chunk=cards_per_chunk
+            selected_chunks,
+            module.name,
+            cards_per_chunk=cards_per_chunk,
+            max_total_cards=num_cards,
         )
 
     # Load concepts for tagging

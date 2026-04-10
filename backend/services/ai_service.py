@@ -152,6 +152,7 @@ async def generate_flashcards_chunked(
     chunks: list[dict],
     subject: str,
     cards_per_chunk: int = 25,
+    max_total_cards: Optional[int] = None,
 ) -> list[dict]:
     """Generate flashcards from multiple document chunks.
     
@@ -159,6 +160,10 @@ async def generate_flashcards_chunked(
     """
     all_cards = []
     for chunk_info in chunks:
+        remaining_cards = None if max_total_cards is None else max_total_cards - len(all_cards)
+        if remaining_cards is not None and remaining_cards <= 0:
+            break
+
         chunk_text = chunk_info.get("text", "")
         if not chunk_text.strip():
             continue
@@ -167,10 +172,13 @@ async def generate_flashcards_chunked(
         context = f"From document: {filename}\n\n{chunk_text}" if filename else chunk_text
         
         try:
-            cards = await generate_flashcards(context, cards_per_chunk, subject)
+            requested_cards = cards_per_chunk if remaining_cards is None else min(cards_per_chunk, remaining_cards)
+            cards = await generate_flashcards(context, requested_cards, subject)
             for card in cards:
                 card["source_document_id"] = chunk_info.get("document_id")
                 card["source_excerpt"] = chunk_text[:200]
+            if remaining_cards is not None:
+                cards = cards[:remaining_cards]
             all_cards.extend(cards)
         except Exception as e:
             logger.warning(f"Failed to generate cards for chunk: {e}")

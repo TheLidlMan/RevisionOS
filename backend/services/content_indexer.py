@@ -206,7 +206,10 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
                 txt = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
                 emb = vector_service.embed_text(txt)
                 if emb:
-                    vector_service.store_embedding(db, "concepts", c.id, emb)
+                    vector_service.store_embedding(db, "concepts", c.id, emb, commit=False)
+
+        if created_concepts:
+            db.commit()
 
         return created_concepts
 
