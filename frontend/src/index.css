@@ -1,52 +1,145 @@
 @import "tailwindcss";
 
 @theme {
-  --color-navy: #0d1117;
-  --color-navy-light: #161b22;
-  --color-navy-lighter: #21262d;
-  --color-teal: #00b4d8;
-  --color-teal-dark: #0096b7;
-  --font-sans: 'Inter', sans-serif;
+  --color-navy: #0f0f0f;
+  --color-navy-light: #1a1714;
+  --color-navy-lighter: #252018;
+  --color-teal: #c4956a;
+  --color-teal-dark: #a87d56;
+  --font-sans: Inter, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Scholar Glass Design Tokens */
+:root {
+  --bg: #0f0f0f;
+  --bg-warm: #1a1714;
+  --surface: rgba(255, 248, 240, 0.04);
+  --surface-hover: rgba(255, 248, 240, 0.08);
+  --border: rgba(139, 115, 85, 0.15);
+  --border-focus: rgba(139, 115, 85, 0.3);
+  --text: #f5f0e8;
+  --text-secondary: rgba(245, 240, 232, 0.5);
+  --text-tertiary: rgba(245, 240, 232, 0.25);
+  --accent: #c4956a;
+  --accent-soft: rgba(196, 149, 106, 0.15);
+  --danger: rgba(220, 120, 100, 0.8);
+  --success: rgba(120, 180, 120, 0.8);
+  --serif: Georgia, 'Times New Roman', serif;
+  --sans: Inter, -apple-system, sans-serif;
+  --radius: 12px;
+  --blur: blur(20px);
 }
 
 @layer base {
   body {
     @apply bg-navy text-white min-h-screen;
     margin: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-weight: 300;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Scrollbar styling */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--serif);
+    font-weight: 400;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+
+  h1 { font-size: 1.875rem; }
+  h2 { font-size: 1.375rem; }
+  h3 { font-size: 1.125rem; }
+
+  /* Custom scrollbar — thin, warm-brown */
   ::-webkit-scrollbar {
-    width: 6px;
+    width: 5px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #30363d;
+    background: rgba(139, 115, 85, 0.25);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #484f58;
+    background: rgba(139, 115, 85, 0.4);
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 115, 85, 0.25) transparent;
   }
 }
 
-/* Light theme */
-body.theme-light {
-  --color-navy: #ffffff;
-  --color-navy-light: #f6f8fa;
-  --color-navy-lighter: #eaeef2;
-  color: #1f2328;
+/* Scholar Glass utility: frosted card */
+.scholar-card {
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.scholar-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-focus);
 }
 
-body.theme-light .text-white { color: #1f2328 !important; }
-body.theme-light .text-gray-400 { color: #656d76 !important; }
-body.theme-light .text-gray-500 { color: #8b949e !important; }
-body.theme-light .border-gray-800 { border-color: #d0d7de !important; }
-body.theme-light .border-gray-700 { border-color: #d8dee4 !important; }
+/* Scholar Glass utility: button */
+.scholar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+.scholar-btn:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+.scholar-btn:active {
+  transform: translateY(0);
+}
+
+/* Light theme overrides — cream/paper aesthetic */
+body.theme-light {
+  --bg: #faf8f5;
+  --bg-warm: #f5f0e8;
+  --surface: rgba(139, 115, 85, 0.05);
+  --surface-hover: rgba(139, 115, 85, 0.09);
+  --border: rgba(139, 115, 85, 0.18);
+  --border-focus: rgba(139, 115, 85, 0.35);
+  --text: #3c2415;
+  --text-secondary: rgba(60, 36, 21, 0.55);
+  --text-tertiary: rgba(60, 36, 21, 0.3);
+  --accent: #8b7355;
+  --accent-soft: rgba(139, 115, 85, 0.12);
+
+  --color-navy: #faf8f5;
+  --color-navy-light: #f5f0e8;
+  --color-navy-lighter: #ebe4d8;
+  color: #3c2415;
+}
+
+body.theme-light .text-white { color: #3c2415 !important; }
+body.theme-light .text-gray-400 { color: rgba(60, 36, 21, 0.55) !important; }
+body.theme-light .text-gray-500 { color: rgba(60, 36, 21, 0.4) !important; }
+body.theme-light .border-gray-800 { border-color: rgba(139, 115, 85, 0.18) !important; }
+body.theme-light .border-gray-700 { border-color: rgba(139, 115, 85, 0.12) !important; }
 
 /* Mobile responsive */
 @media (max-width: 768px) {
@@ -69,6 +162,11 @@ body.theme-light .border-gray-700 { border-color: #d8dee4 !important; }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .animate-fade-in {

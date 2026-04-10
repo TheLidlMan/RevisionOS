@@ -45,9 +45,9 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/modules/:id" element={<ModuleView />} />

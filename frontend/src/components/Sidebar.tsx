@@ -49,35 +49,95 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`${
-        sidebarOpen ? 'w-64' : 'w-16'
-      } bg-navy-light border-r border-gray-800 flex flex-col transition-all duration-300 shrink-0 h-screen sticky top-0`}
+      style={{
+        width: sidebarOpen ? 256 : 64,
+        background: 'var(--bg-warm)',
+        borderRight: '1px solid var(--border)',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'width 0.3s ease',
+        flexShrink: 0,
+        height: '100vh',
+        position: 'sticky',
+        top: 0,
+        backdropFilter: 'blur(12px)',
+      }}
     >
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-gray-800">
-        <BookOpen className="w-7 h-7 text-teal shrink-0" />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '0 16px',
+          height: 64,
+          borderBottom: '1px dashed var(--border)',
+        }}
+      >
+        <BookOpen
+          style={{ width: 28, height: 28, color: 'var(--accent)', flexShrink: 0 }}
+        />
         {sidebarOpen && (
-          <span className="text-lg font-bold tracking-tight whitespace-nowrap">
+          <span
+            style={{
+              fontFamily: 'var(--serif)',
+              fontSize: 18,
+              fontWeight: 400,
+              color: 'var(--text)',
+              letterSpacing: '-0.01em',
+              whiteSpace: 'nowrap',
+            }}
+          >
             RevisionOS
           </span>
         )}
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
+      <nav
+        style={{
+          flex: 1,
+          padding: '16px 8px',
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+        }}
+      >
         {navItems.map(({ to, icon: Icon, label }) => {
           const active = location.pathname === to;
           return (
             <NavLink
               key={to}
               to={to}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                active
-                  ? 'bg-teal/10 text-teal'
-                  : 'text-gray-400 hover:text-white hover:bg-navy-lighter'
-              }`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '8px 12px',
+                borderRadius: 'var(--radius)',
+                fontSize: 13,
+                fontWeight: 300,
+                fontFamily: 'var(--sans)',
+                textDecoration: 'none',
+                transition: 'background 0.15s ease, color 0.15s ease',
+                color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                background: active ? 'var(--accent-soft)' : 'transparent',
+              }}
+              onMouseEnter={(e) => {
+                if (!active) {
+                  e.currentTarget.style.background = 'var(--surface-hover)';
+                  e.currentTarget.style.color = 'var(--text)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = 'var(--text-secondary)';
+                }
+              }}
             >
-              <Icon className="w-5 h-5 shrink-0" />
+              <Icon style={{ width: 18, height: 18, flexShrink: 0 }} />
               {sidebarOpen && <span>{label}</span>}
             </NavLink>
           );
@@ -85,8 +145,19 @@ export default function Sidebar() {
 
         {/* Module list */}
         {sidebarOpen && modules && modules.length > 0 && (
-          <div className="mt-6">
-            <p className="px-3 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <div style={{ marginTop: 24 }}>
+            <p
+              style={{
+                padding: '0 12px',
+                marginBottom: 8,
+                fontSize: 10,
+                fontWeight: 500,
+                color: 'var(--text-tertiary)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+                fontFamily: 'var(--sans)',
+              }}
+            >
               Modules
             </p>
             {modules.map((mod) => {
@@ -95,19 +166,62 @@ export default function Sidebar() {
                 <NavLink
                   key={mod.id}
                   to={`/modules/${mod.id}`}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    active
-                      ? 'bg-teal/10 text-teal'
-                      : 'text-gray-400 hover:text-white hover:bg-navy-lighter'
-                  }`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '7px 12px',
+                    borderRadius: 'var(--radius)',
+                    fontSize: 13,
+                    fontWeight: 300,
+                    textDecoration: 'none',
+                    transition: 'background 0.15s ease, color 0.15s ease',
+                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                    background: active ? 'var(--accent-soft)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) {
+                      e.currentTarget.style.background = 'var(--surface-hover)';
+                      e.currentTarget.style.color = 'var(--text)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = 'var(--text-secondary)';
+                    }
+                  }}
                 >
                   <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: mod.color }}
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      backgroundColor: mod.color,
+                    }}
                   />
-                  <span className="truncate flex-1">{mod.name}</span>
+                  <span
+                    style={{
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {mod.name}
+                  </span>
                   {mod.due_cards > 0 && (
-                    <span className="text-xs bg-teal/20 text-teal px-1.5 py-0.5 rounded-full">
+                    <span
+                      style={{
+                        fontSize: 11,
+                        background: 'var(--accent-soft)',
+                        color: 'var(--accent)',
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        fontWeight: 400,
+                      }}
+                    >
                       {mod.due_cards}
                     </span>
                   )}
@@ -120,18 +234,66 @@ export default function Sidebar() {
 
       {/* User section */}
       {sidebarOpen && (
-        <div className="px-3 py-3 border-t border-gray-800">
+        <div
+          style={{
+            padding: '12px',
+            borderTop: '1px dashed var(--border)',
+          }}
+        >
           {user ? (
-            <div className="flex items-center gap-2">
-              <User className="w-5 h-5 text-teal shrink-0" />
-              <span className="text-sm text-gray-300 truncate flex-1">{user.display_name}</span>
-              <button onClick={logout} className="text-gray-500 hover:text-red-400" title="Sign out">
-                <LogOut className="w-4 h-4" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <User
+                style={{ width: 18, height: 18, color: 'var(--accent)', flexShrink: 0 }}
+              />
+              <span
+                style={{
+                  fontSize: 13,
+                  color: 'var(--text-secondary)',
+                  flex: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontWeight: 300,
+                }}
+              >
+                {user.display_name}
+              </span>
+              <button
+                onClick={logout}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-tertiary)',
+                  padding: 4,
+                  display: 'flex',
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = 'var(--danger)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--text-tertiary)';
+                }}
+                title="Sign out"
+              >
+                <LogOut style={{ width: 16, height: 16 }} />
               </button>
             </div>
           ) : (
-            <NavLink to="/login" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white">
-              <LogIn className="w-5 h-5" />
+            <NavLink
+              to="/login"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                textDecoration: 'none',
+                fontWeight: 300,
+              }}
+            >
+              <LogIn style={{ width: 18, height: 18 }} />
               Sign In
             </NavLink>
           )}
@@ -141,12 +303,33 @@ export default function Sidebar() {
       {/* Toggle button */}
       <button
         onClick={toggleSidebar}
-        className="flex items-center justify-center h-12 border-t border-gray-800 text-gray-400 hover:text-white transition-colors"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: 48,
+          borderTop: '1px solid var(--border)',
+          color: 'var(--text-tertiary)',
+          background: 'none',
+          border: 'none',
+          borderTopStyle: 'solid',
+          borderTopWidth: 1,
+          borderTopColor: 'var(--border)',
+          cursor: 'pointer',
+          transition: 'color 0.15s',
+          width: '100%',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = 'var(--text)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'var(--text-tertiary)';
+        }}
       >
         {sidebarOpen ? (
-          <ChevronLeft className="w-5 h-5" />
+          <ChevronLeft style={{ width: 18, height: 18 }} />
         ) : (
-          <ChevronRight className="w-5 h-5" />
+          <ChevronRight style={{ width: 18, height: 18 }} />
         )}
       </button>
     </aside>
