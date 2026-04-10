@@ -16,6 +16,7 @@ import LoginPage from './pages/LoginPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import CollaborationPage from './pages/CollaborationPage';
 import IntegrationsPage from './pages/IntegrationsPage';
+import ThemePreview from './pages/ThemePreview';
 import { useAuthStore } from './store/auth';
 
 export default function App() {
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/collaboration" element={<CollaborationPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/themes" element={<ThemePreview />} />
         </Routes>
       </main>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />

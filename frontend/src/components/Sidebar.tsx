@@ -14,6 +14,7 @@ import {
   Trophy,
   Users,
   Link2,
+  Palette,
   LogIn,
   LogOut,
   User,
@@ -42,6 +43,7 @@ export default function Sidebar() {
     { to: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
     { to: '/collaboration', icon: Users, label: 'Study Rooms' },
     { to: '/integrations', icon: Link2, label: 'Integrations' },
+    { to: '/themes', icon: Palette, label: 'Theme Preview' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 
