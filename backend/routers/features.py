@@ -387,8 +387,8 @@ def _fsrs_retention(stability: float, days: float) -> float:
 
 def _strip_html(html: str) -> str:
     """Crude HTML → plain-text conversion."""
-    text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<\s*style\b[^>]*>.*?<\s*/\s*style\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
@@ -401,6 +401,34 @@ _YOUTUBE_RE = re.compile(
 
 def _is_youtube_url(url: str) -> bool:
     return bool(_YOUTUBE_RE.match(url))
+
+
+def _validate_external_url(url: str) -> str:
+    """Validate that a URL is an acceptable external HTTP(S) URL (SSRF mitigation)."""
+    from urllib.parse import urlparse
+    import ipaddress
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Only http and https URLs are allowed")
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="URL must include a hostname")
+
+    hostname = parsed.hostname.lower()
+    # Block obviously internal hostnames
+    blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google.internal"}
+    if hostname in blocked_hosts:
+        raise HTTPException(status_code=400, detail="Requests to internal addresses are not allowed")
+
+    # Block private/reserved IP addresses
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            raise HTTPException(status_code=400, detail="Requests to internal addresses are not allowed")
+    except ValueError:
+        pass  # hostname is a DNS name, not a raw IP — OK
+
+    return url
 
 
 def _parse_tags_json(tags_str: OptionalType[str]) -> list[str]:
@@ -882,9 +910,11 @@ async def clip_url(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    validated_url = _validate_external_url(body.url)
+
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(body.url)
+            resp = await client.get(validated_url)
             resp.raise_for_status()
             html = resp.text
     except httpx.HTTPError as exc:
