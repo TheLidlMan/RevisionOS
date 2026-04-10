@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings, get_cors_origins
 from database import create_tables
+from services.auth_service import validate_auth_settings
 
 from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
 from routers import settings as settings_router
@@ -46,6 +47,7 @@ app.include_router(collaboration.router)
 
 @app.on_event("startup")
 def on_startup():
+    validate_auth_settings()
     create_tables()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 

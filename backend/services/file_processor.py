@@ -13,7 +13,11 @@ def _validate_path(file_path: str) -> str:
     """Ensure the file path is within the uploads directory to prevent path traversal."""
     upload_dir = os.path.realpath(settings.UPLOAD_DIR)
     resolved = os.path.realpath(file_path)
-    if not resolved.startswith(upload_dir):
+    try:
+        within_upload_dir = os.path.commonpath([upload_dir, resolved]) == upload_dir
+    except ValueError:
+        within_upload_dir = False
+    if not within_upload_dir:
         raise ValueError("Access denied: path is outside the uploads directory")
     return resolved
 

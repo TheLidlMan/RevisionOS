@@ -21,6 +21,7 @@ PERSISTED_SETTINGS_MAP = {
 
 class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
+    JWT_SECRET: str = ""
     DATABASE_URL: str = "sqlite:///./revisionos.db"
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"

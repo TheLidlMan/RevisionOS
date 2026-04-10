@@ -1,8 +1,10 @@
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -39,52 +41,76 @@ def get_leaderboard(
     """Global leaderboard ranked by total reviews."""
     users = db.query(User).filter(User.is_active == True).all()
 
+    cutoff = None
+    if timeframe == "week":
+        cutoff = datetime.utcnow() - timedelta(days=7)
+    elif timeframe == "month":
+        cutoff = datetime.utcnow() - timedelta(days=30)
+
+    review_counts_query = db.query(
+        ReviewLog.user_id,
+        func.count(ReviewLog.id),
+    ).filter(ReviewLog.user_id.isnot(None))
+    if cutoff is not None:
+        review_counts_query = review_counts_query.filter(ReviewLog.answered_at >= cutoff)
+    review_counts = {
+        user_id: count
+        for user_id, count in review_counts_query.group_by(ReviewLog.user_id).all()
+    }
+
+    session_counts_query = db.query(
+        StudySession.user_id,
+        func.count(StudySession.id),
+    ).filter(StudySession.user_id.isnot(None))
+    if cutoff is not None:
+        session_counts_query = session_counts_query.filter(StudySession.started_at >= cutoff)
+    session_counts = {
+        user_id: count
+        for user_id, count in session_counts_query.group_by(StudySession.user_id).all()
+    }
+
+    streak_dates: dict[str, set] = defaultdict(set)
+    for session_user_id, started_at in (
+        db.query(StudySession.user_id, StudySession.started_at)
+        .filter(StudySession.user_id.isnot(None), StudySession.started_at.isnot(None))
+        .all()
+    ):
+        streak_dates[session_user_id].add(started_at.date())
+
+    card_totals: dict[str, int] = defaultdict(int)
+    mastered_totals: dict[str, int] = defaultdict(int)
+    for card_user_id, state, lapses, reps in (
+        db.query(Flashcard.user_id, Flashcard.state, Flashcard.lapses, Flashcard.reps)
+        .filter(Flashcard.user_id.isnot(None))
+        .all()
+    ):
+        card_totals[card_user_id] += 1
+        if state == "REVIEW" and lapses == 0 and reps >= 2:
+            mastered_totals[card_user_id] += 1
+
     entries = []
     for u in users:
-        review_query = db.query(ReviewLog).filter(ReviewLog.user_id == u.id)
-        session_query = db.query(StudySession).filter(StudySession.user_id == u.id)
-
-        if timeframe == "week":
-            cutoff = datetime.utcnow() - timedelta(days=7)
-            review_query = review_query.filter(ReviewLog.answered_at >= cutoff)
-            session_query = session_query.filter(StudySession.started_at >= cutoff)
-        elif timeframe == "month":
-            cutoff = datetime.utcnow() - timedelta(days=30)
-            review_query = review_query.filter(ReviewLog.answered_at >= cutoff)
-            session_query = session_query.filter(StudySession.started_at >= cutoff)
-
-        total_reviews = review_query.count()
-        total_sessions = session_query.count()
+        total_reviews = review_counts.get(u.id, 0)
+        total_sessions = session_counts.get(u.id, 0)
 
         if total_reviews == 0 and total_sessions == 0:
             continue
 
-        # Calculate streak
         streak = 0
         today = datetime.utcnow().date()
+        user_session_dates = streak_dates.get(u.id, set())
         for i in range(365):
             check_date = today - timedelta(days=i)
-            day_start = datetime.combine(check_date, datetime.min.time())
-            day_end = datetime.combine(check_date, datetime.max.time())
-            has_session = (
-                db.query(StudySession)
-                .filter(StudySession.user_id == u.id)
-                .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
-                .first()
-            )
-            if has_session:
+            if check_date in user_session_dates:
                 streak += 1
             else:
                 if i == 0:
                     continue
                 break
 
-        # Calculate mastery percentage
-        cards = db.query(Flashcard).filter(Flashcard.user_id == u.id).all()
         mastery_pct = 0.0
-        if cards:
-            mastered = sum(1 for c in cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
-            mastery_pct = round((mastered / len(cards)) * 100, 1)
+        if card_totals.get(u.id):
+            mastery_pct = round((mastered_totals.get(u.id, 0) / card_totals[u.id]) * 100, 1)
 
         entries.append(LeaderboardEntry(
             rank=0,

@@ -36,6 +36,21 @@ class SearchResponse(BaseModel):
 
 # ---------- Helpers ----------
 
+
+def _apply_owned_scope(query, model, user: OptionalType[User]):
+    if user:
+        return query.filter(model.user_id == user.id)
+    return query.filter(model.user_id.is_(None))
+
+
+def _get_module_name(db: Session, module_cache: dict[str, str], mid: str, user: OptionalType[User]) -> str:
+    if mid not in module_cache:
+        module_query = _apply_owned_scope(db.query(Module).filter(Module.id == mid), Module, user)
+        mod = module_query.first()
+        module_cache[mid] = mod.name if mod else ""
+    return module_cache[mid]
+
+
 def _snippet(text: Optional[str], query: str, max_len: int = 200) -> str:
     """Extract a snippet around the query match."""
     if not text:
@@ -57,6 +72,7 @@ def _snippet(text: Optional[str], query: str, max_len: int = 200) -> str:
 
 # ---------- Endpoints ----------
 
+
 @router.get("", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1, description="Search query"),
@@ -69,9 +85,12 @@ def search(
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    module_cache: dict[str, str] = {}
+
     # Try semantic search first
     try:
         from services import vector_service
+
         vector_results = vector_service.search(q, top_k=limit)
         if vector_results:
             semantic_results: list[SearchResult] = []
@@ -79,14 +98,72 @@ def search(
                 parts = vr["id"].split(":", 1)
                 if len(parts) != 2:
                     continue
+
                 item_type, item_id = parts
-                semantic_results.append(SearchResult(
-                    type=item_type,
-                    id=item_id,
-                    title=vr.get("text", "")[:100],
-                    snippet=vr.get("text", "")[:200],
-                    score=vr["score"],
-                ))
+                result: SearchResult | None = None
+
+                if item_type == "concept":
+                    concept_query = _apply_owned_scope(
+                        db.query(Concept).filter(Concept.id == item_id),
+                        Concept,
+                        user,
+                    )
+                    if module_id:
+                        concept_query = concept_query.filter(Concept.module_id == module_id)
+                    concept = concept_query.first()
+                    if concept:
+                        result = SearchResult(
+                            type="concept",
+                            id=concept.id,
+                            title=concept.name,
+                            snippet=_snippet(concept.definition or concept.explanation or vr.get("text", ""), q),
+                            score=vr["score"],
+                            module_id=concept.module_id,
+                            module_name=_get_module_name(db, module_cache, concept.module_id, user),
+                        )
+                elif item_type == "document":
+                    doc_query = _apply_owned_scope(
+                        db.query(Document).filter(Document.id == item_id),
+                        Document,
+                        user,
+                    )
+                    if module_id:
+                        doc_query = doc_query.filter(Document.module_id == module_id)
+                    document = doc_query.first()
+                    if document:
+                        result = SearchResult(
+                            type="document",
+                            id=document.id,
+                            title=document.filename,
+                            snippet=_snippet(document.raw_text or vr.get("text", ""), q),
+                            score=vr["score"],
+                            module_id=document.module_id,
+                            module_name=_get_module_name(db, module_cache, document.module_id, user),
+                        )
+                elif item_type == "flashcard":
+                    flashcard_query = _apply_owned_scope(
+                        db.query(Flashcard).filter(Flashcard.id == item_id),
+                        Flashcard,
+                        user,
+                    )
+                    if module_id:
+                        flashcard_query = flashcard_query.filter(Flashcard.module_id == module_id)
+                    flashcard = flashcard_query.first()
+                    if flashcard:
+                        match_text = flashcard.front if q.lower() in (flashcard.front or "").lower() else flashcard.back
+                        result = SearchResult(
+                            type="flashcard",
+                            id=flashcard.id,
+                            title=flashcard.front[:100],
+                            snippet=_snippet(match_text or vr.get("text", ""), q),
+                            score=vr["score"],
+                            module_id=flashcard.module_id,
+                            module_name=_get_module_name(db, module_cache, flashcard.module_id, user),
+                        )
+
+                if result and (not result.module_id or result.module_name):
+                    semantic_results.append(result)
+
             if semantic_results:
                 return SearchResponse(
                     results=semantic_results[:limit],
@@ -100,21 +177,9 @@ def search(
     pattern = f"%{q}%"
     results: list[SearchResult] = []
 
-    # Cache module names
-    module_cache: dict[str, str] = {}
-
-    def get_module_name(mid: str) -> str:
-        if mid not in module_cache:
-            mod = db.query(Module).filter(Module.id == mid).first()
-            module_cache[mid] = mod.name if mod else ""
-        return module_cache[mid]
-
-    # Search concepts
-    concept_query = db.query(Concept).filter(
+    concept_query = _apply_owned_scope(db.query(Concept), Concept, user).filter(
         (Concept.name.ilike(pattern)) | (Concept.definition.ilike(pattern))
     )
-    if user:
-        concept_query = concept_query.filter(Concept.user_id == user.id)
     if module_id:
         concept_query = concept_query.filter(Concept.module_id == module_id)
     for c in concept_query.limit(limit).all():
@@ -125,17 +190,14 @@ def search(
             title=c.name,
             snippet=_snippet(match_text, q),
             module_id=c.module_id,
-            module_name=get_module_name(c.module_id),
+            module_name=_get_module_name(db, module_cache, c.module_id, user),
         ))
 
-    # Search flashcards
     remaining = limit - len(results)
     if remaining > 0:
-        fc_query = db.query(Flashcard).filter(
+        fc_query = _apply_owned_scope(db.query(Flashcard), Flashcard, user).filter(
             (Flashcard.front.ilike(pattern)) | (Flashcard.back.ilike(pattern))
         )
-        if user:
-            fc_query = fc_query.filter(Flashcard.user_id == user.id)
         if module_id:
             fc_query = fc_query.filter(Flashcard.module_id == module_id)
         for f in fc_query.limit(remaining).all():
@@ -146,17 +208,14 @@ def search(
                 title=f.front[:100],
                 snippet=_snippet(match_text, q),
                 module_id=f.module_id,
-                module_name=get_module_name(f.module_id),
+                module_name=_get_module_name(db, module_cache, f.module_id, user),
             ))
 
-    # Search documents
     remaining = limit - len(results)
     if remaining > 0:
-        doc_query = db.query(Document).filter(
+        doc_query = _apply_owned_scope(db.query(Document), Document, user).filter(
             (Document.filename.ilike(pattern)) | (Document.raw_text.ilike(pattern))
         )
-        if user:
-            doc_query = doc_query.filter(Document.user_id == user.id)
         if module_id:
             doc_query = doc_query.filter(Document.module_id == module_id)
         for d in doc_query.limit(remaining).all():
@@ -167,7 +226,7 @@ def search(
                 title=d.filename,
                 snippet=_snippet(match_text, q),
                 module_id=d.module_id,
-                module_name=get_module_name(d.module_id),
+                module_name=_get_module_name(db, module_cache, d.module_id, user),
             ))
 
     return SearchResponse(results=results, total=len(results), query=q)

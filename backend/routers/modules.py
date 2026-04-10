@@ -67,6 +67,12 @@ class ModuleStatsResponse(BaseModel):
 
 # ---------- Helpers ----------
 
+def _apply_module_scope(query, user: OptionalType[User]):
+    if user:
+        return query.filter(Module.user_id == user.id)
+    return query.filter(Module.user_id.is_(None))
+
+
 def _compute_module_stats(db: Session, module: Module) -> dict:
     now = datetime.utcnow()
     cards = db.query(Flashcard).filter(Flashcard.module_id == module.id).all()
@@ -95,9 +101,7 @@ def _compute_module_stats(db: Session, module: Module) -> dict:
 
 @router.get("", response_model=list[ModuleResponse])
 def list_modules(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module)
-    if user:
-        query = query.filter(Module.user_id == user.id)
+    query = _apply_module_scope(db.query(Module), user)
     modules = query.order_by(Module.created_at.desc()).all()
     results = []
     for m in modules:
@@ -135,9 +139,7 @@ def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: Optio
 
 @router.get("/{module_id}", response_model=ModuleDetailResponse)
 def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
+    query = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user)
     module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -171,9 +173,7 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
 
 @router.patch("/{module_id}", response_model=ModuleResponse)
 def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
+    query = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user)
     module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -203,9 +203,7 @@ def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_
 
 @router.delete("/{module_id}", status_code=204)
 def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
+    query = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user)
     module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -216,9 +214,7 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalT
 
 @router.get("/{module_id}/stats", response_model=ModuleStatsResponse)
 def get_module_stats(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
+    query = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user)
     module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
