@@ -189,7 +189,7 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         raise HTTPException(status_code=400, detail="No processed documents found in this module")
 
     all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
-    max_chars = settings.MAX_CONTEXT_TOKENS * 3
+    max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
     if len(all_text) > max_chars:
         all_text = all_text[:max_chars]
 

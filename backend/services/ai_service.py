@@ -18,36 +18,71 @@ async def _call_groq(
     max_tokens: int = 4096,
 ) -> str:
     """Call Groq API with fallback model support."""
-    model = model or settings.LLM_MODEL
-
     headers = {
         "Authorization": f"Bearer {settings.GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    primary_model = model or settings.LLM_MODEL
+    models_to_try = [primary_model]
+    if primary_model != settings.LLM_FALLBACK_MODEL:
+        models_to_try.append(settings.LLM_FALLBACK_MODEL)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            response = await client.post(GROQ_API_URL, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except (httpx.HTTPStatusError, httpx.RequestError, KeyError) as e:
-            if model != settings.LLM_FALLBACK_MODEL:
-                logger.warning(f"Primary model failed ({e}), trying fallback model")
-                return await _call_groq(
-                    messages,
-                    model=settings.LLM_FALLBACK_MODEL,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-            raise RuntimeError(f"Groq API call failed: {e}") from e
+        errors: list[str] = []
+
+        for candidate_model in models_to_try:
+            token_fields = ["max_tokens"]
+
+            for token_field in token_fields:
+                payload = {
+                    "model": candidate_model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    token_field: max_tokens,
+                }
+
+                try:
+                    response = await client.post(GROQ_API_URL, headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"]
+                except httpx.HTTPStatusError as e:
+                    status = e.response.status_code
+                    response_body = (e.response.text or "")[:500]
+                    body_lower = response_body.lower()
+
+                    # Some OpenAI-compatible providers require max_completion_tokens.
+                    if (
+                        token_field == "max_tokens"
+                        and status == 400
+                        and (
+                            "max_tokens" in body_lower
+                            or "max_completion_tokens" in body_lower
+                            or "unknown field" in body_lower
+                            or "unrecognized" in body_lower
+                        )
+                    ):
+                        token_fields.append("max_completion_tokens")
+
+                    error_msg = (
+                        f"model={candidate_model}, status={status}, token_field={token_field}, "
+                        f"response={response_body}"
+                    )
+                    logger.warning("Groq API call failed: %s", error_msg)
+                    errors.append(error_msg)
+                except httpx.RequestError as e:
+                    error_msg = f"model={candidate_model}, request_error={e}"
+                    logger.warning("Groq API request error: %s", error_msg)
+                    errors.append(error_msg)
+                    break
+                except KeyError as e:
+                    error_msg = f"model={candidate_model}, malformed_response={e}"
+                    logger.warning("Groq API malformed response: %s", error_msg)
+                    errors.append(error_msg)
+                    break
+
+        joined = " | ".join(errors[-3:]) if errors else "Unknown error"
+        raise RuntimeError(f"Groq API call failed after trying available models: {joined}")
 
 
 def _parse_json_response(text: str) -> list | dict:

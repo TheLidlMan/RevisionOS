@@ -1,15 +1,17 @@
 import json
 import os
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from config import reload_runtime_settings
 from services.ai_service import validate_api_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-SETTINGS_FILE = "settings.json"
+SETTINGS_FILE = Path(__file__).resolve().parent.parent / "settings.json"
 
 DEFAULT_SETTINGS = {
     "groq_api_key": "",
@@ -63,7 +65,7 @@ class ValidateKeyResponse(BaseModel):
 
 def _load_settings() -> dict:
     if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r") as f:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             merged = {**DEFAULT_SETTINGS, **data}
             return merged
@@ -71,7 +73,7 @@ def _load_settings() -> dict:
 
 
 def _save_settings(data: dict) -> None:
-    with open(SETTINGS_FILE, "w") as f:
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 
@@ -92,13 +94,9 @@ def update_settings(body: SettingsUpdate):
     current = _load_settings()
     update_data = body.model_dump(exclude_none=True)
 
-    # If updating API key, also update the runtime config
-    if "groq_api_key" in update_data:
-        from config import settings
-        settings.GROQ_API_KEY = update_data["groq_api_key"]
-
     current.update(update_data)
     _save_settings(current)
+    reload_runtime_settings()
 
     # Mask key in response
     resp = dict(current)

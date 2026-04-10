@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fsrs import Scheduler, Card, Rating, State
+from fsrs import FSRS, Card, Rating, State
 
 
 # Map string ratings to FSRS Rating enum
@@ -14,6 +14,7 @@ RATING_MAP = {
 
 # Map FSRS State enum to our string representation
 STATE_MAP = {
+    State.New: "NEW",
     State.Learning: "LEARNING",
     State.Review: "REVIEW",
     State.Relearning: "RELEARNING",
@@ -25,13 +26,11 @@ STATE_REVERSE_MAP = {
     "RELEARNING": State.Relearning,
 }
 
-_scheduler = Scheduler()
+_scheduler = FSRS()
 
 
-def _to_app_state(fsrs_state: State, step: int) -> str:
-    """Convert fsrs State + step into app-level state string."""
-    if fsrs_state == State.Learning and step == 0:
-        return "NEW"
+def _to_app_state(fsrs_state: State, _step: int = 0) -> str:
+    """Convert fsrs State into app-level state string."""
     return STATE_MAP.get(fsrs_state, "NEW")
 
 
@@ -66,14 +65,19 @@ def schedule_review(card_data: dict, rating: str) -> dict:
     state_str = card_data.get("state", "NEW")
     if state_str in STATE_REVERSE_MAP:
         card.state = STATE_REVERSE_MAP[state_str]
-        # Non-new cards should have step > 0
-        card.step = max(card_data.get("reps", 0), 1) if state_str != "LEARNING" else card_data.get("reps", 0)
     else:
-        # NEW state -> Learning with step 0
-        card.state = State.Learning
-        card.step = 0
+        card.state = State.New
 
-    if card_data.get("last_review"):
+    if card_data.get("reps") is not None:
+        card.reps = card_data.get("reps", 0)
+    if card_data.get("lapses") is not None:
+        card.lapses = card_data.get("lapses", 0)
+    if card_data.get("elapsed_days") is not None:
+        card.elapsed_days = card_data.get("elapsed_days", 0)
+    if card_data.get("scheduled_days") is not None:
+        card.scheduled_days = card_data.get("scheduled_days", 0)
+
+    if card_data.get("last_review") and hasattr(card, "last_review"):
         lr = card_data["last_review"]
         if isinstance(lr, str):
             lr = datetime.fromisoformat(lr)
@@ -90,7 +94,7 @@ def schedule_review(card_data: dict, rating: str) -> dict:
         new_due = new_due.replace(tzinfo=None)
 
     new_last_review: Optional[datetime] = None
-    if updated_card.last_review is not None:
+    if hasattr(updated_card, "last_review") and updated_card.last_review is not None:
         new_last_review = updated_card.last_review
         if new_last_review.tzinfo is not None:
             new_last_review = new_last_review.replace(tzinfo=None)
@@ -109,9 +113,11 @@ def schedule_review(card_data: dict, rating: str) -> dict:
         elapsed_days = max((new_last_review - old_lr).days, 0)
 
     # scheduled_days = days until next review from now
-    scheduled_days = max((new_due - (new_last_review or datetime.utcnow())).days, 0)
+    scheduled_days = getattr(updated_card, "scheduled_days", None)
+    if scheduled_days is None:
+        scheduled_days = max((new_due - (new_last_review or datetime.utcnow())).days, 0)
 
-    app_state = _to_app_state(updated_card.state, updated_card.step)
+    app_state = _to_app_state(updated_card.state)
 
     return {
         "due": new_due,

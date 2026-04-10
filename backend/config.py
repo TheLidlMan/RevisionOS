@@ -1,5 +1,22 @@
-from pydantic_settings import BaseSettings
+import json
+import logging
 from pathlib import Path
+
+from pydantic_settings import BaseSettings
+
+
+logger = logging.getLogger(__name__)
+SETTINGS_FILE = Path(__file__).resolve().parent / "settings.json"
+PERSISTED_SETTINGS_MAP = {
+    "groq_api_key": "GROQ_API_KEY",
+    "llm_model": "LLM_MODEL",
+    "llm_fallback_model": "LLM_FALLBACK_MODEL",
+    "daily_new_cards_limit": "DAILY_NEW_CARDS_LIMIT",
+    "cards_per_document": "CARDS_PER_DOCUMENT",
+    "questions_per_document": "QUESTIONS_PER_DOCUMENT",
+    "weakness_threshold": "WEAKNESS_THRESHOLD",
+    "desired_retention": "DESIRED_RETENTION",
+}
 
 
 class Settings(BaseSettings):
@@ -8,6 +25,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
     MAX_CONTEXT_TOKENS: int = 800000
+    MAX_PROMPT_CHARS: int = 120000
     UPLOAD_DIR: str = "./uploads"
     DAILY_NEW_CARDS_LIMIT: int = 20
     CARDS_PER_DOCUMENT: int = 20
@@ -23,3 +41,31 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def _load_persisted_settings() -> dict:
+    if not SETTINGS_FILE.exists():
+        return {}
+
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load persisted settings from %s: %s", SETTINGS_FILE, exc)
+        return {}
+
+
+def reload_runtime_settings() -> None:
+    persisted = _load_persisted_settings()
+    for json_key, attr_name in PERSISTED_SETTINGS_MAP.items():
+        if json_key not in persisted:
+            continue
+
+        value = persisted[json_key]
+        if json_key == "groq_api_key" and isinstance(value, str) and "..." in value:
+            logger.warning("Ignoring masked Groq API key found in persisted settings")
+            continue
+
+        setattr(settings, attr_name, value)
+
+
+reload_runtime_settings()
