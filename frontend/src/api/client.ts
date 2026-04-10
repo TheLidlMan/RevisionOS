@@ -180,9 +180,9 @@ export const validateApiKey = (key: string) =>
     .then((r) => r.data);
 
 // Search
-export const search = (query: string, moduleId?: string) =>
+export const search = (query: string, moduleId?: string, type?: string) =>
   client
-    .get('/search', { params: { q: query, module_id: moduleId } })
+    .get('/search', { params: { q: query, module_id: moduleId, type } })
     .then((r) => r.data);
 
 // ---- Phase 2: Weakness Map & Analytics ----
@@ -223,6 +223,9 @@ export const generateCurriculum = (moduleId: string, hoursPerWeek: number, examD
 
 export const exportAnki = (moduleId: string) =>
   client.get(`/modules/${moduleId}/export-anki`, { responseType: 'blob' }).then((r) => r.data);
+
+export const getQuizStatus = (moduleId: string) =>
+  client.get<{ module_id: string; status: string; question_count: number }>(`/modules/${moduleId}/quiz-status`).then((r) => r.data);
 
 export const exportJson = (moduleId: string) =>
   client.get(`/modules/${moduleId}/export-json`, { responseType: 'blob' }).then((r) => r.data);

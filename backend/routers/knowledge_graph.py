@@ -25,6 +25,9 @@ class GraphNode(BaseModel):
     importance: float = 0.5
     mastery: float = 0.0
     group: str = "concept"
+    parent_id: Optional[str] = None
+    order_index: int = 0
+    item_count: int = 0
 
 
 class GraphEdge(BaseModel):
@@ -75,12 +78,16 @@ def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: Opt
 
     for c in concepts:
         mastery = _compute_concept_mastery(db, c)
+        item_count = len(c.flashcards) + len(c.quiz_questions)
         nodes.append(GraphNode(
             id=c.id,
             name=c.name,
             importance=c.importance_score,
             mastery=mastery,
             group="concept",
+            parent_id=c.parent_concept_id,
+            order_index=c.order_index if c.order_index else 0,
+            item_count=item_count,
         ))
 
         # Track which documents each concept is linked to via flashcards/questions
@@ -93,11 +100,23 @@ def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: Opt
                 doc_ids.add(qq.source_document_id)
         concept_doc_map[c.id] = doc_ids
 
-    # Infer edges from shared documents
+    # Build edges: parent-child hierarchy + shared document relationships
     edges: list[GraphEdge] = []
     concept_ids = [c.id for c in concepts]
     seen_pairs: set[tuple[str, str]] = set()
 
+    # Parent-child edges from taxonomy
+    for c in concepts:
+        if c.parent_concept_id and c.parent_concept_id in concept_ids:
+            edges.append(GraphEdge(
+                source=c.parent_concept_id,
+                target=c.id,
+                type="parent_child",
+            ))
+            pair = tuple(sorted((c.parent_concept_id, c.id)))
+            seen_pairs.add(pair)
+
+    # Shared document edges
     for i, cid_a in enumerate(concept_ids):
         for cid_b in concept_ids[i + 1:]:
             shared = concept_doc_map.get(cid_a, set()) & concept_doc_map.get(cid_b, set())

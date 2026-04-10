@@ -21,6 +21,7 @@ class Document(Base):
     processing_status = Column(String(20), default="pending")  # pending, processing, done, failed
     word_count = Column(Integer, default=0)
     transcript = Column(Text, nullable=True)  # Whisper transcription output
+    summary = Column(Text, nullable=True)  # AI-generated document summary
     slide_count = Column(Integer, nullable=True)  # For PPTX files
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ class DocumentResponse(BaseModel):
     processed: bool
     processing_status: str
     word_count: int
+    summary: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -67,6 +68,7 @@ def _get_file_type(filename: str) -> str:
 async def upload_document(
     module_id: str = Form(...),
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
@@ -155,13 +157,22 @@ async def upload_document(
         db.commit()
         db.refresh(doc)
 
-    # Auto-index: extract topics
+    # Auto-index: extract topics and generate summary
     if doc.processing_status == "done":
         try:
             from services.content_indexer import index_document
             await index_document(doc.id, db)
         except Exception:
             pass  # Non-critical, indexing can be re-triggered
+
+        # Pre-generate quiz questions in background
+        if background_tasks and settings.GROQ_API_KEY:
+            from routers.quizzes import _generate_quiz_for_module
+            background_tasks.add_task(
+                _generate_quiz_for_module,
+                module_id,
+                user.id if user else None,
+            )
 
     return DocumentResponse(
         id=doc.id,
@@ -172,6 +183,7 @@ async def upload_document(
         processed=doc.processed,
         processing_status=doc.processing_status,
         word_count=doc.word_count,
+        summary=doc.summary,
         created_at=doc.created_at,
     )
 
@@ -210,6 +222,7 @@ def get_document(document_id: str, db: Session = Depends(get_db), user: Optional
         processed=doc.processed,
         processing_status=doc.processing_status,
         word_count=doc.word_count,
+        summary=doc.summary,
         created_at=doc.created_at,
     )
 

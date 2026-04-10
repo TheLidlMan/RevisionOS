@@ -115,7 +115,7 @@ export default function Dashboard() {
         <div>
           <h1
             style={{
-              fontFamily: 'var(--serif)',
+              fontFamily: 'var(--heading)',
               fontSize: 28,
               fontWeight: 400,
               color: 'var(--text)',
@@ -218,7 +218,7 @@ export default function Dashboard() {
       <div style={{ marginBottom: 16 }}>
         <h2
           style={{
-            fontFamily: 'var(--serif)',
+            fontFamily: 'var(--heading)',
             fontSize: 20,
             fontWeight: 400,
             color: 'var(--text)',
@@ -274,7 +274,7 @@ export default function Dashboard() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <h3
                     style={{
-                      fontFamily: 'var(--serif)',
+                      fontFamily: 'var(--heading)',
                       fontSize: 16,
                       fontWeight: 400,
                       color: 'var(--text)',
@@ -369,7 +369,7 @@ export default function Dashboard() {
         >
           <p
             style={{
-              fontFamily: 'var(--serif)',
+              fontFamily: 'var(--heading)',
               fontStyle: 'italic',
               fontSize: 15,
               fontWeight: 400,
@@ -405,7 +405,7 @@ export default function Dashboard() {
             >
               <h2
                 style={{
-                  fontFamily: 'var(--serif)',
+                  fontFamily: 'var(--heading)',
                   fontSize: 20,
                   fontWeight: 400,
                   color: 'var(--text)',

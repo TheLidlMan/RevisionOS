@@ -1,28 +1,15 @@
-"""Vector search service using sentence-transformers and FAISS for semantic search."""
-import base64
-import json
+"""Vector search service using sentence-transformers with pgvector/fallback for semantic search."""
 import logging
 import os
 from typing import Optional
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded globals
 _model = None
-_index = None
-_id_map: list[str] = []
-_text_map: dict[str, str] = {}
-
-EMBEDDING_DIM = 384  # all-MiniLM-L6-v2 dimension
-
-
-def _get_np():
-    """Lazy-load numpy."""
-    try:
-        import numpy as np
-        return np
-    except ImportError:
-        return None
+EMBEDDING_DIM = 384
 
 
 def _get_model():
@@ -35,32 +22,18 @@ def _get_model():
             _model = SentenceTransformer(model_name)
             logger.info(f"Loaded embedding model: {model_name}")
         except Exception as e:
-            logger.warning(f"Could not load sentence-transformers model: {e}. Falling back to basic search.")
+            logger.warning(f"Could not load sentence-transformers model: {e}")
             _model = None
     return _model
 
 
-def _get_index():
-    """Lazy-load or create FAISS index."""
-    global _index
-    if _index is None:
-        try:
-            import faiss
-            _index = faiss.IndexFlatIP(EMBEDDING_DIM)  # Inner product (cosine after normalization)
-            logger.info("Created new FAISS index")
-        except Exception as e:
-            logger.warning(f"Could not create FAISS index: {e}")
-            _index = None
-    return _index
-
-
-def embed_text(text: str) -> Optional[list[float]]:
+def embed_text(text_input: str) -> Optional[list[float]]:
     """Generate embedding vector for text."""
     model = _get_model()
     if model is None:
         return None
     try:
-        embedding = model.encode(text, normalize_embeddings=True)
+        embedding = model.encode(text_input, normalize_embeddings=True)
         return embedding.tolist()
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
@@ -80,127 +53,201 @@ def embed_texts(texts: list[str]) -> Optional[list[list[float]]]:
         return None
 
 
-def add_to_index(item_id: str, embedding: list[float], text: str = ""):
-    """Add an embedding to the FAISS index."""
-    np = _get_np()
-    index = _get_index()
-    if index is None or np is None:
-        return
-    global _id_map, _text_map
+def store_embedding(db: Session, table: str, item_id: str, embedding: list[float]):
+    """Store an embedding vector in the DB (base64-encoded for portability)."""
+    import base64, struct
+    blob = struct.pack(f'{len(embedding)}f', *embedding)
+    encoded = base64.b64encode(blob).decode('ascii')
+    db.execute(
+        text(f"UPDATE {table} SET embedding = :vec WHERE id = :id"),
+        {"vec": encoded, "id": item_id},
+    )
+    db.commit()
+
+
+def _decode_embedding(encoded: str) -> Optional[list[float]]:
+    """Decode base64-encoded embedding."""
+    if not encoded:
+        return None
     try:
-        vec = np.array([embedding], dtype=np.float32)
-        index.add(vec)
-        _id_map.append(item_id)
-        if text:
-            _text_map[item_id] = text
-    except Exception as e:
-        logger.error(f"Failed to add to index: {e}")
+        import base64, struct
+        blob = base64.b64decode(encoded)
+        return list(struct.unpack(f'{len(blob) // 4}f', blob))
+    except Exception:
+        return None
 
 
-def search(query: str, top_k: int = 20) -> list[dict]:
-    """Semantic search: embed query and find nearest neighbors."""
-    np = _get_np()
-    index = _get_index()
+def search_semantic(db: Session, query: str, top_k: int = 20, user_id: Optional[str] = None) -> list[dict]:
+    """Semantic search via in-memory cosine similarity on stored embeddings."""
     model = _get_model()
-    if index is None or model is None or np is None or index.ntotal == 0:
+    if model is None:
         return []
 
     try:
-        query_vec = model.encode(query, normalize_embeddings=True)
-        query_vec = np.array([query_vec], dtype=np.float32)
-
-        k = min(top_k, index.ntotal)
-        scores, indices = index.search(query_vec, k)
-
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(_id_map):
-                continue
-            item_id = _id_map[idx]
-            results.append({
-                "id": item_id,
-                "score": float(score),
-                "text": _text_map.get(item_id, ""),
-            })
-        return results
+        query_vec = model.encode(query, normalize_embeddings=True).tolist()
     except Exception as e:
-        logger.error(f"Search failed: {e}")
+        logger.error(f"Query embedding failed: {e}")
         return []
 
-
-def build_index_from_db(db) -> int:
-    """Rebuild the FAISS index from all concepts and documents in the database."""
     from models.concept import Concept
     from models.document import Document
 
-    global _index, _id_map, _text_map
+    results = []
+
+    # Search concepts
+    concept_q = db.query(Concept).filter(Concept.embedding.isnot(None))
+    if user_id:
+        concept_q = concept_q.filter(Concept.user_id == user_id)
+    for c in concept_q.limit(500).all():
+        vec = _decode_embedding(c.embedding)
+        if vec:
+            score = sum(a * b for a, b in zip(query_vec, vec))
+            results.append({
+                "id": f"concept:{c.id}",
+                "score": float(score),
+                "text": f"{c.name}: {c.definition or ''}",
+                "name": c.name,
+                "module_id": c.module_id,
+            })
+
+    # Search documents
+    doc_q = db.query(Document).filter(Document.embedding.isnot(None))
+    if user_id:
+        doc_q = doc_q.filter(Document.user_id == user_id)
+    for d in doc_q.limit(200).all():
+        vec = _decode_embedding(d.embedding)
+        if vec:
+            score = sum(a * b for a, b in zip(query_vec, vec))
+            results.append({
+                "id": f"document:{d.id}",
+                "score": float(score),
+                "text": f"{d.filename}: {d.summary or (d.raw_text or '')[:200]}",
+                "name": d.filename,
+                "module_id": d.module_id,
+            })
+
+    results.sort(key=lambda r: r["score"], reverse=True)
+    return results[:top_k]
+
+
+def search(query: str, top_k: int = 20) -> list[dict]:
+    """Legacy search interface for backward compatibility. Uses in-memory approach."""
+    model = _get_model()
+    if model is None:
+        return []
+    # This needs a DB session; return empty for legacy callers
+    return []
+
+
+def search_keyword(db: Session, query: str, top_k: int = 20, user_id: Optional[str] = None, module_id: Optional[str] = None) -> list[dict]:
+    """Keyword search using SQL ILIKE across concepts and documents."""
+    from models.concept import Concept
+    from models.document import Document
+
+    pattern = f"%{query}%"
+    results = []
+
+    concept_q = db.query(Concept).filter(
+        (Concept.name.ilike(pattern)) | (Concept.definition.ilike(pattern))
+    )
+    if user_id:
+        concept_q = concept_q.filter(Concept.user_id == user_id)
+    if module_id:
+        concept_q = concept_q.filter(Concept.module_id == module_id)
+
+    for c in concept_q.limit(top_k).all():
+        results.append({
+            "id": f"concept:{c.id}",
+            "score": 0.8,
+            "text": f"{c.name}: {c.definition or ''}",
+            "name": c.name,
+            "module_id": c.module_id,
+        })
+
+    remaining = top_k - len(results)
+    if remaining > 0:
+        doc_q = db.query(Document).filter(
+            (Document.filename.ilike(pattern)) | (Document.raw_text.ilike(pattern))
+        )
+        if user_id:
+            doc_q = doc_q.filter(Document.user_id == user_id)
+        if module_id:
+            doc_q = doc_q.filter(Document.module_id == module_id)
+
+        for d in doc_q.limit(remaining).all():
+            results.append({
+                "id": f"document:{d.id}",
+                "score": 0.6,
+                "text": f"{d.filename}: {(d.raw_text or '')[:200]}",
+                "name": d.filename,
+                "module_id": d.module_id,
+            })
+
+    return results
+
+
+def search_exact(db: Session, query: str, top_k: int = 20, user_id: Optional[str] = None, module_id: Optional[str] = None) -> list[dict]:
+    """Exact/grep search for precise text matches in document content."""
+    from models.document import Document
+
+    results = []
+    doc_q = db.query(Document).filter(Document.raw_text.ilike(f"%{query}%"))
+    if user_id:
+        doc_q = doc_q.filter(Document.user_id == user_id)
+    if module_id:
+        doc_q = doc_q.filter(Document.module_id == module_id)
+
+    for d in doc_q.limit(top_k).all():
+        raw = d.raw_text or ""
+        idx = raw.lower().find(query.lower())
+        if idx >= 0:
+            start = max(0, idx - 100)
+            end = min(len(raw), idx + len(query) + 100)
+            snippet = raw[start:end]
+            if start > 0:
+                snippet = "..." + snippet
+            if end < len(raw):
+                snippet = snippet + "..."
+        else:
+            snippet = raw[:200]
+
+        results.append({
+            "id": f"document:{d.id}",
+            "score": 1.0,
+            "text": snippet,
+            "name": d.filename,
+            "module_id": d.module_id,
+        })
+
+    return results
+
+
+def build_index_from_db(db: Session) -> int:
+    """Compute and store embeddings for all concepts and documents."""
+    from models.concept import Concept
+    from models.document import Document
 
     model = _get_model()
     if model is None:
         return 0
 
-    try:
-        import faiss
-        _index = faiss.IndexFlatIP(EMBEDDING_DIM)
-        _id_map = []
-        _text_map = {}
+    total = 0
 
-        np = _get_np()
-        if np is None:
-            return 0
+    concepts = db.query(Concept).all()
+    for c in concepts:
+        txt = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
+        emb = embed_text(txt)
+        if emb:
+            store_embedding(db, "concepts", c.id, emb)
+            total += 1
 
-        # Index concepts
-        concepts = db.query(Concept).all()
-        concept_texts = []
-        concept_ids = []
-        for c in concepts:
-            text = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
-            concept_texts.append(text)
-            concept_ids.append(f"concept:{c.id}")
-            _text_map[f"concept:{c.id}"] = text
+    documents = db.query(Document).filter(Document.raw_text.isnot(None)).all()
+    for d in documents:
+        txt = d.summary or f"{d.filename}: {(d.raw_text or '')[:500]}"
+        emb = embed_text(txt)
+        if emb:
+            store_embedding(db, "documents", d.id, emb)
+            total += 1
 
-        if concept_texts:
-            embeddings = model.encode(concept_texts, normalize_embeddings=True, batch_size=32)
-            _index.add(np.array(embeddings, dtype=np.float32))
-            _id_map.extend(concept_ids)
-
-        # Index documents (first 500 chars of each)
-        documents = db.query(Document).filter(Document.raw_text.isnot(None)).all()
-        doc_texts = []
-        doc_ids = []
-        for d in documents:
-            text = (d.raw_text or "")[:500]
-            if text.strip():
-                doc_texts.append(f"{d.filename}: {text}")
-                doc_ids.append(f"document:{d.id}")
-                _text_map[f"document:{d.id}"] = f"{d.filename}: {text[:200]}"
-
-        if doc_texts:
-            embeddings = model.encode(doc_texts, normalize_embeddings=True, batch_size=32)
-            _index.add(np.array(embeddings, dtype=np.float32))
-            _id_map.extend(doc_ids)
-
-        total = len(concept_ids) + len(doc_ids)
-        logger.info(f"Built FAISS index with {total} items ({len(concept_ids)} concepts, {len(doc_ids)} documents)")
-        return total
-    except Exception as e:
-        logger.error(f"Failed to build index: {e}")
-        return 0
-
-
-def encode_embedding(embedding: list[float]) -> str:
-    """Encode embedding to base64 string for DB storage."""
-    np = _get_np()
-    if np is None:
-        return ""
-    arr = np.array(embedding, dtype=np.float32)
-    return base64.b64encode(arr.tobytes()).decode('ascii')
-
-
-def decode_embedding(encoded: str) -> list[float]:
-    """Decode base64 embedding from DB."""
-    np = _get_np()
-    if np is None:
-        return []
-    arr = np.frombuffer(base64.b64decode(encoded), dtype=np.float32)
-    return arr.tolist()
+    logger.info(f"Built embeddings for {total} items")
+    return total

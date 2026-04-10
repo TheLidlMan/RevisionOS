@@ -15,7 +15,7 @@ const PRESET_COLORS = [
 
 const glass = { background: 'rgba(255,248,240,0.04)', border: '1px solid rgba(139,115,85,0.15)', borderRadius: '12px', backdropFilter: 'blur(20px)' } as const;
 const inputStyle: React.CSSProperties = { background: 'rgba(255,248,240,0.04)', border: '1px solid rgba(139,115,85,0.15)', borderRadius: '8px', color: '#f5f0e8', outline: 'none', fontWeight: 300, width: '100%', padding: '0.5rem 0.75rem' };
-const serif: React.CSSProperties = { fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' };
+const serif: React.CSSProperties = { fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' };
 
 export default function CreateModuleModal({ open, onClose }: Props) {
   const [name, setName] = useState('');

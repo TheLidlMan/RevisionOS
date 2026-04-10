@@ -6,7 +6,7 @@
   --color-navy-lighter: #252018;
   --color-teal: #c4956a;
   --color-teal-dark: #a87d56;
-  --font-sans: Inter, -apple-system, sans-serif;
+  --font-sans: 'General Sans', -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
 
@@ -25,8 +25,8 @@
   --accent-soft: rgba(196, 149, 106, 0.15);
   --danger: rgba(220, 120, 100, 0.8);
   --success: rgba(120, 180, 120, 0.8);
-  --serif: Georgia, 'Times New Roman', serif;
-  --sans: Inter, -apple-system, sans-serif;
+  --heading: 'Clash Display', 'General Sans', sans-serif;
+  --sans: 'General Sans', -apple-system, sans-serif;
   --radius: 12px;
   --blur: blur(20px);
 }
@@ -44,17 +44,17 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--serif);
-    font-weight: 400;
+    font-family: var(--heading);
+    font-weight: 500;
     color: var(--text);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
   }
 
   h1 { font-size: 1.875rem; }
   h2 { font-size: 1.375rem; }
   h3 { font-size: 1.125rem; }
 
-  /* Custom scrollbar — thin, warm-brown */
+  /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 5px;
   }
@@ -115,7 +115,7 @@
   transform: translateY(0);
 }
 
-/* Light theme overrides — cream/paper aesthetic */
+/* Light theme overrides */
 body.theme-light {
   --bg: #faf8f5;
   --bg-warm: #f5f0e8;

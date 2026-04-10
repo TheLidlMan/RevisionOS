@@ -34,7 +34,7 @@ const sg = {
   accentSoft: 'rgba(196,149,106,0.15)',
   hover: 'rgba(255,248,240,0.08)',
   warmBorder: 'rgba(139,115,85,0.15)',
-  serif: "Georgia, 'Times New Roman', serif",
+  serif: "'Clash Display', sans-serif",
   overlay: 'rgba(26,23,20,0.8)',
 };
 

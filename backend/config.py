@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     MAX_PROMPT_CHARS: int = 120000
     UPLOAD_DIR: str = "./uploads"
     DAILY_NEW_CARDS_LIMIT: int = 20
-    CARDS_PER_DOCUMENT: int = 20
-    QUESTIONS_PER_DOCUMENT: int = 10
+    CARDS_PER_DOCUMENT: int = 200
+    QUESTIONS_PER_DOCUMENT: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
 

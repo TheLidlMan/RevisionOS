@@ -141,7 +141,7 @@ export default function QuizMode() {
         <div className="flex items-center gap-3 mb-8">
           <Brain className="w-6 h-6" style={{ color: '#c4956a' }} />
           <h1
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+            style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600 }}
             className="text-2xl"
           >
             Quiz Mode
@@ -299,7 +299,7 @@ export default function QuizMode() {
         <div className="flex flex-col items-center text-center py-12">
           <Trophy className="w-16 h-16 mb-4" style={{ color: '#c4956a' }} />
           <h2
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+            style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' }}
             className="text-3xl mb-6"
           >
             Quiz Complete!
@@ -421,7 +421,7 @@ export default function QuizMode() {
             {question.difficulty}
           </span>
           <p
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontSize: '1.1rem', lineHeight: 1.7 }}
+            style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontSize: '1.1rem', lineHeight: 1.7 }}
             className="mb-6 whitespace-pre-wrap"
           >
             {question.question_text}

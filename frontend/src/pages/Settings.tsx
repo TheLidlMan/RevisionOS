@@ -39,7 +39,7 @@ const buttonStyle: React.CSSProperties = {
 };
 
 const headingFont: React.CSSProperties = {
-  fontFamily: "Georgia, 'Times New Roman', serif",
+  fontFamily: "'Clash Display', sans-serif",
   color: '#f5f0e8',
 };
 

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,7 +15,9 @@ from models.quiz_session import StudySession
 from models.review_log import ReviewLog
 from models.module import Module
 from models.document import Document
+from models.user import User
 from services import ai_service
+from services.auth_service import get_current_user
 
 router = APIRouter(tags=["quizzes"])
 
@@ -349,7 +351,7 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
 
 
 @router.post("/api/quizzes/sessions/{session_id}/complete", response_model=SessionResultsResponse)
-def complete_session(session_id: str, db: Session = Depends(get_db)):
+def complete_session(session_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -359,8 +361,17 @@ def complete_session(session_id: str, db: Session = Depends(get_db)):
     if total > 0:
         session.score_pct = round((session.correct / total) * 100, 1)
     session.total_items = total
+    session.status = "completed"
     db.commit()
     db.refresh(session)
+
+    # Trigger background generation of next quiz
+    if session.module_id and settings.GROQ_API_KEY:
+        background_tasks.add_task(
+            _generate_next_quiz_background,
+            session.module_id,
+            session_id,
+        )
 
     logs = db.query(ReviewLog).filter(ReviewLog.session_id == session_id).all()
     log_dicts = [
@@ -391,7 +402,7 @@ def complete_session(session_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/api/quizzes/sessions/{session_id}/results", response_model=SessionResultsResponse)
-def get_session_results(session_id: str, db: Session = Depends(get_db)):
+def get_session_results(session_id: str, db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -422,3 +433,73 @@ def get_session_results(session_id: str, db: Session = Depends(get_db)):
         score_pct=session.score_pct,
         review_logs=log_dicts,
     )
+
+
+# ---------- Background quiz pre-generation ----------
+
+async def _generate_quiz_for_module(module_id: str, user_id: str = None):
+    """Generate quiz questions for a module in the background."""
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        module = db.query(Module).filter(Module.id == module_id).first()
+        if not module:
+            return
+
+        docs = db.query(Document).filter(
+            Document.module_id == module_id,
+            Document.processing_status == "done",
+        ).all()
+        if not docs:
+            return
+
+        combined_text = "\n\n".join(d.raw_text for d in docs if d.raw_text)
+        if not combined_text.strip():
+            return
+
+        questions = await ai_service.generate_quiz_questions(
+            combined_text,
+            module.name,
+            num_questions=settings.QUESTIONS_PER_DOCUMENT,
+        )
+
+        for q_data in questions:
+            q = QuizQuestion(
+                id=str(uuid.uuid4()),
+                module_id=module_id,
+                question_text=q_data.get("question_text", ""),
+                question_type=q_data.get("question_type", "multiple_choice"),
+                options=json.dumps(q_data.get("options", [])),
+                correct_answer=q_data.get("correct_answer", ""),
+                explanation=q_data.get("explanation", ""),
+                difficulty=q_data.get("difficulty", "medium"),
+                source_document_id=docs[0].id if docs else None,
+                user_id=user_id,
+            )
+            db.add(q)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _generate_next_quiz_background(module_id: str, completed_session_id: str):
+    """After a quiz session completes, pre-generate the next set of questions."""
+    await _generate_quiz_for_module(module_id)
+
+
+class QuizStatusResponse(BaseModel):
+    module_id: str
+    status: str  # ready, generating, no_questions
+    question_count: int = 0
+
+
+@router.get("/api/modules/{module_id}/quiz-status", response_model=QuizStatusResponse)
+def get_quiz_status(module_id: str, db: Session = Depends(get_db)):
+    count = db.query(QuizQuestion).filter(QuizQuestion.module_id == module_id).count()
+    if count == 0:
+        status = "no_questions"
+    else:
+        status = "ready"
+    return QuizStatusResponse(module_id=module_id, status=status, question_count=count)

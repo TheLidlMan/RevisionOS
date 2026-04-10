@@ -21,6 +21,7 @@ class StudySession(Base):
     incorrect = Column(Integer, default=0)
     skipped = Column(Integer, default=0)
     score_pct = Column(Float, default=0.0)
+    status = Column(String(20), default="in_progress")  # ready, generating, in_progress, completed
 
     module = relationship("Module", back_populates="study_sessions")
     review_logs = relationship("ReviewLog", back_populates="session", cascade="all, delete-orphan")

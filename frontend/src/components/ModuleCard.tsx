@@ -16,7 +16,7 @@ export default function ModuleCard({ module }: Props) {
       onMouseLeave={(e) => { e.currentTarget.style.background = glass.background; e.currentTarget.style.borderColor = 'rgba(139,115,85,0.15)'; e.currentTarget.style.borderLeft = `4px solid ${module.color}`; }}>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <h3 style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600, fontSize: '1rem', margin: 0 }}>{module.name}</h3>
+          <h3 style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600, fontSize: '1rem', margin: 0 }}>{module.name}</h3>
           {module.description && <p style={{ color: 'rgba(245,240,232,0.5)', fontSize: '0.8rem', fontWeight: 300, marginTop: 4 }} className="line-clamp-2">{module.description}</p>}
         </div>
       </div>

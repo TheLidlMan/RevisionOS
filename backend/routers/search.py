@@ -77,101 +77,108 @@ def _snippet(text: Optional[str], query: str, max_len: int = 200) -> str:
 def search(
     q: str = Query(..., min_length=1, description="Search query"),
     module_id: Optional[str] = Query(None),
+    type: Optional[str] = Query(None, description="Search type: semantic, keyword, exact"),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    """Semantic search across all content. Falls back to keyword search if vectors unavailable."""
+    """Search across all content. Supports semantic, keyword, and exact modes."""
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     module_cache: dict[str, str] = {}
+    search_type = type or "semantic"
 
-    # Try semantic search first
-    try:
-        from services import vector_service
+    # Try vector-based search (semantic or exact) first
+    if search_type in ("semantic", "exact"):
+        try:
+            from services import vector_service
 
-        vector_results = vector_service.search(q, top_k=limit)
-        if vector_results:
-            semantic_results: list[SearchResult] = []
-            for vr in vector_results:
-                parts = vr["id"].split(":", 1)
-                if len(parts) != 2:
-                    continue
+            if search_type == "exact":
+                vector_results = vector_service.search_exact(q, db, module_id=module_id, top_k=limit)
+            else:
+                vector_results = vector_service.search_semantic(q, db, module_id=module_id, top_k=limit)
 
-                item_type, item_id = parts
-                result: SearchResult | None = None
+            if vector_results:
+                semantic_results: list[SearchResult] = []
+                for vr in vector_results:
+                    parts = vr["id"].split(":", 1)
+                    if len(parts) != 2:
+                        continue
 
-                if item_type == "concept":
-                    concept_query = _apply_owned_scope(
-                        db.query(Concept).filter(Concept.id == item_id),
-                        Concept,
-                        user,
-                    )
-                    if module_id:
-                        concept_query = concept_query.filter(Concept.module_id == module_id)
-                    concept = concept_query.first()
-                    if concept:
-                        result = SearchResult(
-                            type="concept",
-                            id=concept.id,
-                            title=concept.name,
-                            snippet=_snippet(concept.definition or concept.explanation or vr.get("text", ""), q),
-                            score=vr["score"],
-                            module_id=concept.module_id,
-                            module_name=_get_module_name(db, module_cache, concept.module_id, user),
+                    item_type, item_id = parts
+                    result: SearchResult | None = None
+
+                    if item_type == "concept":
+                        concept_query = _apply_owned_scope(
+                            db.query(Concept).filter(Concept.id == item_id),
+                            Concept,
+                            user,
                         )
-                elif item_type == "document":
-                    doc_query = _apply_owned_scope(
-                        db.query(Document).filter(Document.id == item_id),
-                        Document,
-                        user,
-                    )
-                    if module_id:
-                        doc_query = doc_query.filter(Document.module_id == module_id)
-                    document = doc_query.first()
-                    if document:
-                        result = SearchResult(
-                            type="document",
-                            id=document.id,
-                            title=document.filename,
-                            snippet=_snippet(document.raw_text or vr.get("text", ""), q),
-                            score=vr["score"],
-                            module_id=document.module_id,
-                            module_name=_get_module_name(db, module_cache, document.module_id, user),
+                        if module_id:
+                            concept_query = concept_query.filter(Concept.module_id == module_id)
+                        concept = concept_query.first()
+                        if concept:
+                            result = SearchResult(
+                                type="concept",
+                                id=concept.id,
+                                title=concept.name,
+                                snippet=_snippet(concept.definition or concept.explanation or vr.get("text", ""), q),
+                                score=vr["score"],
+                                module_id=concept.module_id,
+                                module_name=_get_module_name(db, module_cache, concept.module_id, user),
+                            )
+                    elif item_type == "document":
+                        doc_query = _apply_owned_scope(
+                            db.query(Document).filter(Document.id == item_id),
+                            Document,
+                            user,
                         )
-                elif item_type == "flashcard":
-                    flashcard_query = _apply_owned_scope(
-                        db.query(Flashcard).filter(Flashcard.id == item_id),
-                        Flashcard,
-                        user,
-                    )
-                    if module_id:
-                        flashcard_query = flashcard_query.filter(Flashcard.module_id == module_id)
-                    flashcard = flashcard_query.first()
-                    if flashcard:
-                        match_text = flashcard.front if q.lower() in (flashcard.front or "").lower() else flashcard.back
-                        result = SearchResult(
-                            type="flashcard",
-                            id=flashcard.id,
-                            title=flashcard.front[:100],
-                            snippet=_snippet(match_text or vr.get("text", ""), q),
-                            score=vr["score"],
-                            module_id=flashcard.module_id,
-                            module_name=_get_module_name(db, module_cache, flashcard.module_id, user),
+                        if module_id:
+                            doc_query = doc_query.filter(Document.module_id == module_id)
+                        document = doc_query.first()
+                        if document:
+                            result = SearchResult(
+                                type="document",
+                                id=document.id,
+                                title=document.filename,
+                                snippet=_snippet(document.raw_text or vr.get("text", ""), q),
+                                score=vr["score"],
+                                module_id=document.module_id,
+                                module_name=_get_module_name(db, module_cache, document.module_id, user),
+                            )
+                    elif item_type == "flashcard":
+                        flashcard_query = _apply_owned_scope(
+                            db.query(Flashcard).filter(Flashcard.id == item_id),
+                            Flashcard,
+                            user,
                         )
+                        if module_id:
+                            flashcard_query = flashcard_query.filter(Flashcard.module_id == module_id)
+                        flashcard = flashcard_query.first()
+                        if flashcard:
+                            match_text = flashcard.front if q.lower() in (flashcard.front or "").lower() else flashcard.back
+                            result = SearchResult(
+                                type="flashcard",
+                                id=flashcard.id,
+                                title=flashcard.front[:100],
+                                snippet=_snippet(match_text or vr.get("text", ""), q),
+                                score=vr["score"],
+                                module_id=flashcard.module_id,
+                                module_name=_get_module_name(db, module_cache, flashcard.module_id, user),
+                            )
 
-                if result and (result.module_id is None or result.module_name):
-                    semantic_results.append(result)
+                    if result and (result.module_id is None or result.module_name):
+                        semantic_results.append(result)
 
-            if semantic_results:
-                return SearchResponse(
-                    results=semantic_results[:limit],
-                    total=len(semantic_results),
-                    query=q,
-                )
-    except Exception:
-        pass  # Fall through to keyword search
+                if semantic_results:
+                    return SearchResponse(
+                        results=semantic_results[:limit],
+                        total=len(semantic_results),
+                        query=q,
+                    )
+        except Exception:
+            pass  # Fall through to keyword search
 
     # Keyword search fallback
     pattern = f"%{q}%"
