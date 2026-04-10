@@ -13,13 +13,38 @@ import {
 import { searchAll, getModules } from '../api/client';
 import type { SearchResult } from '../types';
 
+const sg = {
+  glass: {
+    background: 'rgba(255,248,240,0.04)',
+    border: '1px solid rgba(139,115,85,0.15)',
+    borderRadius: '12px',
+    backdropFilter: 'blur(20px)',
+  } as React.CSSProperties,
+  input: {
+    background: 'rgba(255,248,240,0.04)',
+    border: '1px solid rgba(139,115,85,0.15)',
+    borderRadius: '8px',
+    color: '#f5f0e8',
+    outline: 'none',
+  } as React.CSSProperties,
+  text: '#f5f0e8',
+  secondary: 'rgba(245,240,232,0.5)',
+  tertiary: 'rgba(245,240,232,0.25)',
+  accent: '#c4956a',
+  accentSoft: 'rgba(196,149,106,0.15)',
+  hover: 'rgba(255,248,240,0.08)',
+  warmBorder: 'rgba(139,115,85,0.15)',
+  serif: "Georgia, 'Times New Roman', serif",
+  overlay: 'rgba(26,23,20,0.8)',
+};
+
 function resultIcon(type: string) {
   switch (type.toLowerCase()) {
-    case 'document': return <FileText className="w-4 h-4 text-blue-400" />;
-    case 'flashcard': return <Layers className="w-4 h-4 text-purple-400" />;
-    case 'question': return <HelpCircle className="w-4 h-4 text-yellow-400" />;
-    case 'concept': return <BookOpen className="w-4 h-4 text-teal" />;
-    default: return <Search className="w-4 h-4 text-gray-400" />;
+    case 'document': return <FileText className="w-4 h-4" style={{ color: sg.accent }} />;
+    case 'flashcard': return <Layers className="w-4 h-4" style={{ color: sg.accent }} />;
+    case 'question': return <HelpCircle className="w-4 h-4" style={{ color: sg.accent }} />;
+    case 'concept': return <BookOpen className="w-4 h-4" style={{ color: sg.accent }} />;
+    default: return <Search className="w-4 h-4" style={{ color: sg.secondary }} />;
   }
 }
 
@@ -63,13 +88,11 @@ export default function SearchModal({ open, onClose }: Props) {
 
   const results = searchData?.results ?? [];
 
-  // Debounce
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300);
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Focus input on open
   useEffect(() => {
     if (open) {
       setQuery('');
@@ -79,7 +102,6 @@ export default function SearchModal({ open, onClose }: Props) {
     }
   }, [open]);
 
-  // Reset selection when results change
   useEffect(() => {
     setSelectedIdx(0);
   }, [results.length]);
@@ -116,7 +138,8 @@ export default function SearchModal({ open, onClose }: Props) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/60"
+          className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+          style={{ background: sg.overlay }}
           onClick={(e) => {
             if (e.target === e.currentTarget) onClose();
           }}
@@ -125,40 +148,57 @@ export default function SearchModal({ open, onClose }: Props) {
             initial={{ opacity: 0, scale: 0.95, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
-            className="w-full max-w-xl bg-navy-light border border-gray-700 rounded-xl shadow-2xl overflow-hidden"
+            className="w-full max-w-xl shadow-2xl overflow-hidden"
+            style={sg.glass}
             onKeyDown={handleKeyDown}
           >
-            {/* Search input */}
-            <div className="flex items-center gap-3 px-4 border-b border-gray-800">
-              <Search className="w-5 h-5 text-gray-500 shrink-0" />
+            <div
+              className="flex items-center gap-3 px-4"
+              style={{ borderBottom: `1px solid ${sg.warmBorder}` }}
+            >
+              <Search className="w-5 h-5 shrink-0" style={{ color: sg.accent }} />
               <input
                 ref={inputRef}
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search concepts, flashcards, questions…"
-                className="flex-1 bg-transparent py-4 text-white placeholder:text-gray-500 focus:outline-none"
+                className="flex-1 py-4"
+                style={{
+                  background: 'transparent',
+                  color: sg.text,
+                  outline: 'none',
+                  border: 'none',
+                  fontFamily: sg.serif,
+                  fontWeight: 300,
+                }}
               />
               <select
                 value={moduleFilter}
                 onChange={(e) => setModuleFilter(e.target.value)}
-                className="bg-navy-lighter border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none"
+                className="px-2 py-1 text-xs"
+                style={sg.input}
               >
                 <option value="">All modules</option>
                 {modules?.map((m) => (
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
-              <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+              <button
+                onClick={onClose}
+                className="transition-colors"
+                style={{ color: sg.secondary }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = sg.text; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = sg.secondary; }}
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Results */}
             {debouncedQuery.length >= 2 && (
               <div className="max-h-80 overflow-y-auto">
                 {results.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-gray-500 text-sm">
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>
                     No results found.
                   </div>
                 ) : (
@@ -167,21 +207,27 @@ export default function SearchModal({ open, onClose }: Props) {
                       <li key={`${result.type}-${result.id}`}>
                         <button
                           onClick={() => handleSelect(result)}
-                          className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors ${
-                            idx === selectedIdx
-                              ? 'bg-teal/10 text-white'
-                              : 'text-gray-300 hover:bg-navy-lighter'
-                          }`}
+                          className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
+                          style={{
+                            background: idx === selectedIdx ? sg.accentSoft : 'transparent',
+                            color: sg.text,
+                          }}
+                          onMouseEnter={(e) => {
+                            if (idx !== selectedIdx) e.currentTarget.style.background = sg.hover;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = idx === selectedIdx ? sg.accentSoft : 'transparent';
+                          }}
                         >
                           <div className="mt-0.5 shrink-0">{resultIcon(result.type)}</div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{result.title}</p>
-                            <p className="text-xs text-gray-500 truncate">{result.snippet}</p>
+                            <p className="text-sm truncate" style={{ color: sg.text, fontWeight: 500 }}>{result.title}</p>
+                            <p className="text-xs truncate" style={{ color: sg.secondary }}>{result.snippet}</p>
                             {result.module_name && (
-                              <p className="text-xs text-gray-600 mt-0.5">{result.module_name}</p>
+                              <p className="text-xs mt-0.5" style={{ color: sg.tertiary }}>{result.module_name}</p>
                             )}
                           </div>
-                          <span className="text-xs text-gray-600 shrink-0 uppercase">{result.type}</span>
+                          <span className="text-xs shrink-0 uppercase" style={{ color: sg.tertiary }}>{result.type}</span>
                         </button>
                       </li>
                     ))}
@@ -190,8 +236,10 @@ export default function SearchModal({ open, onClose }: Props) {
               </div>
             )}
 
-            {/* Hint */}
-            <div className="px-4 py-2 border-t border-gray-800 text-xs text-gray-600 flex items-center gap-4">
+            <div
+              className="px-4 py-2 text-xs flex items-center gap-4"
+              style={{ borderTop: `1px solid ${sg.warmBorder}`, color: sg.tertiary }}
+            >
               <span>↑↓ Navigate</span>
               <span>↵ Open</span>
               <span>Esc Close</span>
