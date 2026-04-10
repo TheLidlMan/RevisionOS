@@ -17,6 +17,9 @@ class Concept(Base):
     definition = Column(Text, nullable=True, default="")
     explanation = Column(Text, nullable=True, default="")
     importance_score = Column(Float, default=0.5)
+    source_document_ids = Column(Text, nullable=True, default="[]")  # JSON array of document IDs
+    related_concept_ids = Column(Text, nullable=True, default="[]")  # JSON array for knowledge graph edges
+    embedding = Column(Text, nullable=True)  # Base64-encoded embedding vector
     created_at = Column(DateTime, default=datetime.utcnow)
 
     module = relationship("Module", back_populates="concepts")

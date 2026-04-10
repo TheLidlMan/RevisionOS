@@ -20,6 +20,8 @@ class Document(Base):
     processed = Column(Boolean, default=False)
     processing_status = Column(String(20), default="pending")  # pending, processing, done, failed
     word_count = Column(Integer, default=0)
+    transcript = Column(Text, nullable=True)  # Whisper transcription output
+    slide_count = Column(Integer, nullable=True)  # For PPTX files
     created_at = Column(DateTime, default=datetime.utcnow)
 
     module = relationship("Module", back_populates="documents")

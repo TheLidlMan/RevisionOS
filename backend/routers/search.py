@@ -23,6 +23,7 @@ class SearchResult(BaseModel):
     id: str
     title: str
     snippet: str = ""
+    score: Optional[float] = None
     module_id: Optional[str] = None
     module_name: Optional[str] = None
 
@@ -64,10 +65,38 @@ def search(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    """Search across concepts, flashcards, and documents using LIKE matching."""
+    """Semantic search across all content. Falls back to keyword search if vectors unavailable."""
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    # Try semantic search first
+    try:
+        from services import vector_service
+        vector_results = vector_service.search(q, top_k=limit)
+        if vector_results:
+            semantic_results: list[SearchResult] = []
+            for vr in vector_results:
+                parts = vr["id"].split(":", 1)
+                if len(parts) != 2:
+                    continue
+                item_type, item_id = parts
+                semantic_results.append(SearchResult(
+                    type=item_type,
+                    id=item_id,
+                    title=vr.get("text", "")[:100],
+                    snippet=vr.get("text", "")[:200],
+                    score=vr["score"],
+                ))
+            if semantic_results:
+                return SearchResponse(
+                    results=semantic_results[:limit],
+                    total=len(semantic_results),
+                    query=q,
+                )
+    except Exception:
+        pass  # Fall through to keyword search
+
+    # Keyword search fallback
     pattern = f"%{q}%"
     results: list[SearchResult] = []
 
