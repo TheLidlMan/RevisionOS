@@ -19,7 +19,7 @@ export default function QuickNotes({ open, onClose }: Props) {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <StickyNote className="w-5 h-5" style={{ color: '#c4956a' }} />
-              <span style={{ fontFamily: "Georgia, serif", color: '#f5f0e8', fontWeight: 600 }}>Quick Notes</span>
+              <span style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600 }}>Quick Notes</span>
             </div>
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}><X className="w-4 h-4" /></button>
           </div>

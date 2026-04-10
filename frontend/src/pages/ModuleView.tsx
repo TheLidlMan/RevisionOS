@@ -148,7 +148,7 @@ export default function ModuleView() {
         />
         <div className="flex-1">
           <h1
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+            style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' }}
             className="text-2xl"
           >
             {mod.name}
@@ -270,7 +270,7 @@ export default function ModuleView() {
           className="p-4 mb-6"
         >
           <p style={{ color: 'rgba(120,180,120,0.9)', fontWeight: 300, fontSize: '0.9rem' }}>
-            ✅ Generated {generateMutation.data.generated} flashcards!
+            Generated {generateMutation.data.generated} flashcards!
           </p>
         </div>
       )}
@@ -287,7 +287,7 @@ export default function ModuleView() {
 
       {/* Documents table */}
       <h2
-        style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+        style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' }}
         className="text-lg mb-4"
       >
         Documents

@@ -92,7 +92,7 @@ export default function WeaknessMap() {
       <div className="flex items-center gap-3 mb-8">
         <Map className="w-6 h-6" style={{ color: '#c4956a' }} />
         <h1
-          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+          style={{ fontFamily: "var(--heading, 'Clash Display', sans-serif)", color: '#f5f0e8', fontWeight: 600 }}
           className="text-2xl"
         >
           Weakness Map
@@ -194,6 +194,16 @@ export default function WeaknessMap() {
                 </span>
                 <TrendIcon trend={concept.trend} />
               </div>
+              {/* Confidence bar */}
+              <div style={{ height: 3, background: 'rgba(255,248,240,0.06)', borderRadius: 2, marginTop: 8 }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.round(concept.confidence_score)}%`,
+                  background: confidenceTextColor(concept.confidence_score),
+                  borderRadius: 2,
+                  transition: 'width 0.4s ease',
+                }} />
+              </div>
               <div style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.75rem' }} className="mt-2">
                 {concept.review_count} reviews
               </div>
@@ -228,7 +238,7 @@ export default function WeaknessMap() {
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2
-                    style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+                    style={{ fontFamily: "var(--heading, 'Clash Display', sans-serif)", color: '#f5f0e8' }}
                     className="text-lg"
                   >
                     Concept Detail
@@ -277,7 +287,7 @@ function ConceptDetailPanel({
     <div className="space-y-6">
       <div>
         <h3
-          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+          style={{ fontFamily: "var(--heading, 'Clash Display', sans-serif)", color: '#f5f0e8', fontWeight: 600 }}
           className="text-xl mb-1"
         >
           {detail.name}

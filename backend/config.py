@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     DAILY_NEW_CARDS_LIMIT: int = 20
     CARDS_PER_DOCUMENT: int = 20
     QUESTIONS_PER_DOCUMENT: int = 10
+    MAX_CARDS_PER_REQUEST: int = 50
+    MAX_QUESTIONS_PER_REQUEST: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
 
@@ -70,6 +72,20 @@ def reload_runtime_settings() -> None:
         if json_key == "groq_api_key" and isinstance(value, str) and "..." in value:
             logger.warning("Ignoring masked Groq API key found in persisted settings")
             continue
+
+        if attr_name == "CARDS_PER_DOCUMENT":
+            try:
+                value = max(1, min(int(value), settings.MAX_CARDS_PER_REQUEST))
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid persisted cards_per_document value: %r", value)
+                continue
+
+        if attr_name == "QUESTIONS_PER_DOCUMENT":
+            try:
+                value = max(1, min(int(value), settings.MAX_QUESTIONS_PER_REQUEST))
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid persisted questions_per_document value: %r", value)
+                continue
 
         setattr(settings, attr_name, value)
 

@@ -17,7 +17,7 @@ const tokens = {
   tertiary: 'rgba(245,240,232,0.25)',
   accent: '#c4956a',
   accentSoft: 'rgba(196,149,106,0.15)',
-  serif: "Georgia, 'Times New Roman', serif",
+  serif: "'Clash Display', sans-serif",
   danger: 'rgba(220,120,100,0.8)',
   success: 'rgba(120,180,120,0.8)',
   hover: 'rgba(255,248,240,0.08)',
@@ -30,6 +30,9 @@ export default function LeaderboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['leaderboard', timeframe],
     queryFn: () => getLeaderboard(timeframe),
+    staleTime: 0,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
   const rankColor = (rank: number) => {

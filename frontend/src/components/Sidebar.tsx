@@ -6,7 +6,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  BookOpen,
+  GraduationCap,
   Map,
   BarChart3,
   Share2,
@@ -14,7 +14,6 @@ import {
   Trophy,
   Users,
   Link2,
-  Palette,
   LogIn,
   LogOut,
   User,
@@ -22,6 +21,7 @@ import {
 import { useAppStore } from '../store';
 import { useAuthStore } from '../store/auth';
 import { getModules } from '../api/client';
+import ThemeToggle from './ThemeToggle';
 
 export default function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useAppStore();
@@ -43,7 +43,6 @@ export default function Sidebar() {
     { to: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
     { to: '/collaboration', icon: Users, label: 'Study Rooms' },
     { to: '/integrations', icon: Link2, label: 'Integrations' },
-    { to: '/themes', icon: Palette, label: 'Theme Preview' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 
@@ -74,23 +73,24 @@ export default function Sidebar() {
           borderBottom: '1px dashed var(--border)',
         }}
       >
-        <BookOpen
+        <GraduationCap
           style={{ width: 28, height: 28, color: 'var(--accent)', flexShrink: 0 }}
         />
         {sidebarOpen && (
           <span
             style={{
-              fontFamily: 'var(--serif)',
+              fontFamily: 'var(--heading)',
               fontSize: 18,
-              fontWeight: 400,
+              fontWeight: 500,
               color: 'var(--text)',
-              letterSpacing: '-0.01em',
+              letterSpacing: '-0.02em',
               whiteSpace: 'nowrap',
             }}
           >
             RevisionOS
           </span>
         )}
+        {sidebarOpen && <ThemeToggle />}
       </div>
 
       {/* Nav links */}

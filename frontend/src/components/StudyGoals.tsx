@@ -22,7 +22,7 @@ export default function StudyGoals() {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Target className="w-4 h-4" style={{ color: '#c4956a' }} />
-          <span style={{ fontFamily: "Georgia, serif", color: '#f5f0e8', fontWeight: 600, fontSize: '0.9rem' }}>Daily Goal</span>
+          <span style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600, fontSize: '0.9rem' }}>Daily Goal</span>
         </div>
         <button onClick={() => { if (editing) { setGoal({ ...goal, target: editVal }); } setEditing(!editing); }} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}>
           {editing ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}

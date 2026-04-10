@@ -102,32 +102,40 @@ def _parse_json_response(text: str) -> list | dict:
 
 
 async def generate_flashcards(text: str, num_cards: int, subject: str) -> list[dict]:
-    """Generate flashcards from text using Groq API."""
+    """Generate fill-in-the-gap flashcards from text using Groq API.
+    
+    All cards are cloze/fill-in-the-blank type where key terms are blanked out.
+    """
     messages = [
         {
             "role": "system",
             "content": (
-                "You are creating high-quality study flashcards following best practices: "
-                "atomic (one fact per card), clear, testable."
+                "You are creating fill-in-the-blank study flashcards. Every card must be a sentence "
+                "or short paragraph with exactly ONE key term, definition, or concept replaced by '___' (three underscores). "
+                "The answer is the missing word or phrase. Focus on terms likely to appear in exams."
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Create {num_cards} flashcards from this {subject} content. Mix of:\n"
-                "- Basic Q&A (most cards)\n"
-                '- Cloze deletions for key terms (format: "The {{{{c1::term}}}} is defined as...")\n'
-                "- Definition cards\n\n"
-                "Focus on: concepts likely to be examined, non-obvious relationships, specific figures/thresholds.\n"
-                "Do NOT create trivial or obvious cards.\n\n"
-                'Return ONLY valid JSON array: [{{"front": "...", "back": "...", "type": "basic"|"cloze", '
-                '"cloze_text": "..." or null, "tags": []}}]\n\n'
+                f"Create {num_cards} fill-in-the-blank flashcards from this {subject} content.\n\n"
+                "Rules:\n"
+                "- Each card has a 'front' field: a sentence with ONE key term replaced by '___'\n"
+                "- Each card has a 'back' field: the missing term/answer\n"
+                "- All cards are type 'CLOZE'\n"
+                "- Focus on: key definitions, important figures/thresholds, relationships between concepts\n"
+                "- Include cards of varying difficulty\n"
+                "- The blanked term should be specific (not 'it' or 'this')\n"
+                "- Do NOT create trivial cards\n\n"
+                "Return ONLY valid JSON array:\n"
+                '[{"front": "The ___ is the process by which...", "back": "osmosis", '
+                '"type": "CLOZE", "concept_name": "topic this relates to", "tags": []}]\n\n'
                 f"Content:\n{text}"
             ),
         },
     ]
 
-    response_text = await _call_groq(messages, max_tokens=4096)
+    response_text = await _call_groq(messages, max_tokens=8192)
     try:
         cards = _parse_json_response(response_text)
         if isinstance(cards, dict) and "cards" in cards:
@@ -138,6 +146,54 @@ async def generate_flashcards(text: str, num_cards: int, subject: str) -> list[d
     except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"Failed to parse flashcard response: {e}")
         return []
+
+
+async def generate_flashcards_chunked(
+    chunks: list[dict],
+    subject: str,
+    cards_per_chunk: int = 25,
+    max_total_cards: Optional[int] = None,
+) -> list[dict]:
+    """Generate flashcards from multiple document chunks.
+    
+    Each chunk generates cards_per_chunk cards, producing massive numbers of cards.
+    """
+    all_cards = []
+    for chunk_info in chunks:
+        remaining_cards = None if max_total_cards is None else max_total_cards - len(all_cards)
+        if remaining_cards is not None and remaining_cards <= 0:
+            break
+
+        chunk_text = chunk_info.get("text", "")
+        if not chunk_text.strip():
+            continue
+        
+        filename = chunk_info.get("filename", "")
+        context = f"From document: {filename}\n\n{chunk_text}" if filename else chunk_text
+        
+        try:
+            requested_cards = cards_per_chunk if remaining_cards is None else min(cards_per_chunk, remaining_cards)
+            cards = await generate_flashcards(context, requested_cards, subject)
+            valid_cards = []
+            for card in cards:
+                if not isinstance(card, dict):
+                    logger.warning(
+                        "Skipping malformed flashcard item for document_id=%s: %r",
+                        chunk_info.get("document_id"),
+                        card,
+                    )
+                    continue
+                card["source_document_id"] = chunk_info.get("document_id")
+                card["source_excerpt"] = chunk_text[:200]
+                valid_cards.append(card)
+            if remaining_cards is not None:
+                valid_cards = valid_cards[:remaining_cards]
+            all_cards.extend(valid_cards)
+        except Exception as e:
+            logger.warning(f"Failed to generate cards for chunk: {e}")
+            continue
+    
+    return all_cards
 
 
 async def generate_quiz_questions(
