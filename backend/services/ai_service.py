@@ -174,12 +174,21 @@ async def generate_flashcards_chunked(
         try:
             requested_cards = cards_per_chunk if remaining_cards is None else min(cards_per_chunk, remaining_cards)
             cards = await generate_flashcards(context, requested_cards, subject)
+            valid_cards = []
             for card in cards:
+                if not isinstance(card, dict):
+                    logger.warning(
+                        "Skipping malformed flashcard item for document_id=%s: %r",
+                        chunk_info.get("document_id"),
+                        card,
+                    )
+                    continue
                 card["source_document_id"] = chunk_info.get("document_id")
                 card["source_excerpt"] = chunk_text[:200]
+                valid_cards.append(card)
             if remaining_cards is not None:
-                cards = cards[:remaining_cards]
-            all_cards.extend(cards)
+                valid_cards = valid_cards[:remaining_cards]
+            all_cards.extend(valid_cards)
         except Exception as e:
             logger.warning(f"Failed to generate cards for chunk: {e}")
             continue

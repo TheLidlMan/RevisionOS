@@ -79,7 +79,7 @@ export default function Sidebar() {
         {sidebarOpen && (
           <span
             style={{
-              fontFamily: "'Clash Display', sans-serif",
+              fontFamily: 'var(--heading)',
               fontSize: 18,
               fontWeight: 500,
               color: 'var(--text)',

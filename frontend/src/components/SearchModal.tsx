@@ -34,7 +34,7 @@ const sg = {
   accentSoft: 'rgba(196,149,106,0.15)',
   hover: 'rgba(255,248,240,0.08)',
   warmBorder: 'rgba(139,115,85,0.15)',
-  serif: "'Clash Display', sans-serif",
+  displayFont: "'Clash Display', sans-serif",
   overlay: 'rgba(26,23,20,0.8)',
 };
 
@@ -169,7 +169,7 @@ export default function SearchModal({ open, onClose }: Props) {
                   color: sg.text,
                   outline: 'none',
                   border: 'none',
-                  fontFamily: sg.serif,
+                  fontFamily: sg.displayFont,
                   fontWeight: 300,
                 }}
               />

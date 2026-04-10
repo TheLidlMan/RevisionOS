@@ -99,26 +99,44 @@ def search_documents(
 ) -> list[dict]:
     """Unified search interface supporting semantic, keyword, and exact search."""
     if search_type == "semantic":
-        return vector_service.search_semantic(db, query, top_k=top_k, user_id=user_id)
+        return vector_service.search_semantic(
+            db,
+            query,
+            top_k=top_k,
+            user_id=user_id,
+            module_id=module_id,
+        )
     elif search_type == "keyword":
         return vector_service.search_keyword(db, query, top_k=top_k, user_id=user_id, module_id=module_id)
     elif search_type == "exact":
         return vector_service.search_exact(db, query, top_k=top_k, user_id=user_id, module_id=module_id)
     else:
         # Hybrid: try semantic first, fall back to keyword
-        results = vector_service.search_semantic(db, query, top_k=top_k, user_id=user_id)
+        results = vector_service.search_semantic(
+            db,
+            query,
+            top_k=top_k,
+            user_id=user_id,
+            module_id=module_id,
+        )
         if not results:
             results = vector_service.search_keyword(db, query, top_k=top_k, user_id=user_id, module_id=module_id)
         return results
 
 
-def build_rag_context(db: Session, module_id: str, query: Optional[str] = None, max_chars: int = 60000) -> str:
+def build_rag_context(
+    db: Session,
+    module_id: str,
+    query: Optional[str] = None,
+    max_chars: int = 60000,
+    user_id: Optional[str] = None,
+) -> str:
     """Build a RAG context string for LLM generation.
 
     Includes document summaries and optionally retrieves relevant chunks
     based on a query.
     """
-    summaries = get_document_summaries(db, module_id)
+    summaries = get_document_summaries(db, module_id, user_id=user_id)
 
     context_parts = ["## Available Documents\n"]
     for s in summaries:
@@ -126,7 +144,13 @@ def build_rag_context(db: Session, module_id: str, query: Optional[str] = None, 
 
     if query:
         # Retrieve relevant chunks via semantic search
-        results = vector_service.search_semantic(db, query, top_k=5)
+        results = vector_service.search_semantic(
+            db,
+            query,
+            top_k=5,
+            user_id=user_id,
+            module_id=module_id,
+        )
         if results:
             context_parts.append("\n## Relevant Content\n")
             for r in results:

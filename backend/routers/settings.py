@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from config import reload_runtime_settings
+from config import reload_runtime_settings, settings
 from services.ai_service import validate_api_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -93,6 +93,17 @@ def get_settings():
 def update_settings(body: SettingsUpdate):
     current = _load_settings()
     update_data = body.model_dump(exclude_none=True)
+
+    if "cards_per_document" in update_data:
+        update_data["cards_per_document"] = max(
+            1,
+            min(int(update_data["cards_per_document"]), settings.MAX_CARDS_PER_REQUEST),
+        )
+    if "questions_per_document" in update_data:
+        update_data["questions_per_document"] = max(
+            1,
+            min(int(update_data["questions_per_document"]), settings.MAX_QUESTIONS_PER_REQUEST),
+        )
 
     current.update(update_data)
     _save_settings(current)

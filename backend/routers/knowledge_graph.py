@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from models.concept import Concept
@@ -69,7 +69,12 @@ def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: Opt
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    concepts = db.query(Concept).filter(Concept.module_id == module_id).all()
+    concepts = (
+        db.query(Concept)
+        .options(joinedload(Concept.flashcards), joinedload(Concept.quiz_questions))
+        .filter(Concept.module_id == module_id)
+        .all()
+    )
     if not concepts:
         return KnowledgeGraphResponse(nodes=[], edges=[])
 

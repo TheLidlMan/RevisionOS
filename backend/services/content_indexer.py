@@ -1,17 +1,33 @@
-import json
 import logging
 import uuid
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from config import settings
 from models.concept import Concept
 from models.document import Document
 from services import ai_service
 from services import vector_service
-from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _concept_path(name: str, parent_path: Optional[str] = None) -> str:
+    return f"{parent_path}/{name}" if parent_path else name
+
+
+def _register_concept_path(
+    path_to_id: dict[str, str],
+    name_to_paths: dict[str, list[str]],
+    path: str,
+    concept_id: str,
+) -> None:
+    path_to_id[path] = concept_id
+    concept_name = path.rsplit("/", 1)[-1]
+    candidates = name_to_paths.setdefault(concept_name, [])
+    if path not in candidates:
+        candidates.append(path)
 
 
 async def summarize_document(document_id: str, db: Session) -> Optional[str]:
@@ -52,16 +68,16 @@ async def summarize_document(document_id: str, db: Session) -> Optional[str]:
         ]
         summary = await ai_service._call_groq(messages, max_tokens=1024)
         doc.summary = summary.strip()
-        db.commit()
 
-        # Embed the summary for semantic search
         emb = vector_service.embed_text(f"{doc.filename}: {doc.summary}")
         if emb:
             vector_service.store_embedding(db, "documents", doc.id, emb)
 
+        db.commit()
         return doc.summary
-    except Exception as e:
-        logger.error(f"Failed to summarize document {document_id}: {e}")
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to summarize document %s: %s", document_id, exc)
         return None
 
 
@@ -77,7 +93,6 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
     if not settings.GROQ_API_KEY:
         return []
 
-    # Generate summary first
     await summarize_document(document_id, db)
 
     text = doc.raw_text
@@ -88,94 +103,48 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
     try:
         topics = await extract_topics_hierarchical(text, doc.module_id)
 
-        created_concepts = []
-        parent_map = {}  # name -> concept id
+        created_concepts: list[dict] = []
+        created_ids: set[str] = set()
+        concept_entities: dict[str, Concept] = {}
+        path_to_id: dict[str, str] = {}
+        name_to_paths: dict[str, list[str]] = {}
 
-        # First pass: create/update top-level topics
-        for topic in topics:
-            if topic.get("parent"):
-                continue  # Handle children in second pass
+        def remember_concept(concept: Concept, is_new: bool) -> None:
+            concept_entities[concept.id] = concept
+            if concept.id in created_ids:
+                return
+            created_ids.add(concept.id)
+            created_concepts.append({
+                "id": concept.id,
+                "name": concept.name,
+                "is_new": is_new,
+            })
 
-            existing = (
-                db.query(Concept)
-                .filter(
-                    Concept.module_id == doc.module_id,
-                    Concept.name == topic["name"],
-                )
-                .first()
+        def upsert_topic(topic: dict, parent_id: Optional[str], parent_path: Optional[str]) -> None:
+            query = db.query(Concept).filter(
+                Concept.module_id == doc.module_id,
+                Concept.name == topic["name"],
             )
-
-            if existing:
-                if topic.get("definition") and not existing.definition:
-                    existing.definition = topic["definition"]
-                if topic.get("explanation") and not existing.explanation:
-                    existing.explanation = topic["explanation"]
-                if topic.get("importance_score"):
-                    existing.importance_score = max(
-                        existing.importance_score, topic["importance_score"]
-                    )
-                existing.order_index = topic.get("order_index", 0)
-                db.commit()
-                parent_map[topic["name"]] = existing.id
-                created_concepts.append({
-                    "id": existing.id,
-                    "name": existing.name,
-                    "is_new": False,
-                })
+            if parent_id is None:
+                query = query.filter(Concept.parent_concept_id.is_(None))
             else:
-                concept = Concept(
-                    id=str(uuid.uuid4()),
-                    module_id=doc.module_id,
-                    name=topic["name"],
-                    definition=topic.get("definition", ""),
-                    explanation=topic.get("explanation", ""),
-                    importance_score=topic.get("importance_score", 0.5),
-                    order_index=topic.get("order_index", 0),
-                    user_id=doc.user_id,
-                )
-                db.add(concept)
-                db.flush()
-                parent_map[topic["name"]] = concept.id
-                created_concepts.append({
-                    "id": concept.id,
-                    "name": concept.name,
-                    "is_new": True,
-                })
+                query = query.filter(Concept.parent_concept_id == parent_id)
 
-        # Second pass: create/update child topics
-        for topic in topics:
-            parent_name = topic.get("parent")
-            if not parent_name:
-                continue
-
-            parent_id = parent_map.get(parent_name)
-
-            existing = (
-                db.query(Concept)
-                .filter(
-                    Concept.module_id == doc.module_id,
-                    Concept.name == topic["name"],
-                )
-                .first()
-            )
-
+            existing = query.first()
             if existing:
                 if topic.get("definition") and not existing.definition:
                     existing.definition = topic["definition"]
                 if topic.get("explanation") and not existing.explanation:
                     existing.explanation = topic["explanation"]
-                if topic.get("importance_score"):
+                if topic.get("importance_score") is not None:
                     existing.importance_score = max(
-                        existing.importance_score, topic["importance_score"]
+                        existing.importance_score,
+                        topic["importance_score"],
                     )
                 existing.parent_concept_id = parent_id
                 existing.order_index = topic.get("order_index", 0)
-                parent_map[topic["name"]] = existing.id
-                created_concepts.append({
-                    "id": existing.id,
-                    "name": existing.name,
-                    "is_new": False,
-                })
+                concept = existing
+                is_new = False
             else:
                 concept = Concept(
                     id=str(uuid.uuid4()),
@@ -189,32 +158,68 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
                     user_id=doc.user_id,
                 )
                 db.add(concept)
-                db.flush()
-                parent_map[topic["name"]] = concept.id
-                created_concepts.append({
-                    "id": concept.id,
-                    "name": concept.name,
-                    "is_new": True,
-                })
+                is_new = True
+
+            db.flush()
+            remember_concept(concept, is_new)
+            _register_concept_path(
+                path_to_id,
+                name_to_paths,
+                _concept_path(topic["name"], parent_path),
+                concept.id,
+            )
+
+        for topic in topics:
+            if topic.get("parent"):
+                continue
+            upsert_topic(topic, parent_id=None, parent_path=None)
+
+        pending_topics = [topic for topic in topics if topic.get("parent")]
+        max_iterations = max(1, len(pending_topics))
+        for _ in range(max_iterations):
+            if not pending_topics:
+                break
+
+            next_pending = []
+            resolved_count = 0
+            for topic in pending_topics:
+                parent_name = topic.get("parent")
+                parent_paths = name_to_paths.get(parent_name or "", [])
+                if len(parent_paths) != 1:
+                    next_pending.append(topic)
+                    continue
+
+                parent_path = parent_paths[0]
+                parent_id = path_to_id.get(parent_path)
+                if not parent_id:
+                    next_pending.append(topic)
+                    continue
+
+                upsert_topic(topic, parent_id=parent_id, parent_path=parent_path)
+                resolved_count += 1
+
+            pending_topics = next_pending
+            if resolved_count == 0:
+                break
+
+        if pending_topics:
+            logger.warning(
+                "Unresolved topic hierarchy for document %s: %s",
+                document_id,
+                [topic.get("name") for topic in pending_topics],
+            )
+
+        for concept in concept_entities.values():
+            text_for_embedding = f"{concept.name}: {concept.definition or ''} {concept.explanation or ''}"
+            emb = vector_service.embed_text(text_for_embedding)
+            if emb:
+                vector_service.store_embedding(db, "concepts", concept.id, emb)
 
         db.commit()
-
-        # Embed all concepts
-        for concept_info in created_concepts:
-            c = db.query(Concept).filter(Concept.id == concept_info["id"]).first()
-            if c:
-                txt = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
-                emb = vector_service.embed_text(txt)
-                if emb:
-                    vector_service.store_embedding(db, "concepts", c.id, emb, commit=False)
-
-        if created_concepts:
-            db.commit()
-
         return created_concepts
-
-    except Exception as e:
-        logger.error(f"Failed to index document {document_id}: {e}")
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to index document %s: %s", document_id, exc)
         return []
 
 
@@ -236,7 +241,7 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
                 "For each topic provide:\n"
                 "- name: Short specific name\n"
                 "- definition: 1-2 sentence definition\n"
-                "- explanation: Brief context\n"  
+                "- explanation: Brief context\n"
                 "- importance_score: 0.0-1.0 (exam likelihood)\n"
                 "- parent: The name of the parent topic (null for top-level topics)\n"
                 "- order_index: Integer ordering within its level (0-based)\n\n"
@@ -262,31 +267,53 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
             topics = [topics]
 
         cleaned = []
-        for i, t in enumerate(topics):
-            if isinstance(t, dict) and t.get("name"):
+        for i, topic in enumerate(topics):
+            try:
+                if not isinstance(topic, dict):
+                    logger.warning("Skipping non-dict topic item at index %s: %r", i, topic)
+                    continue
+
+                name = str(topic.get("name", "")).strip()
+                if not name:
+                    logger.warning("Skipping topic item with missing name at index %s", i)
+                    continue
+
+                try:
+                    importance_score = float(topic.get("importance_score", 0.5))
+                except (TypeError, ValueError):
+                    importance_score = 0.5
+                importance_score = min(max(importance_score, 0.0), 1.0)
+
+                try:
+                    order_index = int(topic.get("order_index", i))
+                except (TypeError, ValueError):
+                    order_index = i
+
+                parent_value = topic.get("parent")
+                parent_name = str(parent_value).strip()[:200] if parent_value else None
+
                 cleaned.append({
-                    "name": str(t["name"])[:200],
-                    "definition": str(t.get("definition", ""))[:500],
-                    "explanation": str(t.get("explanation", ""))[:500],
-                    "importance_score": min(
-                        max(float(t.get("importance_score", 0.5)), 0.0), 1.0
-                    ),
-                    "parent": t.get("parent") if t.get("parent") else None,
-                    "order_index": int(t.get("order_index", i)),
+                    "name": name[:200],
+                    "definition": str(topic.get("definition", ""))[:500],
+                    "explanation": str(topic.get("explanation", ""))[:500],
+                    "importance_score": importance_score,
+                    "parent": parent_name or None,
+                    "order_index": order_index,
                 })
+            except Exception as item_exc:
+                logger.warning("Skipping malformed topic item at index %s: %s", i, item_exc)
+                continue
         return cleaned
-    except Exception as e:
-        logger.error(f"Failed to parse topic extraction response: {e}")
+    except Exception as exc:
+        logger.error("Failed to parse topic extraction response: %s", exc)
         return []
 
 
-# Legacy function for backward compatibility
 async def extract_topics_from_text(text: str, module_id: str = "") -> list[dict]:
     """Use AI to extract topics from text (legacy flat list)."""
     topics = await extract_topics_hierarchical(text, module_id)
-    # Flatten: remove parent field
-    for t in topics:
-        t.pop("parent", None)
+    for topic in topics:
+        topic.pop("parent", None)
     return topics
 
 
@@ -309,21 +336,21 @@ async def generate_content_map(module_id: str, db: Session) -> dict:
     from models.quiz_question import QuizQuestion
 
     topics = []
-    for c in concepts:
+    for concept in concepts:
         flashcard_count = (
-            db.query(Flashcard).filter(Flashcard.concept_id == c.id).count()
+            db.query(Flashcard).filter(Flashcard.concept_id == concept.id).count()
         )
         question_count = (
-            db.query(QuizQuestion).filter(QuizQuestion.concept_id == c.id).count()
+            db.query(QuizQuestion).filter(QuizQuestion.concept_id == concept.id).count()
         )
 
         topics.append({
-            "id": c.id,
-            "name": c.name,
-            "definition": c.definition or "",
-            "importance_score": c.importance_score,
-            "parent_id": c.parent_concept_id,
-            "order_index": c.order_index,
+            "id": concept.id,
+            "name": concept.name,
+            "definition": concept.definition or "",
+            "importance_score": concept.importance_score,
+            "parent_id": concept.parent_concept_id,
+            "order_index": concept.order_index,
             "flashcard_count": flashcard_count,
             "question_count": question_count,
             "has_content": flashcard_count > 0 or question_count > 0,
@@ -333,6 +360,6 @@ async def generate_content_map(module_id: str, db: Session) -> dict:
         "module_id": module_id,
         "topics": topics,
         "total_topics": len(topics),
-        "covered_topics": sum(1 for t in topics if t["has_content"]),
-        "uncovered_topics": sum(1 for t in topics if not t["has_content"]),
+        "covered_topics": sum(1 for topic in topics if topic["has_content"]),
+        "uncovered_topics": sum(1 for topic in topics if not topic["has_content"]),
     }

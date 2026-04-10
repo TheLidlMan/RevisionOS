@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -21,6 +22,8 @@ from services import ai_service
 from services.auth_service import get_current_user
 
 router = APIRouter(tags=["quizzes"])
+logger = logging.getLogger(__name__)
+_quiz_generation_locks: dict[str, asyncio.Lock] = {}
 
 
 # ---------- Pydantic schemas ----------
@@ -176,6 +179,45 @@ def _question_for_quiz(q: QuizQuestion) -> QuestionForQuiz:
     )
 
 
+def _normalize_question_type(value: Optional[str], default: str = "MCQ") -> str:
+    normalized = (value or default).strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "MCQ": "MCQ",
+        "MULTIPLE_CHOICE": "MCQ",
+        "MULTIPLECHOICE": "MCQ",
+        "SHORT_ANSWER": "SHORT_ANSWER",
+        "SHORTANSWER": "SHORT_ANSWER",
+        "TRUE_FALSE": "TRUE_FALSE",
+        "TRUEFALSE": "TRUE_FALSE",
+        "FILL_BLANK": "FILL_BLANK",
+        "FILL_IN_THE_BLANK": "FILL_BLANK",
+        "FILLINBLANK": "FILL_BLANK",
+        "EXAM_STYLE": "EXAM_STYLE",
+        "EXAM": "EXAM_STYLE",
+    }
+    return aliases.get(normalized, default)
+
+
+def _normalize_question_difficulty(value: Optional[str], default: str = "MEDIUM") -> str:
+    normalized = (value or default).strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "EASY": "EASY",
+        "MEDIUM": "MEDIUM",
+        "HARD": "HARD",
+        "EXAM": "EXAM",
+        "EXAM_STYLE": "EXAM",
+    }
+    return aliases.get(normalized, default)
+
+
+def _quiz_generation_lock(module_id: str) -> asyncio.Lock:
+    lock = _quiz_generation_locks.get(module_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _quiz_generation_locks[module_id] = lock
+    return lock
+
+
 # ---------- Endpoints ----------
 
 @router.get("/api/questions", response_model=list[QuestionResponse])
@@ -218,9 +260,15 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
     if len(all_text) > max_chars:
         all_text = all_text[:max_chars]
 
+    num_questions = min(
+        max(1, body.num_questions),
+        settings.QUESTIONS_PER_DOCUMENT,
+        settings.MAX_QUESTIONS_PER_REQUEST,
+    )
+
     generated = await ai_service.generate_quiz_questions(
         text=all_text,
-        num_questions=body.num_questions,
+        num_questions=num_questions,
         question_types=body.question_types,
         difficulty=body.difficulty,
         subject=module.name,
@@ -228,16 +276,12 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
     created_questions = []
     for qdata in generated:
-        q_type = qdata.get("type", qdata.get("question_type", "MCQ")).upper()
-        if q_type not in ("MCQ", "SHORT_ANSWER", "TRUE_FALSE", "FILL_BLANK", "EXAM_STYLE"):
-            q_type = "MCQ"
+        q_type = _normalize_question_type(qdata.get("type", qdata.get("question_type")), default="MCQ")
 
         options = qdata.get("options")
         options_json = json.dumps(options) if options else None
 
-        diff = qdata.get("difficulty", body.difficulty).upper()
-        if diff not in ("EASY", "MEDIUM", "HARD", "EXAM"):
-            diff = "MEDIUM"
+        diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
 
         question = QuizQuestion(
             module_id=body.module_id,
@@ -472,50 +516,75 @@ def get_session_results(session_id: str, db: Session = Depends(get_db), user: Op
 async def _generate_quiz_for_module(module_id: str, user_id: str = None):
     """Generate quiz questions for a module in the background."""
     from database import SessionLocal
-    db = SessionLocal()
-    try:
-        module = db.query(Module).filter(Module.id == module_id).first()
-        if not module:
-            return
+    async with _quiz_generation_lock(module_id):
+        db = SessionLocal()
+        try:
+            module = db.query(Module).filter(Module.id == module_id).first()
+            if not module:
+                return
 
-        docs = db.query(Document).filter(
-            Document.module_id == module_id,
-            Document.processing_status == "done",
-        ).all()
-        if not docs:
-            return
+            docs = db.query(Document).filter(
+                Document.module_id == module_id,
+                Document.processing_status == "done",
+            ).all()
+            if not docs:
+                return
 
-        combined_text = "\n\n".join(d.raw_text for d in docs if d.raw_text)
-        if not combined_text.strip():
-            return
+            combined_text = "\n\n".join(d.raw_text for d in docs if d.raw_text)
+            if not combined_text.strip():
+                return
 
-        questions = await ai_service.generate_quiz_questions(
-            text=combined_text,
-            num_questions=settings.QUESTIONS_PER_DOCUMENT,
-            question_types=["MCQ"],
-            difficulty="MEDIUM",
-            subject=module.name,
-        )
-
-        for q_data in questions:
-            q = QuizQuestion(
-                id=str(uuid.uuid4()),
-                module_id=module_id,
-                question_text=q_data.get("question_text", ""),
-                question_type=q_data.get("question_type", "multiple_choice"),
-                options=json.dumps(q_data.get("options", [])),
-                correct_answer=q_data.get("correct_answer", ""),
-                explanation=q_data.get("explanation", ""),
-                difficulty=q_data.get("difficulty", "medium"),
-                source_document_id=docs[0].id if docs else None,
-                user_id=user_id,
+            question_types = ["MCQ"]
+            difficulty = "MEDIUM"
+            num_questions = min(settings.QUESTIONS_PER_DOCUMENT, settings.MAX_QUESTIONS_PER_REQUEST)
+            questions = await ai_service.generate_quiz_questions(
+                combined_text,
+                num_questions,
+                question_types,
+                difficulty,
+                subject=module.name,
             )
-            db.add(q)
-        db.commit()
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
+
+            normalized_questions: list[QuizQuestion] = []
+            for q_data in questions:
+                if not isinstance(q_data, dict):
+                    logger.debug("Skipping malformed background quiz payload for module %s: %r", module_id, q_data)
+                    continue
+
+                question_text = q_data.get("question_text", q_data.get("question", ""))
+                correct_answer = q_data.get("correct_answer", "")
+                if not question_text or not correct_answer:
+                    continue
+
+                options = q_data.get("options")
+                options_json = json.dumps(options) if isinstance(options, list) and options else None
+                normalized_questions.append(
+                    QuizQuestion(
+                        id=str(uuid.uuid4()),
+                        module_id=module_id,
+                        question_text=question_text,
+                        question_type=_normalize_question_type(q_data.get("type", q_data.get("question_type")), default="MCQ"),
+                        options=options_json,
+                        correct_answer=correct_answer,
+                        explanation=q_data.get("explanation", ""),
+                        difficulty=_normalize_question_difficulty(q_data.get("difficulty", difficulty), default="MEDIUM"),
+                        source_document_id=docs[0].id if docs else None,
+                        user_id=user_id,
+                    )
+                )
+
+            if not normalized_questions:
+                return
+
+            db.query(QuizQuestion).filter(QuizQuestion.module_id == module_id).delete(synchronize_session=False)
+            for question in normalized_questions:
+                db.add(question)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Background quiz generation failed for module %s: %s", module_id, exc)
+        finally:
+            db.close()
 
 
 async def _generate_next_quiz_background(module_id: str, completed_session_id: str):

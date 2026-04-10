@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -17,6 +18,7 @@ from services.auth_service import get_current_user
 from models.user import User
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
 
 # ---------- Pydantic schemas ----------
 
@@ -66,9 +68,9 @@ def _get_file_type(filename: str) -> str:
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     module_id: str = Form(...),
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
@@ -162,11 +164,11 @@ async def upload_document(
         try:
             from services.content_indexer import index_document
             await index_document(doc.id, db)
-        except Exception:
-            pass  # Non-critical, indexing can be re-triggered
+        except Exception as exc:
+            logger.exception("Document indexing failed for doc_id=%s: %s", doc.id, exc)
 
         # Pre-generate quiz questions in background
-        if background_tasks and settings.GROQ_API_KEY:
+        if settings.GROQ_API_KEY:
             from routers.quizzes import _run_generate_quiz_for_module_background
             background_tasks.add_task(
                 _run_generate_quiz_for_module_background,

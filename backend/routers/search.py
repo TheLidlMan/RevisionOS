@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +15,7 @@ from services.auth_service import get_current_user
 from models.user import User
 
 router = APIRouter(prefix="/api/search", tags=["search"])
+logger = logging.getLogger(__name__)
 
 
 # ---------- Pydantic schemas ----------
@@ -108,6 +110,7 @@ def search(
                     q,
                     top_k=limit,
                     user_id=user.id if user else None,
+                    module_id=module_id,
                 )
 
             if vector_results:
@@ -188,8 +191,13 @@ def search(
                         total=len(semantic_results),
                         query=q,
                     )
-        except Exception:
-            pass  # Fall through to keyword search
+        except ValueError as exc:
+            logger.warning("Vector search failed for query=%r; falling back to keyword search: %s", q, exc)
+        except RuntimeError as exc:
+            logger.warning("Vector search unavailable for query=%r; falling back to keyword search: %s", q, exc)
+        except Exception as exc:
+            logger.exception("Unexpected vector search failure for query=%r: %s", q, exc)
+            raise
 
     # Keyword search fallback
     pattern = f"%{q}%"

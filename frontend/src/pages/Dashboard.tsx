@@ -59,6 +59,9 @@ export default function Dashboard() {
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics'],
     queryFn: getAnalyticsOverview,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const { data: modules, isLoading: modulesLoading } = useQuery({

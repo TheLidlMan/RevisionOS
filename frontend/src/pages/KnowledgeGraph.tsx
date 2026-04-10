@@ -30,6 +30,7 @@ export default function KnowledgeGraph() {
   const [moduleId, setModuleId] = useState(preModule);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -44,11 +45,12 @@ export default function KnowledgeGraph() {
 
   const layout = useMemo(() => {
     if (!graph || graph.nodes.length === 0) return { positions: new Map<string, { x: number; y: number }>(), width: 900, height: 700 };
-    const nodes = graph.nodes;
+    const nodes = [...graph.nodes].sort(
+      (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || a.name.localeCompare(b.name),
+    );
     const positions = new Map<string, { x: number; y: number }>();
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
 
-    // Separate root nodes (no parent) from children
-    const roots = nodes.filter((n) => !n.parent_id);
     const childrenMap = new Map<string, GraphNode[]>();
     nodes.forEach((n) => {
       if (n.parent_id) {
@@ -57,37 +59,79 @@ export default function KnowledgeGraph() {
         childrenMap.set(n.parent_id, existing);
       }
     });
-
-    // Layout: roots in a row, children clustered below their parent
-    const width = 900;
-    const height = 700;
-    const rootY = 120;
-    const childY = 320;
-    const rootSpacing = width / (roots.length + 1);
-
-    roots.forEach((root, i) => {
-      const x = rootSpacing * (i + 1);
-      positions.set(root.id, { x, y: rootY });
-
-      const children = childrenMap.get(root.id) || [];
-      if (children.length > 0) {
-        const childSpacing = Math.min(100, rootSpacing / (children.length + 1));
-        const startX = x - (children.length - 1) * childSpacing / 2;
-        children.forEach((child, j) => {
-          positions.set(child.id, { x: startX + j * childSpacing, y: childY + (j % 2) * 40 });
-        });
-      }
+    childrenMap.forEach((children) => {
+      children.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || a.name.localeCompare(b.name));
     });
 
-    // Place any orphan children that reference non-existent parents
-    const unplaced = nodes.filter((n) => !positions.has(n.id));
-    if (unplaced.length > 0) {
-      const orphanY = 520;
-      const orphanSpacing = width / (unplaced.length + 1);
-      unplaced.forEach((n, i) => {
-        positions.set(n.id, { x: orphanSpacing * (i + 1), y: orphanY });
+    const roots = nodes.filter((node) => !node.parent_id || !nodeMap.has(node.parent_id));
+    const orderedRoots = roots.length > 0 ? roots : nodes;
+
+    const subtreeWidths = new Map<string, number>();
+    const activePath = new Set<string>();
+    let maxDepth = 0;
+
+    const measureSubtree = (node: GraphNode): number => {
+      if (subtreeWidths.has(node.id)) {
+        return subtreeWidths.get(node.id)!;
+      }
+      if (activePath.has(node.id)) {
+        return 1;
+      }
+
+      activePath.add(node.id);
+      const children = childrenMap.get(node.id) || [];
+      const width = children.length > 0
+        ? children.reduce((sum, child) => sum + measureSubtree(child), 0)
+        : 1;
+      activePath.delete(node.id);
+      subtreeWidths.set(node.id, Math.max(1, width));
+      return subtreeWidths.get(node.id)!;
+    };
+
+    const unitWidth = 120;
+    const levelHeight = 150;
+    const marginX = 90;
+    const marginY = 110;
+
+    const placeSubtree = (node: GraphNode, startUnit: number, depth: number): number => {
+      const widthUnits = subtreeWidths.get(node.id) ?? 1;
+      const centerUnit = startUnit + widthUnits / 2;
+      positions.set(node.id, {
+        x: marginX + centerUnit * unitWidth,
+        y: marginY + depth * levelHeight,
       });
-    }
+      maxDepth = Math.max(maxDepth, depth);
+
+      let cursor = startUnit;
+      for (const child of childrenMap.get(node.id) || []) {
+        const childWidth = subtreeWidths.get(child.id) ?? 1;
+        placeSubtree(child, cursor, depth + 1);
+        cursor += childWidth;
+      }
+
+      return widthUnits;
+    };
+
+    let cursor = 0;
+    orderedRoots.forEach((root) => {
+      measureSubtree(root);
+      const consumed = placeSubtree(root, cursor, 0);
+      cursor += consumed + 0.5;
+    });
+
+    const unplaced = nodes.filter((node) => !positions.has(node.id));
+    let fallbackCursor = cursor;
+    unplaced.forEach((node) => {
+      positions.set(node.id, {
+        x: marginX + (fallbackCursor + 0.5) * unitWidth,
+        y: marginY + (maxDepth + 1) * levelHeight,
+      });
+      fallbackCursor += 1.5;
+    });
+
+    const totalUnits = Math.max(1, fallbackCursor, cursor);
+    const width = Math.max(900, marginX * 2 + totalUnits * unitWidth);
+    const height = Math.max(700, marginY * 2 + (maxDepth + 2) * levelHeight);
 
     return { positions, width, height };
   }, [graph]);
@@ -180,26 +224,56 @@ export default function KnowledgeGraph() {
               const r = nodeRadius(node);
               const isHovered = hoveredNode?.id === node.id;
               const isSelected = selectedNode?.id === node.id;
+              const isFocused = focusedNodeId === node.id;
               const isRoot = !node.parent_id;
               return (
                 <g
                   key={node.id}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Inspect node ${node.name || node.id}`}
                   onMouseEnter={() => setHoveredNode(node)}
                   onMouseLeave={() => setHoveredNode(null)}
+                  onFocus={() => {
+                    setHoveredNode(node);
+                    setFocusedNodeId(node.id);
+                  }}
+                  onBlur={() => {
+                    setHoveredNode(null);
+                    setFocusedNodeId((current) => (current === node.id ? null : current));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedNode(node);
+                    }
+                  }}
                   onClick={() => setSelectedNode(node)}
                   className="cursor-pointer"
-                  style={{ transition: 'transform 0.2s' }}
+                  style={{ transition: 'transform 0.2s', outline: 'none' }}
                 >
                   {/* Glow effect for hovered/selected */}
-                  {(isHovered || isSelected) && (
+                  {(isHovered || isSelected || isFocused) && (
                     <circle cx={pos.x} cy={pos.y} r={r + 6} fill="none" stroke={masteryColor(node.mastery)} strokeWidth={2} opacity={0.3} />
+                  )}
+                  {isFocused && (
+                    <circle
+                      cx={pos.x}
+                      cy={pos.y}
+                      r={r + 10}
+                      fill="none"
+                      stroke="var(--text)"
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
+                      opacity={0.9}
+                    />
                   )}
                   <circle
                     cx={pos.x}
                     cy={pos.y}
                     r={r}
                     fill={masteryColor(node.mastery)}
-                    opacity={isHovered || isSelected ? 1 : 0.75}
+                    opacity={isHovered || isSelected || isFocused ? 1 : 0.75}
                     stroke={isRoot ? 'var(--text)' : 'transparent'}
                     strokeWidth={isRoot ? 1.5 : 0}
                   />

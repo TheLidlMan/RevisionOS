@@ -15,7 +15,7 @@ const PRESET_COLORS = [
 
 const glass = { background: 'rgba(255,248,240,0.04)', border: '1px solid rgba(139,115,85,0.15)', borderRadius: '12px', backdropFilter: 'blur(20px)' } as const;
 const inputStyle: React.CSSProperties = { background: 'rgba(255,248,240,0.04)', border: '1px solid rgba(139,115,85,0.15)', borderRadius: '8px', color: '#f5f0e8', outline: 'none', fontWeight: 300, width: '100%', padding: '0.5rem 0.75rem' };
-const serif: React.CSSProperties = { fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' };
+const headingFont: React.CSSProperties = { fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' };
 
 export default function CreateModuleModal({ open, onClose }: Props) {
   const [name, setName] = useState('');
@@ -39,7 +39,7 @@ export default function CreateModuleModal({ open, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(26,23,20,0.8)' }}>
       <div className="relative w-full max-w-md mx-4 p-6" style={glass}>
         <div className="flex items-center justify-between mb-6">
-          <h2 style={{ ...serif, fontSize: '1.25rem', fontWeight: 700 }}>Create Module</h2>
+          <h2 style={{ ...headingFont, fontSize: '1.25rem', fontWeight: 700 }}>Create Module</h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.5)', cursor: 'pointer' }}><X className="w-5 h-5" /></button>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); if (!name.trim()) return; mutation.mutate({ name: name.trim(), description, color }); }} className="space-y-4">

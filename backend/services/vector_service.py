@@ -1,4 +1,5 @@
 """Vector search service using sentence-transformers with pgvector/fallback for semantic search."""
+import heapq
 import logging
 import os
 from typing import Optional
@@ -10,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 _model = None
 EMBEDDING_DIM = 384
-_ALLOWED_EMBEDDING_TABLES = {"concepts", "documents"}
+_ALLOWED_EMBEDDING_TABLES = {"concepts": "concepts", "documents": "documents"}
+_BATCH_SIZE = 100
 
 
 def _get_model():
@@ -54,21 +56,20 @@ def embed_texts(texts: list[str]) -> Optional[list[list[float]]]:
         return None
 
 
-def store_embedding(db: Session, table: str, item_id: str, embedding: list[float], commit: bool = True):
+def store_embedding(db: Session, table: str, item_id: str, embedding: list[float]):
     """Store an embedding vector in the DB (base64-encoded for portability)."""
     import base64, struct
 
-    if table not in _ALLOWED_EMBEDDING_TABLES:
+    safe_table = _ALLOWED_EMBEDDING_TABLES.get(table)
+    if safe_table is None:
         raise ValueError(f"Unsupported embedding table: {table}")
 
     blob = struct.pack(f'{len(embedding)}f', *embedding)
     encoded = base64.b64encode(blob).decode('ascii')
     db.execute(
-        text(f"UPDATE {table} SET embedding = :vec WHERE id = :id"),
+        text(f"UPDATE {safe_table} SET embedding = :vec WHERE id = :id"),
         {"vec": encoded, "id": item_id},
     )
-    if commit:
-        db.commit()
 
 
 def _decode_embedding(encoded: str) -> Optional[list[float]]:
@@ -83,8 +84,35 @@ def _decode_embedding(encoded: str) -> Optional[list[float]]:
         return None
 
 
-def search_semantic(db: Session, query: str, top_k: int = 20, user_id: Optional[str] = None) -> list[dict]:
-    """Semantic search via in-memory cosine similarity on stored embeddings."""
+def _batched_query(query, batch_size: int = _BATCH_SIZE):
+    offset = 0
+    while True:
+        batch = query.limit(batch_size).offset(offset).all()
+        if not batch:
+            break
+        for row in batch:
+            yield row
+        offset += batch_size
+
+
+def _push_scored_result(heap: list[tuple[float, str, dict]], result: dict, top_k: int) -> None:
+    entry = (result["score"], result["id"], result)
+    if len(heap) < top_k:
+        heapq.heappush(heap, entry)
+        return
+
+    if entry[0] > heap[0][0]:
+        heapq.heapreplace(heap, entry)
+
+
+def search_semantic(
+    db: Session,
+    query: str,
+    top_k: int = 20,
+    user_id: Optional[str] = None,
+    module_id: Optional[str] = None,
+) -> list[dict]:
+    """Semantic search with batched in-memory scoring when pgvector is unavailable."""
     model = _get_model()
     if model is None:
         return []
@@ -98,42 +126,46 @@ def search_semantic(db: Session, query: str, top_k: int = 20, user_id: Optional[
     from models.concept import Concept
     from models.document import Document
 
-    results = []
+    logger.debug("pgvector search is not configured; using batched in-memory semantic search")
+    scored_results: list[tuple[float, str, dict]] = []
 
     # Search concepts
-    concept_q = db.query(Concept).filter(Concept.embedding.isnot(None))
+    concept_q = db.query(Concept).filter(Concept.embedding.isnot(None)).order_by(Concept.id.asc())
     if user_id:
         concept_q = concept_q.filter(Concept.user_id == user_id)
-    for c in concept_q.limit(500).all():
+    if module_id:
+        concept_q = concept_q.filter(Concept.module_id == module_id)
+    for c in _batched_query(concept_q):
         vec = _decode_embedding(c.embedding)
         if vec:
-            score = sum(a * b for a, b in zip(query_vec, vec))
-            results.append({
+            score = sum(a * b for a, b in zip(query_vec, vec, strict=True))
+            _push_scored_result(scored_results, {
                 "id": f"concept:{c.id}",
                 "score": float(score),
                 "text": f"{c.name}: {c.definition or ''}",
                 "name": c.name,
                 "module_id": c.module_id,
-            })
+            }, top_k)
 
     # Search documents
-    doc_q = db.query(Document).filter(Document.embedding.isnot(None))
+    doc_q = db.query(Document).filter(Document.embedding.isnot(None)).order_by(Document.id.asc())
     if user_id:
         doc_q = doc_q.filter(Document.user_id == user_id)
-    for d in doc_q.limit(200).all():
+    if module_id:
+        doc_q = doc_q.filter(Document.module_id == module_id)
+    for d in _batched_query(doc_q):
         vec = _decode_embedding(d.embedding)
         if vec:
-            score = sum(a * b for a, b in zip(query_vec, vec))
-            results.append({
+            score = sum(a * b for a, b in zip(query_vec, vec, strict=True))
+            _push_scored_result(scored_results, {
                 "id": f"document:{d.id}",
                 "score": float(score),
                 "text": f"{d.filename}: {d.summary or (d.raw_text or '')[:200]}",
                 "name": d.filename,
                 "module_id": d.module_id,
-            })
+            }, top_k)
 
-    results.sort(key=lambda r: r["score"], reverse=True)
-    return results[:top_k]
+    return [result for _, _, result in sorted(scored_results, key=lambda item: item[0], reverse=True)]
 
 
 def search(query: str, top_k: int = 20) -> list[dict]:
@@ -239,24 +271,28 @@ def build_index_from_db(db: Session) -> int:
 
     total = 0
 
-    concepts = db.query(Concept).all()
-    for c in concepts:
-        txt = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
-        emb = embed_text(txt)
-        if emb:
-            store_embedding(db, "concepts", c.id, emb, commit=False)
-            total += 1
+    try:
+        concepts = db.query(Concept).all()
+        for c in concepts:
+            txt = f"{c.name}: {c.definition or ''} {c.explanation or ''}"
+            emb = embed_text(txt)
+            if emb:
+                store_embedding(db, "concepts", c.id, emb)
+                total += 1
 
-    documents = db.query(Document).filter(Document.raw_text.isnot(None)).all()
-    for d in documents:
-        txt = d.summary or f"{d.filename}: {(d.raw_text or '')[:500]}"
-        emb = embed_text(txt)
-        if emb:
-            store_embedding(db, "documents", d.id, emb, commit=False)
-            total += 1
+        documents = db.query(Document).filter(Document.raw_text.isnot(None)).all()
+        for d in documents:
+            txt = d.summary or f"{d.filename}: {(d.raw_text or '')[:500]}"
+            emb = embed_text(txt)
+            if emb:
+                store_embedding(db, "documents", d.id, emb)
+                total += 1
 
-    if total:
-        db.commit()
+        if total:
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     logger.info(f"Built embeddings for {total} items")
     return total

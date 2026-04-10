@@ -39,6 +39,18 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+const runSearch = (
+  query: string,
+  moduleId?: string,
+  type?: string,
+  limit?: number,
+): Promise<SearchResponse> =>
+  client
+    .get<SearchResponse>('/search', {
+      params: { q: query, module_id: moduleId, type, limit },
+    })
+    .then((r) => r.data);
+
 // Auth interceptor
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('revisionos_token');
@@ -180,10 +192,8 @@ export const validateApiKey = (key: string) =>
     .then((r) => r.data);
 
 // Search
-export const search = (query: string, moduleId?: string, type?: string) =>
-  client
-    .get('/search', { params: { q: query, module_id: moduleId, type } })
-    .then((r) => r.data);
+export const search = (query: string, moduleId?: string, type?: string): Promise<SearchResponse> =>
+  runSearch(query, moduleId, type);
 
 // ---- Phase 2: Weakness Map & Analytics ----
 
@@ -215,8 +225,8 @@ export const importFolder = (moduleId: string, folderPath: string) =>
 export const getKnowledgeGraph = (moduleId: string) =>
   client.get<KnowledgeGraphData>(`/modules/${moduleId}/knowledge-graph`).then((r) => r.data);
 
-export const searchAll = (query: string, moduleId?: string, limit?: number) =>
-  client.get<SearchResponse>('/search', { params: { q: query, module_id: moduleId, limit } }).then((r) => r.data);
+export const searchAll = (query: string, moduleId?: string, limit?: number): Promise<SearchResponse> =>
+  runSearch(query, moduleId, undefined, limit);
 
 export const generateCurriculum = (moduleId: string, hoursPerWeek: number, examDate?: string) =>
   client.post<CurriculumData>(`/modules/${moduleId}/curriculum`, { hours_per_week: hoursPerWeek, exam_date: examDate }).then((r) => r.data);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,7 +18,7 @@ function extractClozeAnswer(back: string): string {
   return back.trim();
 }
 
-function renderClozeQuestion(front: string) {
+function renderClozeQuestion(front: string): ReactNode {
   return front.split(/(_{3,})/g).map((part, index) => (
     /_{3,}/.test(part) ? (
       <span

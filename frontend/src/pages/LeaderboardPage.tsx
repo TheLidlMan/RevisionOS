@@ -30,6 +30,9 @@ export default function LeaderboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['leaderboard', timeframe],
     queryFn: () => getLeaderboard(timeframe),
+    staleTime: 0,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
   const rankColor = (rank: number) => {

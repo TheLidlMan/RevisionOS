@@ -1,5 +1,6 @@
 import math
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -17,6 +18,7 @@ from services.fsrs_service import schedule_review
 from services import ai_service
 
 router = APIRouter(tags=["flashcards"])
+logger = logging.getLogger(__name__)
 
 
 # ---------- Pydantic schemas ----------
@@ -269,9 +271,15 @@ async def generate_cards_for_module(
     if not docs:
         raise HTTPException(status_code=400, detail="No processed documents found in this module")
 
-    num_cards = body.num_cards if body and body.num_cards is not None else settings.CARDS_PER_DOCUMENT
-    if num_cards <= 0:
+    requested_cards = body.num_cards if body and body.num_cards is not None else settings.CARDS_PER_DOCUMENT
+    if requested_cards <= 0:
         raise HTTPException(status_code=400, detail="num_cards must be greater than 0")
+
+    num_cards = min(
+        requested_cards,
+        settings.CARDS_PER_DOCUMENT,
+        settings.MAX_CARDS_PER_REQUEST,
+    )
 
     # Use chunked generation for massive flashcard output
     from services.rag_service import retrieve_all_document_chunks
@@ -285,11 +293,9 @@ async def generate_cards_for_module(
             all_text = all_text[:max_chars]
         generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
     else:
-        chunk_count = min(len(chunks), max(1, num_cards))
-        selected_chunks = chunks[:chunk_count]
-        cards_per_chunk = max(1, math.ceil(num_cards / chunk_count))
+        cards_per_chunk = max(1, math.ceil(num_cards / len(chunks)))
         generated_cards_data = await ai_service.generate_flashcards_chunked(
-            selected_chunks,
+            chunks,
             module.name,
             cards_per_chunk=cards_per_chunk,
             max_total_cards=num_cards,
@@ -302,6 +308,10 @@ async def generate_cards_for_module(
 
     created_cards = []
     for card_data in generated_cards_data:
+        if not isinstance(card_data, dict):
+            logger.debug("Skipping malformed flashcard payload for module %s: %r", module_id, card_data)
+            continue
+
         card_type = "CLOZE"  # All cards are now fill-in-the-gap
 
         tags = card_data.get("tags", [])
@@ -312,6 +322,11 @@ async def generate_cards_for_module(
         back_val = card_data.get("back") or ""
 
         if not front_val or not back_val:
+            logger.debug("Skipping incomplete flashcard for module %s", module_id)
+            continue
+
+        if "___" not in front_val and "___" not in back_val:
+            logger.debug("Skipping CLOZE flashcard without placeholder for module %s", module_id)
             continue
 
         # Try to match a concept
