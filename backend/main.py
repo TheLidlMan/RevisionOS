@@ -10,7 +10,7 @@ from services.auth_service import validate_auth_settings
 from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
 from routers import settings as settings_router
 from routers import weakness_map, knowledge_graph, search as search_router, curriculum, exports
-from routers import social, integrations, collaboration
+from routers import social, integrations, collaboration, features
 
 app = FastAPI(
     title="RevisionOS API",
@@ -43,6 +43,7 @@ app.include_router(exports.router)
 app.include_router(social.router)
 app.include_router(integrations.router)
 app.include_router(collaboration.router)
+app.include_router(features.router)
 
 
 @app.on_event("startup")
