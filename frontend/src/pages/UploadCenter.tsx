@@ -13,6 +13,35 @@ import {
 import { getModules, uploadDocument, importFolder } from '../api/client';
 import type { Document } from '../types';
 
+const glass = {
+  background: 'rgba(255,248,240,0.04)',
+  border: '1px solid rgba(139,115,85,0.15)',
+  borderRadius: '12px',
+  backdropFilter: 'blur(20px)',
+} as const;
+
+const inputStyle: React.CSSProperties = {
+  background: 'rgba(255,248,240,0.04)',
+  border: '1px solid rgba(139,115,85,0.15)',
+  borderRadius: '8px',
+  color: '#f5f0e8',
+  outline: 'none',
+  fontWeight: 300,
+};
+
+const buttonStyle: React.CSSProperties = {
+  background: '#c4956a',
+  color: '#1a1714',
+  borderRadius: '8px',
+  fontWeight: 500,
+  border: 'none',
+};
+
+const headingFont: React.CSSProperties = {
+  fontFamily: "Georgia, 'Times New Roman', serif",
+  color: '#f5f0e8',
+};
+
 interface UploadItem {
   file: File;
   status: 'pending' | 'uploading' | 'done' | 'error';
@@ -28,6 +57,7 @@ export default function UploadCenter() {
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+  const [selectFocused, setSelectFocused] = useState(false);
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -68,7 +98,6 @@ export default function UploadCenter() {
       }));
       setUploads((prev) => {
         const updated = [...prev, ...newItems];
-        // auto-upload
         newItems.forEach((item, i) => {
           const idx = prev.length + i;
           if (moduleId) {
@@ -95,19 +124,32 @@ export default function UploadCenter() {
   return (
     <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8">
-        <Upload className="w-6 h-6 text-teal" />
-        <h1 className="text-2xl font-bold">Upload Center</h1>
+        <Upload className="w-6 h-6" style={{ color: '#c4956a' }} />
+        <h1 style={{ ...headingFont, fontSize: '1.5rem', fontWeight: 700 }}>
+          Upload Center
+        </h1>
       </div>
 
       {/* Module selector */}
       <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-300 mb-2">
+        <label
+          className="block mb-2"
+          style={{ color: 'rgba(245,240,232,0.5)', fontSize: '0.875rem', fontWeight: 300 }}
+        >
           Select Module
         </label>
         <select
           value={moduleId}
           onChange={(e) => setModuleId(e.target.value)}
-          className="w-full bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-teal transition-colors"
+          onFocus={() => setSelectFocused(true)}
+          onBlur={() => setSelectFocused(false)}
+          className="w-full px-3 py-2.5"
+          style={{
+            ...inputStyle,
+            border: selectFocused
+              ? '1px solid rgba(196,149,106,0.6)'
+              : '1px solid rgba(139,115,85,0.15)',
+          }}
         >
           <option value="">Choose a module…</option>
           {modules?.map((m) => (
@@ -120,11 +162,19 @@ export default function UploadCenter() {
 
       {/* Drop zone */}
       <div
-        className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors cursor-pointer ${
-          dragOver
-            ? 'border-teal bg-teal/5'
-            : 'border-gray-700 hover:border-gray-500'
-        } ${!moduleId ? 'opacity-50 pointer-events-none' : ''}`}
+        className={`p-12 text-center cursor-pointer ${
+          !moduleId ? 'opacity-50 pointer-events-none' : ''
+        }`}
+        style={{
+          ...glass,
+          border: dragOver
+            ? '2px dashed rgba(196,149,106,0.4)'
+            : '2px dashed rgba(139,115,85,0.3)',
+          background: dragOver
+            ? 'rgba(196,149,106,0.06)'
+            : glass.background,
+          transition: 'border-color 0.2s, background 0.2s',
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -133,11 +183,14 @@ export default function UploadCenter() {
         onDrop={handleDrop}
         onClick={() => fileRef.current?.click()}
       >
-        <CloudUpload className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-        <p className="text-gray-300 mb-1">
+        <CloudUpload
+          className="w-12 h-12 mx-auto mb-4"
+          style={{ color: 'rgba(245,240,232,0.25)' }}
+        />
+        <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, marginBottom: '0.25rem' }}>
           Drag & drop files here, or click to browse
         </p>
-        <p className="text-sm text-gray-500">
+        <p style={{ color: 'rgba(245,240,232,0.25)', fontSize: '0.875rem', fontWeight: 300 }}>
           Accepted: .pdf, .txt, .md, .pptx, .docx, .mp3, .mp4, .png, .jpg, .jpeg
         </p>
         <input
@@ -160,28 +213,39 @@ export default function UploadCenter() {
 
       {/* Upload list */}
       {uploads.length > 0 && (
-        <div className="mt-6 space-y-2">
+        <div className="mt-6" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {uploads.map((item, idx) => (
             <div
               key={idx}
-              className="bg-navy-light rounded-lg border border-gray-800 px-4 py-3 flex items-center gap-3"
+              className="flex items-center gap-3 px-4 py-3"
+              style={{ ...glass, borderRadius: '8px' }}
             >
-              <FileText className="w-5 h-5 text-gray-400 shrink-0" />
-              <span className="flex-1 text-sm truncate">{item.file.name}</span>
-              <span className="text-xs text-gray-500">
+              <FileText
+                className="w-5 h-5 shrink-0"
+                style={{ color: 'rgba(245,240,232,0.25)' }}
+              />
+              <span
+                className="flex-1 truncate"
+                style={{ color: '#f5f0e8', fontSize: '0.875rem', fontWeight: 300 }}
+              >
+                {item.file.name}
+              </span>
+              <span style={{ color: 'rgba(245,240,232,0.25)', fontSize: '0.75rem', fontWeight: 300 }}>
                 {(item.file.size / 1024).toFixed(0)} KB
               </span>
               {item.status === 'uploading' && (
-                <Loader2 className="w-4 h-4 animate-spin text-teal" />
+                <Loader2 className="w-4 h-4 animate-spin" style={{ color: '#c4956a' }} />
               )}
               {item.status === 'done' && (
-                <CheckCircle className="w-4 h-4 text-green-400" />
+                <CheckCircle className="w-4 h-4" style={{ color: 'rgba(120,180,120,0.8)' }} />
               )}
               {item.status === 'error' && (
-                <XCircle className="w-4 h-4 text-red-400" />
+                <XCircle className="w-4 h-4" style={{ color: 'rgba(220,120,100,0.8)' }} />
               )}
               {item.status === 'pending' && (
-                <span className="text-xs text-gray-500">Waiting…</span>
+                <span style={{ color: 'rgba(245,240,232,0.25)', fontSize: '0.75rem', fontWeight: 300 }}>
+                  Waiting…
+                </span>
               )}
             </div>
           ))}
@@ -193,6 +257,7 @@ export default function UploadCenter() {
 
 function FolderImportSection({ moduleId }: { moduleId: string }) {
   const [folderPath, setFolderPath] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const queryClient = useQueryClient();
 
   const folderMutation = useMutation({
@@ -205,12 +270,18 @@ function FolderImportSection({ moduleId }: { moduleId: string }) {
 
   return (
     <div className="mt-8">
-      <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-        <FolderOpen className="w-5 h-5 text-teal" />
+      <h2
+        className="flex items-center gap-2 mb-3"
+        style={{ ...headingFont, fontSize: '1.125rem', fontWeight: 600 }}
+      >
+        <FolderOpen className="w-5 h-5" style={{ color: '#c4956a' }} />
         Folder Import
       </h2>
-      <div className="bg-navy-light rounded-xl border border-gray-800 p-5">
-        <label className="block text-sm font-medium text-gray-300 mb-2">
+      <div className="p-5" style={glass}>
+        <label
+          className="block mb-2"
+          style={{ color: 'rgba(245,240,232,0.5)', fontSize: '0.875rem', fontWeight: 300 }}
+        >
           Local Folder Path
         </label>
         <div className="flex gap-3">
@@ -218,13 +289,27 @@ function FolderImportSection({ moduleId }: { moduleId: string }) {
             type="text"
             value={folderPath}
             onChange={(e) => setFolderPath(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             placeholder="/path/to/your/notes"
-            className="flex-1 bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-teal transition-colors"
+            className="flex-1 px-3 py-2.5"
+            style={{
+              ...inputStyle,
+              border: inputFocused
+                ? '1px solid rgba(196,149,106,0.6)'
+                : '1px solid rgba(139,115,85,0.15)',
+            }}
           />
           <button
             onClick={() => folderMutation.mutate()}
             disabled={!moduleId || !folderPath || folderMutation.isPending}
-            className="bg-teal hover:bg-teal-dark disabled:opacity-50 text-white rounded-lg px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 shrink-0"
+            className="flex items-center gap-2 shrink-0 px-4 py-2.5"
+            style={{
+              ...buttonStyle,
+              fontSize: '0.875rem',
+              opacity: !moduleId || !folderPath || folderMutation.isPending ? 0.5 : 1,
+              cursor: !moduleId || !folderPath || folderMutation.isPending ? 'not-allowed' : 'pointer',
+            }}
           >
             {folderMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -235,10 +320,14 @@ function FolderImportSection({ moduleId }: { moduleId: string }) {
           </button>
         </div>
         {folderMutation.isSuccess && (
-          <p className="text-green-400 text-sm mt-2">✅ Folder imported successfully!</p>
+          <p className="mt-2" style={{ color: 'rgba(120,180,120,0.8)', fontSize: '0.875rem', fontWeight: 300 }}>
+            ✅ Folder imported successfully!
+          </p>
         )}
         {folderMutation.isError && (
-          <p className="text-red-400 text-sm mt-2">Failed to import folder.</p>
+          <p className="mt-2" style={{ color: 'rgba(220,120,100,0.8)', fontSize: '0.875rem', fontWeight: 300 }}>
+            Failed to import folder.
+          </p>
         )}
       </div>
     </div>
