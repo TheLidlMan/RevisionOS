@@ -288,10 +288,16 @@ async def generate_cards_for_module(
         if not isinstance(tags, list):
             tags = []
 
+        front_val = card_data.get("front") or ""
+        back_val = card_data.get("back") or ""
+        # For CLOZE cards the AI may omit back; fall back to cloze_text
+        if card_type == "CLOZE" and not back_val:
+            back_val = card_data.get("cloze_text") or ""
+
         card = Flashcard(
             module_id=module_id,
-            front=card_data.get("front", ""),
-            back=card_data.get("back", ""),
+            front=front_val,
+            back=back_val,
             card_type=card_type,
             cloze_text=card_data.get("cloze_text"),
             source_document_id=docs[0].id if docs else None,
