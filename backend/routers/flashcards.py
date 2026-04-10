@@ -14,9 +14,6 @@ from models.module import Module
 from models.document import Document
 from services.fsrs_service import schedule_review
 from services import ai_service
-from typing import Optional as OptionalType
-from services.auth_service import get_current_user
-from models.user import User
 
 router = APIRouter(tags=["flashcards"])
 
@@ -134,11 +131,8 @@ def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
 ):
     query = db.query(Flashcard)
-    if user:
-        query = query.filter(Flashcard.user_id == user.id)
     if module_id:
         query = query.filter(Flashcard.module_id == module_id)
     if due:
@@ -149,7 +143,7 @@ def list_flashcards(
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
-def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
     module = db.query(Module).filter(Module.id == body.module_id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -166,7 +160,6 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db), user:
         tags=json.dumps(body.tags),
         due=datetime.utcnow(),
         state="NEW",
-        user_id=user.id if user else None,
     )
     db.add(card)
     db.commit()
@@ -175,11 +168,8 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db), user:
 
 
 @router.patch("/api/flashcards/{card_id}", response_model=FlashcardResponse)
-def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Flashcard).filter(Flashcard.id == card_id)
-    if user:
-        query = query.filter(Flashcard.user_id == user.id)
-    card = query.first()
+def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(get_db)):
+    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     if body.front is not None:
@@ -198,11 +188,8 @@ def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(
 
 
 @router.delete("/api/flashcards/{card_id}", status_code=204)
-def delete_flashcard(card_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Flashcard).filter(Flashcard.id == card_id)
-    if user:
-        query = query.filter(Flashcard.user_id == user.id)
-    card = query.first()
+def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
+    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     db.delete(card)
@@ -211,11 +198,8 @@ def delete_flashcard(card_id: str, db: Session = Depends(get_db), user: Optional
 
 
 @router.post("/api/flashcards/{card_id}/review", response_model=ReviewResponse)
-def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Flashcard).filter(Flashcard.id == card_id)
-    if user:
-        query = query.filter(Flashcard.user_id == user.id)
-    card = query.first()
+def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(get_db)):
+    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
 
@@ -268,7 +252,6 @@ async def generate_cards_for_module(
     module_id: str,
     body: Optional[GenerateCardsRequest] = None,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
 ):
     module = db.query(Module).filter(Module.id == module_id).first()
     if not module:
@@ -315,7 +298,6 @@ async def generate_cards_for_module(
             tags=json.dumps(tags),
             due=datetime.utcnow(),
             state="NEW",
-            user_id=user.id if user else None,
         )
         db.add(card)
         created_cards.append(card)

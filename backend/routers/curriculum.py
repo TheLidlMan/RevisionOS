@@ -12,9 +12,6 @@ from models.concept import Concept
 from models.document import Document
 from models.module import Module
 from services import ai_service
-from typing import Optional as OptionalType
-from services.auth_service import get_current_user
-from models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +54,6 @@ async def generate_curriculum(
     module_id: str,
     body: CurriculumRequest,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
 ):
     """AI-generate a study plan based on module concepts."""
     module = db.query(Module).filter(Module.id == module_id).first()

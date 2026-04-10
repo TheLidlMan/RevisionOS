@@ -16,9 +16,6 @@ from models.review_log import ReviewLog
 from models.module import Module
 from models.document import Document
 from services import ai_service
-from typing import Optional as OptionalType
-from services.auth_service import get_current_user
-from models.user import User
 
 router = APIRouter(tags=["quizzes"])
 
@@ -162,11 +159,8 @@ def list_questions(
     difficulty: Optional[str] = None,
     type: Optional[str] = None,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
 ):
     query = db.query(QuizQuestion)
-    if user:
-        query = query.filter(QuizQuestion.user_id == user.id)
     if module_id:
         query = query.filter(QuizQuestion.module_id == module_id)
     if difficulty:
@@ -178,7 +172,7 @@ def list_questions(
 
 
 @router.post("/api/quizzes/generate", response_model=GenerateQuizResponse)
-async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)):
     module = db.query(Module).filter(Module.id == body.module_id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -229,7 +223,6 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
             explanation=qdata.get("explanation", ""),
             difficulty=diff,
             source_document_id=docs[0].id if docs else None,
-            user_id=user.id if user else None,
         )
         db.add(question)
         created_questions.append(question)
@@ -245,13 +238,12 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
 
 @router.post("/api/quizzes/sessions", response_model=SessionResponse)
-def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db)):
     session = StudySession(
         module_id=body.module_id,
         session_type=body.session_type.upper(),
         started_at=datetime.utcnow(),
         total_items=len(body.question_ids),
-        user_id=user.id if user else None,
     )
     db.add(session)
     db.commit()
@@ -290,7 +282,7 @@ def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db),
 
 
 @router.post("/api/quizzes/sessions/{session_id}/answer", response_model=AnswerResponse)
-async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -337,7 +329,6 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
         was_correct=is_correct,
         user_answer=body.user_answer,
         answered_at=datetime.utcnow(),
-        user_id=user.id if user else None,
     )
     db.add(log)
 
@@ -358,7 +349,7 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
 
 
 @router.post("/api/quizzes/sessions/{session_id}/complete", response_model=SessionResultsResponse)
-def complete_session(session_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def complete_session(session_id: str, db: Session = Depends(get_db)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -400,7 +391,7 @@ def complete_session(session_id: str, db: Session = Depends(get_db), user: Optio
 
 
 @router.get("/api/quizzes/sessions/{session_id}/results", response_model=SessionResultsResponse)
-def get_session_results(session_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def get_session_results(session_id: str, db: Session = Depends(get_db)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -431,94 +422,3 @@ def get_session_results(session_id: str, db: Session = Depends(get_db), user: Op
         score_pct=session.score_pct,
         review_logs=log_dicts,
     )
-
-
-@router.post("/api/concepts/{concept_id}/generate-questions")
-async def generate_questions_for_concept(
-    concept_id: str,
-    num_questions: int = 5,
-    question_types: list[str] = ["MCQ", "SHORT_ANSWER"],
-    difficulty: str = "MEDIUM",
-    db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
-):
-    """Generate quiz questions targeting a specific concept/topic."""
-    from models.concept import Concept
-
-    concept = db.query(Concept).filter(Concept.id == concept_id).first()
-    if not concept:
-        raise HTTPException(status_code=404, detail="Concept not found")
-
-    if not settings.GROQ_API_KEY:
-        raise HTTPException(status_code=400, detail="Groq API key not configured")
-
-    text_parts = [f"Topic: {concept.name}"]
-    if concept.definition:
-        text_parts.append(f"Definition: {concept.definition}")
-    if concept.explanation:
-        text_parts.append(f"Explanation: {concept.explanation}")
-
-    docs = (
-        db.query(Document)
-        .filter(
-            Document.module_id == concept.module_id,
-            Document.processing_status == "done",
-        )
-        .all()
-    )
-    for d in docs:
-        if d.raw_text and concept.name.lower() in d.raw_text.lower():
-            idx = d.raw_text.lower().find(concept.name.lower())
-            start = max(0, idx - 2000)
-            end = min(len(d.raw_text), idx + 2000)
-            text_parts.append(d.raw_text[start:end])
-
-    all_text = "\n\n".join(text_parts)
-    max_chars = 120000
-    if len(all_text) > max_chars:
-        all_text = all_text[:max_chars]
-
-    generated = await ai_service.generate_quiz_questions(
-        text=all_text,
-        num_questions=num_questions,
-        question_types=question_types,
-        difficulty=difficulty,
-        subject=concept.name,
-    )
-
-    created_questions = []
-    for qdata in generated:
-        q_type = qdata.get("type", qdata.get("question_type", "MCQ")).upper()
-        if q_type not in ("MCQ", "SHORT_ANSWER", "TRUE_FALSE", "FILL_BLANK", "EXAM_STYLE"):
-            q_type = "MCQ"
-
-        options = qdata.get("options")
-        options_json = json.dumps(options) if options else None
-
-        diff = qdata.get("difficulty", difficulty).upper()
-        if diff not in ("EASY", "MEDIUM", "HARD", "EXAM"):
-            diff = "MEDIUM"
-
-        question = QuizQuestion(
-            module_id=concept.module_id,
-            concept_id=concept.id,
-            question_text=qdata.get("question_text", qdata.get("question", "")),
-            question_type=q_type,
-            options=options_json,
-            correct_answer=qdata.get("correct_answer", ""),
-            explanation=qdata.get("explanation", ""),
-            difficulty=diff,
-            user_id=user.id if user else None,
-        )
-        db.add(question)
-        created_questions.append(question)
-
-    db.commit()
-    for q in created_questions:
-        db.refresh(q)
-
-    return {
-        "generated": len(created_questions),
-        "concept_name": concept.name,
-        "questions": [_question_to_response(q) for q in created_questions],
-    }
