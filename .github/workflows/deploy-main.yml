@@ -1,4 +1,4 @@
-name: Deploy On Main
+name: Deploy Production On Main
 
 on:
   push:
@@ -9,6 +9,9 @@ on:
 concurrency:
   group: deploy-main
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   migrate_database:
@@ -25,6 +28,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Validate required secrets (DB)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          test -n "$DATABASE_URL" || (echo "Missing GitHub secret: DATABASE_URL" && exit 1)
 
       - name: Install migration dependencies
         run: |
@@ -52,21 +61,66 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Validate required secrets (Railway)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_ACCESS_TOKEN: ${{ secrets.RAILWAY_ACCESS_TOKEN }}
+          RAILWAY_REFRESH_TOKEN: ${{ secrets.RAILWAY_REFRESH_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+          RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME }}
+        run: |
+          test -n "$RAILWAY_PROJECT_ID" || (echo "Missing GitHub secret: RAILWAY_PROJECT_ID" && exit 1)
+          if [ -z "$RAILWAY_TOKEN" ] && { [ -z "$RAILWAY_ACCESS_TOKEN" ] || [ -z "$RAILWAY_REFRESH_TOKEN" ]; }; then
+            echo "Missing auth: set RAILWAY_TOKEN, or both RAILWAY_ACCESS_TOKEN and RAILWAY_REFRESH_TOKEN"
+            exit 1
+          fi
+          if [ -z "$RAILWAY_SERVICE_ID" ] && [ -z "$RAILWAY_SERVICE_NAME" ]; then
+            echo "Missing one of: RAILWAY_SERVICE_ID or RAILWAY_SERVICE_NAME"
+            exit 1
+          fi
+
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+
+      - name: Configure Railway auth fallback
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_ACCESS_TOKEN: ${{ secrets.RAILWAY_ACCESS_TOKEN }}
+          RAILWAY_REFRESH_TOKEN: ${{ secrets.RAILWAY_REFRESH_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ] && [ -n "$RAILWAY_ACCESS_TOKEN" ] && [ -n "$RAILWAY_REFRESH_TOKEN" ]; then
+            mkdir -p ~/.railway
+            cat > ~/.railway/config.json <<EOF
+          {
+            "projects": {},
+            "user": {
+              "token": null,
+              "accessToken": "$RAILWAY_ACCESS_TOKEN",
+              "refreshToken": "$RAILWAY_REFRESH_TOKEN"
+            },
+            "linkedFunctions": null
+          }
+          EOF
+          fi
 
       - name: Link Railway service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME }}
         run: |
-          railway link --project "$RAILWAY_PROJECT_ID" --environment production --service "$RAILWAY_SERVICE_NAME"
+          SERVICE_REF="$RAILWAY_SERVICE_ID"
+          if [ -z "$SERVICE_REF" ]; then
+            SERVICE_REF="$RAILWAY_SERVICE_NAME"
+          fi
+          railway link --project "$RAILWAY_PROJECT_ID" --environment production --service "$SERVICE_REF"
 
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --detach
+        run: railway up --ci
 
   deploy_frontend:
     name: Deploy Frontend To Cloudflare Pages
@@ -86,6 +140,18 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Validate required secrets (Cloudflare)
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ secrets.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          test -n "$VITE_API_BASE_URL" || (echo "Missing GitHub secret: VITE_API_BASE_URL" && exit 1)
+          test -n "$CLOUDFLARE_API_TOKEN" || (echo "Missing GitHub secret: CLOUDFLARE_API_TOKEN" && exit 1)
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "Missing GitHub secret: CLOUDFLARE_ACCOUNT_ID" && exit 1)
+          test -n "$CLOUDFLARE_PAGES_PROJECT" || (echo "Missing GitHub secret: CLOUDFLARE_PAGES_PROJECT" && exit 1)
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -95,8 +161,8 @@ jobs:
         run: npm run build
 
       - name: Deploy to Cloudflare Pages
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_PAGES_PROJECT: ${{ secrets.CLOUDFLARE_PAGES_PROJECT }}
-        run: npx wrangler pages deploy dist --project-name "$CLOUDFLARE_PAGES_PROJECT" --branch main
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name ${{ secrets.CLOUDFLARE_PAGES_PROJECT }} --branch main

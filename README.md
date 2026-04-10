@@ -166,7 +166,8 @@ Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repos
 | `DATABASE_URL` | Production Postgres URL used for Alembic migrations |
 | `RAILWAY_TOKEN` | Railway API token |
 | `RAILWAY_PROJECT_ID` | Railway project id |
-| `RAILWAY_SERVICE_NAME` | Railway backend service name (e.g. `revisionos-api`) |
+| `RAILWAY_SERVICE_ID` | Railway backend service id (recommended, avoids name ambiguity) |
+| `RAILWAY_SERVICE_NAME` | Railway backend service name (fallback if service id is not provided) |
 | `VITE_API_BASE_URL` | Public backend API base URL for frontend builds (e.g. `https://revisionos-api-production.up.railway.app/api`) |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Pages deploy permissions |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
