@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fsrs import FSRS, Card, Rating, State
+from fsrs import Scheduler, Card, Rating, State
 
 
 # Map string ratings to FSRS Rating enum
@@ -14,7 +14,6 @@ RATING_MAP = {
 
 # Map FSRS State enum to our string representation
 STATE_MAP = {
-    State.New: "NEW",
     State.Learning: "LEARNING",
     State.Review: "REVIEW",
     State.Relearning: "RELEARNING",
@@ -26,7 +25,7 @@ STATE_REVERSE_MAP = {
     "RELEARNING": State.Relearning,
 }
 
-_scheduler = FSRS()
+_scheduler = Scheduler()
 
 
 def _to_app_state(fsrs_state: State, _step: int = 0) -> str:
@@ -65,19 +64,8 @@ def schedule_review(card_data: dict, rating: str) -> dict:
     state_str = card_data.get("state", "NEW")
     if state_str in STATE_REVERSE_MAP:
         card.state = STATE_REVERSE_MAP[state_str]
-    else:
-        card.state = State.New
 
-    if card_data.get("reps") is not None:
-        card.reps = card_data.get("reps", 0)
-    if card_data.get("lapses") is not None:
-        card.lapses = card_data.get("lapses", 0)
-    if card_data.get("elapsed_days") is not None:
-        card.elapsed_days = card_data.get("elapsed_days", 0)
-    if card_data.get("scheduled_days") is not None:
-        card.scheduled_days = card_data.get("scheduled_days", 0)
-
-    if card_data.get("last_review") and hasattr(card, "last_review"):
+    if card_data.get("last_review"):
         lr = card_data["last_review"]
         if isinstance(lr, str):
             lr = datetime.fromisoformat(lr)
@@ -85,8 +73,7 @@ def schedule_review(card_data: dict, rating: str) -> dict:
             lr = lr.replace(tzinfo=timezone.utc)
         card.last_review = lr
 
-    now = datetime.now(timezone.utc)
-    updated_card, _review_log = _scheduler.review_card(card, fsrs_rating, now)
+    updated_card, _review_log = _scheduler.review_card(card, fsrs_rating)
 
     # Convert due to naive UTC for storage
     new_due = updated_card.due
@@ -94,28 +81,33 @@ def schedule_review(card_data: dict, rating: str) -> dict:
         new_due = new_due.replace(tzinfo=None)
 
     new_last_review: Optional[datetime] = None
-    if hasattr(updated_card, "last_review") and updated_card.last_review is not None:
+    if updated_card.last_review is not None:
         new_last_review = updated_card.last_review
         if new_last_review.tzinfo is not None:
             new_last_review = new_last_review.replace(tzinfo=None)
 
-    # Compute elapsed_days from last_review
+    # Track reps and lapses ourselves since fsrs v4 Card doesn't store them
     prev_reps = card_data.get("reps", 0)
     prev_lapses = card_data.get("lapses", 0)
     new_reps = prev_reps + 1
     new_lapses = prev_lapses + (1 if fsrs_rating == Rating.Again else 0)
 
+    # Compute elapsed_days
     elapsed_days = 0
     if card_data.get("last_review") and new_last_review:
         old_lr = card_data["last_review"]
         if isinstance(old_lr, str):
             old_lr = datetime.fromisoformat(old_lr)
-        elapsed_days = max((new_last_review - old_lr).days, 0)
+        if old_lr.tzinfo is None:
+            old_lr = old_lr.replace(tzinfo=timezone.utc)
+        elapsed_days = max((new_last_review.replace(tzinfo=timezone.utc) - old_lr).days, 0)
 
-    # scheduled_days = days until next review from now
-    scheduled_days = getattr(updated_card, "scheduled_days", None)
-    if scheduled_days is None:
-        scheduled_days = max((new_due - (new_last_review or datetime.utcnow())).days, 0)
+    # scheduled_days = days until next review from last review
+    scheduled_days = 0
+    if new_last_review and new_due:
+        nr = new_last_review.replace(tzinfo=timezone.utc) if new_last_review.tzinfo is None else new_last_review
+        nd = new_due.replace(tzinfo=timezone.utc) if new_due.tzinfo is None else new_due
+        scheduled_days = max((nd - nr).days, 0)
 
     app_state = _to_app_state(updated_card.state)
 

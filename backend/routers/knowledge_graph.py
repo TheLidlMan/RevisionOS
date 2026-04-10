@@ -10,6 +10,9 @@ from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from models.review_log import ReviewLog
 from models.module import Module
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(tags=["knowledge-graph"])
 
@@ -54,9 +57,12 @@ def _compute_concept_mastery(db: Session, concept: Concept) -> float:
 # ---------- Endpoints ----------
 
 @router.get("/api/modules/{module_id}/knowledge-graph", response_model=KnowledgeGraphResponse)
-def get_knowledge_graph(module_id: str, db: Session = Depends(get_db)):
+def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Return nodes + edges JSON for D3 visualization."""
-    module = db.query(Module).filter(Module.id == module_id).first()
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 

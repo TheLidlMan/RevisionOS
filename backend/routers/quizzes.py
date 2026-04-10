@@ -16,6 +16,9 @@ from models.review_log import ReviewLog
 from models.module import Module
 from models.document import Document
 from services import ai_service
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(tags=["quizzes"])
 
@@ -159,8 +162,11 @@ def list_questions(
     difficulty: Optional[str] = None,
     type: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     query = db.query(QuizQuestion)
+    if user:
+        query = query.filter(QuizQuestion.user_id == user.id)
     if module_id:
         query = query.filter(QuizQuestion.module_id == module_id)
     if difficulty:
@@ -172,7 +178,7 @@ def list_questions(
 
 
 @router.post("/api/quizzes/generate", response_model=GenerateQuizResponse)
-async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)):
+async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     module = db.query(Module).filter(Module.id == body.module_id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -223,6 +229,7 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
             explanation=qdata.get("explanation", ""),
             difficulty=diff,
             source_document_id=docs[0].id if docs else None,
+            user_id=user.id if user else None,
         )
         db.add(question)
         created_questions.append(question)
@@ -238,12 +245,13 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
 
 @router.post("/api/quizzes/sessions", response_model=SessionResponse)
-def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db)):
+def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     session = StudySession(
         module_id=body.module_id,
         session_type=body.session_type.upper(),
         started_at=datetime.utcnow(),
         total_items=len(body.question_ids),
+        user_id=user.id if user else None,
     )
     db.add(session)
     db.commit()
@@ -282,7 +290,7 @@ def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db))
 
 
 @router.post("/api/quizzes/sessions/{session_id}/answer", response_model=AnswerResponse)
-async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db)):
+async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -329,6 +337,7 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
         was_correct=is_correct,
         user_answer=body.user_answer,
         answered_at=datetime.utcnow(),
+        user_id=user.id if user else None,
     )
     db.add(log)
 
@@ -349,7 +358,7 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
 
 
 @router.post("/api/quizzes/sessions/{session_id}/complete", response_model=SessionResultsResponse)
-def complete_session(session_id: str, db: Session = Depends(get_db)):
+def complete_session(session_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -391,7 +400,7 @@ def complete_session(session_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/api/quizzes/sessions/{session_id}/results", response_model=SessionResultsResponse)
-def get_session_results(session_id: str, db: Session = Depends(get_db)):
+def get_session_results(session_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     session = db.query(StudySession).filter(StudySession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")

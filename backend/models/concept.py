@@ -11,6 +11,7 @@ class Concept(Base):
     __tablename__ = "concepts"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
     definition = Column(Text, nullable=True, default="")

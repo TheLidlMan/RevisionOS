@@ -12,6 +12,9 @@ from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from models.review_log import ReviewLog
 from models.module import Module
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/api/weakness-map", tags=["weakness-map"])
 
@@ -131,9 +134,12 @@ def _compute_concept_confidence(db: Session, concept: Concept) -> ConceptConfide
 def get_weakness_map(
     module_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     """Compute confidence scores per concept for the weakness map."""
     query = db.query(Concept)
+    if user:
+        query = query.filter(Concept.user_id == user.id)
     if module_id:
         module = db.query(Module).filter(Module.id == module_id).first()
         if not module:
@@ -160,9 +166,12 @@ def get_optimal_session(
     module_id: Optional[str] = Query(None),
     max_items: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     """Generate optimal study session from weakest concepts."""
     query = db.query(Concept)
+    if user:
+        query = query.filter(Concept.user_id == user.id)
     if module_id:
         module = db.query(Module).filter(Module.id == module_id).first()
         if not module:

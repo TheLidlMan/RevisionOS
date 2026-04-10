@@ -9,6 +9,9 @@ from models.concept import Concept
 from models.flashcard import Flashcard
 from models.document import Document
 from models.module import Module
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -59,6 +62,7 @@ def search(
     module_id: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     """Search across concepts, flashcards, and documents using LIKE matching."""
     if not q.strip():
@@ -80,6 +84,8 @@ def search(
     concept_query = db.query(Concept).filter(
         (Concept.name.ilike(pattern)) | (Concept.definition.ilike(pattern))
     )
+    if user:
+        concept_query = concept_query.filter(Concept.user_id == user.id)
     if module_id:
         concept_query = concept_query.filter(Concept.module_id == module_id)
     for c in concept_query.limit(limit).all():
@@ -99,6 +105,8 @@ def search(
         fc_query = db.query(Flashcard).filter(
             (Flashcard.front.ilike(pattern)) | (Flashcard.back.ilike(pattern))
         )
+        if user:
+            fc_query = fc_query.filter(Flashcard.user_id == user.id)
         if module_id:
             fc_query = fc_query.filter(Flashcard.module_id == module_id)
         for f in fc_query.limit(remaining).all():
@@ -118,6 +126,8 @@ def search(
         doc_query = db.query(Document).filter(
             (Document.filename.ilike(pattern)) | (Document.raw_text.ilike(pattern))
         )
+        if user:
+            doc_query = doc_query.filter(Document.user_id == user.id)
         if module_id:
             doc_query = doc_query.filter(Document.module_id == module_id)
         for d in doc_query.limit(remaining).all():

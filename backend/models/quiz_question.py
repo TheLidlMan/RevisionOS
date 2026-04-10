@@ -11,6 +11,7 @@ class QuizQuestion(Base):
     __tablename__ = "quiz_questions"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
     concept_id = Column(String(36), ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True)
     question_text = Column(Text, nullable=False)

@@ -11,6 +11,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String, nullable=False)
     file_type = Column(String(10), nullable=False)  # PDF, TXT, PPTX, DOCX, MD, MP3, MP4, IMAGE

@@ -12,6 +12,9 @@ from database import get_db
 from models.document import Document
 from models.module import Module
 from services.file_processor import extract_text, extract_image_text, transcribe_audio
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -65,6 +68,7 @@ def upload_document(
     module_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     # Verify module exists
     module = db.query(Module).filter(Module.id == module_id).first()
@@ -107,6 +111,7 @@ def upload_document(
         file_type=file_type,
         file_path=file_path,
         processing_status="pending",
+        user_id=user.id if user else None,
     )
     db.add(doc)
     db.commit()
@@ -164,8 +169,11 @@ def upload_document(
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
-def get_document(document_id: str, db: Session = Depends(get_db)):
-    doc = db.query(Document).filter(Document.id == document_id).first()
+def get_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Document).filter(Document.id == document_id)
+    if user:
+        query = query.filter(Document.user_id == user.id)
+    doc = query.first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return DocumentResponse(
@@ -182,8 +190,11 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{document_id}/text", response_model=DocumentTextResponse)
-def get_document_text(document_id: str, db: Session = Depends(get_db)):
-    doc = db.query(Document).filter(Document.id == document_id).first()
+def get_document_text(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Document).filter(Document.id == document_id)
+    if user:
+        query = query.filter(Document.user_id == user.id)
+    doc = query.first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return DocumentTextResponse(
@@ -194,8 +205,11 @@ def get_document_text(document_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{document_id}", status_code=204)
-def delete_document(document_id: str, db: Session = Depends(get_db)):
-    doc = db.query(Document).filter(Document.id == document_id).first()
+def delete_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Document).filter(Document.id == document_id)
+    if user:
+        query = query.filter(Document.user_id == user.id)
+    doc = query.first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     # Delete physical file
@@ -239,6 +253,7 @@ def import_folder(
     module_id: str,
     body: FolderImportRequest,
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     """Import supported files from a local folder recursively."""
     module = db.query(Module).filter(Module.id == module_id).first()
@@ -294,6 +309,7 @@ def import_folder(
                     file_type=file_type,
                     file_path=dest_path,
                     processing_status="pending",
+                    user_id=user.id if user else None,
                 )
                 db.add(doc)
                 db.flush()

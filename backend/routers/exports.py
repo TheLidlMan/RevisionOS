@@ -17,6 +17,9 @@ from models.document import Document
 from models.concept import Concept
 from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(tags=["exports"])
 
@@ -109,11 +112,14 @@ def _module_to_export_dict(db: Session, module: Module) -> dict:
 # ---------- Endpoints ----------
 
 @router.get("/api/modules/{module_id}/export-anki")
-def export_anki(module_id: str, db: Session = Depends(get_db)):
+def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Generate .apkg file via genanki and return as file download."""
     import genanki
 
-    module = db.query(Module).filter(Module.id == module_id).first()
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -167,9 +173,12 @@ def export_anki(module_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/api/modules/{module_id}/export-json")
-def export_json(module_id: str, db: Session = Depends(get_db)):
+def export_json(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Dump all module data as JSON download."""
-    module = db.query(Module).filter(Module.id == module_id).first()
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -188,7 +197,7 @@ def export_json(module_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/modules/import-json", response_model=ImportModuleResponse)
-def import_json(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Import module from JSON file."""
     try:
         content = file.file.read()
@@ -204,6 +213,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db)):
         name=mod_data.get("name", "Imported Module"),
         description=mod_data.get("description", ""),
         color=mod_data.get("color", "#00b4d8"),
+        user_id=user.id if user else None,
     )
     db.add(module)
     db.flush()

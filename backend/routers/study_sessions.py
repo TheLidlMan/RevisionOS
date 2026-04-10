@@ -11,6 +11,9 @@ from models.quiz_session import StudySession
 from models.review_log import ReviewLog
 from models.flashcard import Flashcard
 from models.module import Module
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(tags=["sessions"])
 
@@ -70,8 +73,11 @@ def list_sessions(
     module_id: Optional[str] = None,
     limit: int = 20,
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     query = db.query(StudySession)
+    if user:
+        query = query.filter(StudySession.user_id == user.id)
     if module_id:
         query = query.filter(StudySession.module_id == module_id)
     sessions = query.order_by(StudySession.started_at.desc()).limit(limit).all()
@@ -100,12 +106,22 @@ def list_sessions(
 
 
 @router.get("/api/analytics/overview", response_model=OverviewResponse)
-def analytics_overview(db: Session = Depends(get_db)):
-    total_modules = db.query(Module).count()
-    total_cards = db.query(Flashcard).count()
+def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    mod_query = db.query(Module)
+    card_query = db.query(Flashcard)
+    session_query_base = db.query(StudySession)
+    if user:
+        mod_query = mod_query.filter(Module.user_id == user.id)
+        card_query = card_query.filter(Flashcard.user_id == user.id)
+        session_query_base = session_query_base.filter(StudySession.user_id == user.id)
+    total_modules = mod_query.count()
+    total_cards = card_query.count()
 
     now = datetime.utcnow()
-    due_today = db.query(Flashcard).filter(Flashcard.due <= now).count()
+    due_query = db.query(Flashcard).filter(Flashcard.due <= now)
+    if user:
+        due_query = due_query.filter(Flashcard.user_id == user.id)
+    due_today = due_query.count()
 
     # Calculate streak: consecutive days with at least one session
     streak = 0
@@ -114,11 +130,11 @@ def analytics_overview(db: Session = Depends(get_db)):
         check_date = today - timedelta(days=i)
         day_start = datetime.combine(check_date, datetime.min.time())
         day_end = datetime.combine(check_date, datetime.max.time())
-        has_session = (
-            db.query(StudySession)
+        sess_q = (
+            session_query_base
             .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
-            .first()
         )
+        has_session = sess_q.first()
         if has_session:
             streak += 1
         else:
@@ -127,7 +143,7 @@ def analytics_overview(db: Session = Depends(get_db)):
             break
 
     # Overall mastery
-    all_cards = db.query(Flashcard).all()
+    all_cards = card_query.all()
     if all_cards:
         mastered = sum(1 for c in all_cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
         overall_mastery = round((mastered / len(all_cards)) * 100, 1)
@@ -144,7 +160,7 @@ def analytics_overview(db: Session = Depends(get_db)):
 
 
 @router.get("/api/analytics/streaks", response_model=StreakResponse)
-def get_streaks(db: Session = Depends(get_db)):
+def get_streaks(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Current streak, longest streak, and daily activity for last 30 days."""
     today = datetime.utcnow().date()
 
@@ -157,20 +173,21 @@ def get_streaks(db: Session = Depends(get_db)):
         day_start = datetime.combine(check_date, datetime.min.time())
         day_end = datetime.combine(check_date, datetime.max.time())
 
-        session_count = (
-            db.query(func.count(StudySession.id))
-            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
-            .scalar()
-        ) or 0
+        sess_q = db.query(func.count(StudySession.id)).filter(
+            StudySession.started_at >= day_start, StudySession.started_at <= day_end
+        )
+        if user:
+            sess_q = sess_q.filter(StudySession.user_id == user.id)
+        session_count = sess_q.scalar() or 0
 
         items_reviewed = 0
         if session_count > 0:
-            session_ids = [
-                s.id for s in
-                db.query(StudySession)
-                .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
-                .all()
-            ]
+            sid_q = db.query(StudySession).filter(
+                StudySession.started_at >= day_start, StudySession.started_at <= day_end
+            )
+            if user:
+                sid_q = sid_q.filter(StudySession.user_id == user.id)
+            session_ids = [s.id for s in sid_q.all()]
             if session_ids:
                 items_reviewed = (
                     db.query(func.count(ReviewLog.id))
@@ -202,11 +219,12 @@ def get_streaks(db: Session = Depends(get_db)):
         check_date = today - timedelta(days=i)
         day_start = datetime.combine(check_date, datetime.min.time())
         day_end = datetime.combine(check_date, datetime.max.time())
-        has_session = (
-            db.query(StudySession)
-            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
-            .first()
+        longest_q = db.query(StudySession).filter(
+            StudySession.started_at >= day_start, StudySession.started_at <= day_end
         )
+        if user:
+            longest_q = longest_q.filter(StudySession.user_id == user.id)
+        has_session = longest_q.first()
         if has_session:
             temp_streak += 1
             longest_streak = max(longest_streak, temp_streak)
@@ -227,6 +245,7 @@ def get_performance_over_time(
     module_id: Optional[str] = Query(None),
     days: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     """Daily average scores over time."""
     today = datetime.utcnow().date()
@@ -242,6 +261,8 @@ def get_performance_over_time(
             StudySession.started_at <= day_end,
             StudySession.ended_at.isnot(None),
         )
+        if user:
+            query = query.filter(StudySession.user_id == user.id)
         if module_id:
             query = query.filter(StudySession.module_id == module_id)
 

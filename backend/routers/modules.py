@@ -11,6 +11,9 @@ from models.module import Module
 from models.document import Document
 from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/api/modules", tags=["modules"])
 
@@ -91,8 +94,11 @@ def _compute_module_stats(db: Session, module: Module) -> dict:
 # ---------- Endpoints ----------
 
 @router.get("", response_model=list[ModuleResponse])
-def list_modules(db: Session = Depends(get_db)):
-    modules = db.query(Module).order_by(Module.created_at.desc()).all()
+def list_modules(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    modules = query.order_by(Module.created_at.desc()).all()
     results = []
     for m in modules:
         stats = _compute_module_stats(db, m)
@@ -112,8 +118,8 @@ def list_modules(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=ModuleResponse, status_code=201)
-def create_module(body: ModuleCreate, db: Session = Depends(get_db)):
-    module = Module(name=body.name, description=body.description, color=body.color)
+def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    module = Module(name=body.name, description=body.description, color=body.color, user_id=user.id if user else None)
     db.add(module)
     db.commit()
     db.refresh(module)
@@ -128,8 +134,11 @@ def create_module(body: ModuleCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{module_id}", response_model=ModuleDetailResponse)
-def get_module(module_id: str, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == module_id).first()
+def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     stats = _compute_module_stats(db, module)
@@ -161,8 +170,11 @@ def get_module(module_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{module_id}", response_model=ModuleResponse)
-def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == module_id).first()
+def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     if body.name is not None:
@@ -190,8 +202,11 @@ def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{module_id}", status_code=204)
-def delete_module(module_id: str, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == module_id).first()
+def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     db.delete(module)
@@ -200,8 +215,11 @@ def delete_module(module_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{module_id}/stats", response_model=ModuleStatsResponse)
-def get_module_stats(module_id: str, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == module_id).first()
+def get_module_stats(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     stats = _compute_module_stats(db, module)

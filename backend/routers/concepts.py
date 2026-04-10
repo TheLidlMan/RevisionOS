@@ -13,6 +13,9 @@ from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
+from typing import Optional as OptionalType
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/api/concepts", tags=["concepts"])
 
@@ -77,8 +80,11 @@ class DrillSessionResponse(BaseModel):
 def list_concepts(
     module_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     query = db.query(Concept)
+    if user:
+        query = query.filter(Concept.user_id == user.id)
     if module_id:
         query = query.filter(Concept.module_id == module_id)
     concepts = query.order_by(Concept.importance_score.desc()).all()
@@ -97,9 +103,12 @@ def list_concepts(
 
 
 @router.get("/{concept_id}", response_model=ConceptDetailResponse)
-def get_concept_detail(concept_id: str, db: Session = Depends(get_db)):
+def get_concept_detail(concept_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Return concept with linked flashcards, questions, and accuracy stats."""
-    concept = db.query(Concept).filter(Concept.id == concept_id).first()
+    query = db.query(Concept).filter(Concept.id == concept_id)
+    if user:
+        query = query.filter(Concept.user_id == user.id)
+    concept = query.first()
     if not concept:
         raise HTTPException(status_code=404, detail="Concept not found")
 
@@ -149,9 +158,12 @@ def get_concept_detail(concept_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{concept_id}/drill", response_model=DrillSessionResponse)
-def create_drill_session(concept_id: str, db: Session = Depends(get_db)):
+def create_drill_session(concept_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Create a WEAKNESS_DRILL session targeting this concept's questions and flashcards."""
-    concept = db.query(Concept).filter(Concept.id == concept_id).first()
+    query = db.query(Concept).filter(Concept.id == concept_id)
+    if user:
+        query = query.filter(Concept.user_id == user.id)
+    concept = query.first()
     if not concept:
         raise HTTPException(status_code=404, detail="Concept not found")
 
@@ -169,6 +181,7 @@ def create_drill_session(concept_id: str, db: Session = Depends(get_db)):
         session_type="WEAKNESS_DRILL",
         started_at=datetime.utcnow(),
         total_items=len(question_ids) + len(flashcard_ids),
+        user_id=user.id if user else None,
     )
     db.add(session)
     db.commit()

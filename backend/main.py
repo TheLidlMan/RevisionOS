@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from database import create_tables
 
-from routers import modules, documents, flashcards, quizzes, study_sessions, concepts
+from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
 from routers import settings as settings_router
 from routers import weakness_map, knowledge_graph, search as search_router, curriculum, exports
 
@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router)
 app.include_router(modules.router)
 app.include_router(documents.router)
 app.include_router(flashcards.router)

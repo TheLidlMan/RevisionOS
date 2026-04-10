@@ -11,6 +11,7 @@ class ReviewLog(Base):
     __tablename__ = "review_logs"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     session_id = Column(String(36), ForeignKey("study_sessions.id", ondelete="CASCADE"), nullable=False)
     item_id = Column(String(36), nullable=False)
     item_type = Column(String(15), nullable=False)  # FLASHCARD, QUESTION
