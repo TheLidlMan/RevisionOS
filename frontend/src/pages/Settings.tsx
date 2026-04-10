@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Settings as SettingsIcon,
@@ -28,19 +28,21 @@ export default function SettingsPage() {
   });
 
   const [form, setForm] = useState<SettingsUpdate>({});
+  const formInitialized = useRef(false);
 
-  // Initialize form from settings
-  const initialized = settings && Object.keys(form).length === 0;
-  if (initialized) {
-    setForm({
-      llm_model: settings.llm_model,
-      daily_new_cards_limit: settings.daily_new_cards_limit,
-      cards_per_document: settings.cards_per_document,
-      questions_per_document: settings.questions_per_document,
-      weakness_threshold: settings.weakness_threshold,
-      desired_retention: settings.desired_retention,
-    });
-  }
+  useEffect(() => {
+    if (settings && !formInitialized.current) {
+      formInitialized.current = true;
+      setForm({
+        llm_model: settings.llm_model,
+        daily_new_cards_limit: settings.daily_new_cards_limit,
+        cards_per_document: settings.cards_per_document,
+        questions_per_document: settings.questions_per_document,
+        weakness_threshold: settings.weakness_threshold,
+        desired_retention: settings.desired_retention,
+      });
+    }
+  }, [settings]);
 
   const saveMutation = useMutation({
     mutationFn: (data: SettingsUpdate) => updateSettings(data),
