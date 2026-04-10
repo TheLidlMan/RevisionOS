@@ -111,7 +111,7 @@ jobs:
           railway link --project "$RAILWAY_PROJECT_ID" --environment production --service "$SERVICE_REF"
 
       - name: Deploy to Railway
-        run: railway up --ci
+        run: railway up --detach
 
   deploy_frontend:
     name: Deploy Frontend To Cloudflare Pages
