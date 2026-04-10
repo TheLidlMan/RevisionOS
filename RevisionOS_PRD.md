@@ -1,6 +1,6 @@
 # Product Requirements Document
 # RevisionOS — AI-Powered Adaptive Study Platform
-**Version:** 1.0  
+**Version:** 1.1  
 **Author:** Sam (via Perplexity)  
 **Date:** April 2026  
 **Target Builder:** Claude Code  
@@ -42,12 +42,14 @@ Students accumulate large volumes of lecture materials (transcripts, PDFs, slide
 | Backend | FastAPI (Python 3.11+) | Async, easy file handling, great AI library support |
 | Database | SQLite via SQLAlchemy + Alembic | Zero-config, file-based, portable |
 | Vector Search | FAISS + sentence-transformers (all-MiniLM-L6-v2) | Semantic search across knowledge base |
-| AI / LLM | Groq API — `meta-llama/llama-4-scout-17b-16e-instruct` | 10M token context, fast inference, cheap |
+| AI / LLM | Groq API — `meta-llama/llama-4-scout-17b-16e-instruct` + Groq vision models | Long-context extraction, grading, OCR, and follow-up tutoring |
 | Transcription | Groq Whisper API (`whisper-large-v3`) | Audio/video lecture transcription |
 | FSRS | `py-fsrs` Python package (v4+) | Gold-standard spaced repetition scheduling |
 | PDF Processing | PyMuPDF (`fitz`) + pdfplumber | Text + table extraction, image extraction |
 | PPTX Processing | `python-pptx` | Slide text and speaker notes extraction |
 | DOCX Processing | `python-docx` | Word document extraction |
+| Web / media ingestion | `trafilatura` + `yt-dlp` + `ffmpeg` | Readable web extraction and YouTube lecture ingestion |
+| Formula rendering | KaTeX | Markdown/LaTeX flashcard rendering for maths/finance content |
 | Anki Export | `genanki` Python package | Native .apkg export |
 | File uploads | FastAPI + python-multipart | Multipart form handling |
 | Auth | None (local app, no multi-user needed) | Simplicity — single user |
@@ -178,9 +180,13 @@ class Flashcard:
     source_document_id: UUID | None
     source_excerpt: str | None   # Original text the card was generated from
     tags: list[str]
+    rendering_format: Enum        # PLAIN | MARKDOWN
+    occlusion_image_path: str | None
+    occlusion_regions: list[dict] | None
     # FSRS fields (py-fsrs Rating/Card fields):
     due: datetime
     stability: float
+    desired_retention: float
     difficulty: float
     elapsed_days: int
     scheduled_days: int
@@ -216,7 +222,7 @@ class QuizQuestion:
 class StudySession:
     id: UUID
     module_id: UUID | None       # None = cross-module session
-    session_type: Enum           # FLASHCARDS | QUIZ | MIXED | WEAKNESS_DRILL
+    session_type: Enum           # FLASHCARDS | QUIZ | MIXED | WEAKNESS_DRILL | TIMED_EXAM | FREE_RECALL | WRITING_PRACTICE
     started_at: datetime
     ended_at: datetime | None
     total_items: int
@@ -224,6 +230,10 @@ class StudySession:
     incorrect: int
     skipped: int
     score_pct: float
+    estimated_duration_seconds: int | None
+    time_limit_seconds: int | None
+    replay_summary: str | None
+    mastery_gain: float
 ```
 
 ### 5.7 ReviewLog
@@ -234,10 +244,12 @@ class ReviewLog:
     item_id: UUID                # Flashcard or QuizQuestion ID
     item_type: Enum              # FLASHCARD | QUESTION
     rating: Enum                 # AGAIN | HARD | GOOD | EASY (FSRS) or 0–100
+    confidence_before: int | None  # 1–5 self-rating before answer reveal
     time_taken_seconds: float
     answered_at: datetime
     was_correct: bool
     user_answer: str | None      # For open questions
+    follow_up_prompts: list[str] | None
 ```
 
 ---
@@ -279,7 +291,9 @@ class ReviewLog:
 5. **Concept creation** — upsert concepts into DB, link to existing module concepts
 6. **Flashcard generation** — generate 10–30 FSRS flashcards per document (configurable)
 7. **Question generation** — generate 5–15 quiz questions per document (mix of MCQ, short answer, exam-style)
-8. **Status update** — mark document as processed
+8. **Concept gap detection** — identify concepts referenced but not fully defined, mark as unresolved
+9. **Cross-module synthesis** — generate bridge cards linking overlapping concepts across modules when enough material exists
+10. **Status update** — mark document as processed
 
 #### Processing UX
 - Upload queue with real-time progress per file
@@ -287,27 +301,35 @@ class ReviewLog:
 - Error states with retry
 - Background processing (don't block UI)
 - Estimated time remaining
+- URL ingestion form for YouTube lectures and clipped web pages
+- Handwritten note OCR preview with preserved paragraph/heading layout before save
 
 ### 6.3 Flashcard System (FSRS)
 
 #### Review Interface
 - Clean card flip animation (front → back)
+- Pre-answer confidence rating (1–5) optional before reveal to measure calibration
 - After revealing answer, user rates: **Again / Hard / Good / Easy**
 - FSRS algorithm (py-fsrs v4) calculates next due date per card
 - Card shows: stability score, next review date, review count
+- Optional forgetting-curve visualiser shows predicted retention % over time for the current card
 - Session ends when no more due cards (or user exits)
 - Keyboard shortcuts: Space = flip, 1/2/3/4 = Again/Hard/Good/Easy
+- "Go Deeper" button after grading generates 2–3 elaboration prompts for applied recall
 
 #### Smart Scheduling
 - Only shows cards due today or overdue
 - "Due" count visible on module cards in dashboard
 - New cards introduced at configurable rate (default 20/day)
 - Leech detection: card answered "Again" 4+ times → flagged, shown in Weakness Map
+- Session start screen shows smart session estimator: due count, estimated duration, and average seconds/card
 
 #### Card Types
 - **Basic** — Q on front, A on back
 - **Cloze** — fill-in-the-blank with highlighted gap
 - **Reversed** — auto-generate reverse card (term → def AND def → term)
+- **Image Occlusion** — user-uploaded diagrams with hidden regions that must be recalled
+- **Cross-Module Synthesis** — cards explicitly linking concepts across different modules
 
 #### Card Management
 - Edit front/back text inline
@@ -316,6 +338,7 @@ class ReviewLog:
 - Suspend cards (skip from review without deleting)
 - View source excerpt (what text generated this card)
 - Manually create cards
+- Render Markdown and LaTeX on both card front and back
 
 ### 6.4 Quiz Mode
 
@@ -337,6 +360,7 @@ class ReviewLog:
   - *Unseen* — only questions never attempted before
   - *Timed Exam* — full timed mock with countdown timer
 - Topic filter: select specific concepts to drill
+- Writing practice toggle: generate essay prompts with timed long-form response editor
 
 #### Quiz Session Flow
 1. Question displayed (timer shown if timed mode)
@@ -345,11 +369,13 @@ class ReviewLog:
 4. For AI-graded short answers: show score + AI feedback + ideal answer
 5. "Next" → proceed
 6. End screen: score, time taken, breakdown by concept, weakest topics
+7. Timed Exam mode auto-submits unanswered questions when countdown reaches zero, then shows full mark-scheme review
 
 #### AI Grading (short/exam answers)
 - Send question + correct answer + user answer to Groq
 - Return: score (0–100), feedback (2–3 sentences), what was correct, what was missing
 - Semantic matching so near-correct answers score well
+- Essay / writing practice grading includes paragraph-level feedback against a generated mark scheme
 
 ### 6.5 Weakness Map (Core Differentiator)
 
@@ -369,12 +395,14 @@ This is the key feature — the adaptive brain of the app.
 - **"Drill This" button** on any concept → instant quiz session on only that concept
 - Mastered concepts (confidence > 85%) auto-hidden from default view (toggle to show)
 - **Radar chart** per module: axes = topic areas, shows coverage and mastery at a glance
+- Calibration overlay highlights concepts where confidence ratings exceed actual performance
 
 #### Smart Session Generation
 - "Start Optimal Session" button on dashboard:
   1. Identifies bottom 20% of concepts by confidence score
   2. Generates a 20-question quiz mixing flashcards and quiz questions on those concepts only
   3. After session, recalculates weakness map and shows what improved
+- "Free Recall" mode opens a blank canvas for a topic, scores the response against source material, and highlights missing concepts
 
 ### 6.6 Curriculum Generator
 
@@ -387,10 +415,11 @@ This is the key feature — the adaptive brain of the app.
    - User-specified hours per week available
    - Exam date (optional input)
 5. Each session in the plan has:
-   - Topics to cover
-   - Estimated duration
-   - Which documents to read
-   - Suggested flashcard + quiz targets
+    - Topics to cover
+    - Estimated duration
+    - Which documents to read
+    - Suggested flashcard + quiz targets
+6. If an exam date is supplied, generate an optimal exam revision timeline ensuring every due concept is reviewed at least twice, weighted by weakness and FSRS stability
 
 #### Curriculum UI
 - Timeline/Gantt-style view of the study plan
@@ -409,7 +438,8 @@ This is the key feature — the adaptive brain of the app.
 - Force-directed layout using D3.js or Sigma.js
 - Filter by: mastered only, weak only, specific document
 - Zoom/pan with mouse
-- "Gap Detection" highlight: concepts mentioned but never fully defined in materials
+- "Gap Detection" highlight: concepts mentioned but never fully defined in materials, shown as orange nodes
+- Cross-module mode surfaces synthesis opportunities and bridge cards between related modules
 
 ### 6.8 Document Viewer + Transcript Sync
 
@@ -441,6 +471,9 @@ On load, the dashboard shows:
 - **Recent activity**: last 5 sessions with scores
 - **Study time tracker**: today / this week / all time (hours)
 - **Exam countdown**: optional — input exam date, shows days remaining with urgency colouring
+- **Retention forecast**: predicted retention % for each module over the next 1, 3, 7, and 14 days
+- **Concept mastery heatmap calendar**: GitHub-style daily view of mastery gain by day
+- **Session replay**: open any past session to review every answer, correction, and AI feedback
 
 ### 6.11 Anki Export
 
@@ -464,6 +497,7 @@ On load, the dashboard shows:
 - **Theme** — Light / Dark / System
 - **Keyboard shortcuts** reference panel
 - **Data management**: export all data as JSON, import data, clear all data, reset progress only
+- **Markdown / LaTeX rendering** toggle and KaTeX preview defaults
 
 ---
 
@@ -483,6 +517,8 @@ POST   /api/modules/{id}/import-folder       # Bulk import from local path
 ### Documents
 ```
 POST   /api/documents/upload                 # Upload file(s), returns job IDs
+POST   /api/documents/clip-url               # Fetch readable content from URL and ingest it
+POST   /api/documents/youtube                # Queue YouTube lecture download + transcription
 GET    /api/documents/{id}                   # Document detail + status
 GET    /api/documents/{id}/text              # Raw extracted text
 DELETE /api/documents/{id}
@@ -496,6 +532,8 @@ POST   /api/flashcards                       # Manually create card
 PATCH  /api/flashcards/{id}                 # Edit card
 DELETE /api/flashcards/{id}
 POST   /api/flashcards/{id}/review           # Submit review rating → FSRS update
+GET    /api/flashcards/{id}/retention-curve  # Predicted retention % over time for a card
+POST   /api/flashcards/{id}/elaborate        # Generate follow-up "Go Deeper" prompts
 POST   /api/modules/{id}/generate-cards      # Trigger AI card generation for module
 GET    /api/modules/{id}/export-anki         # Download .apkg
 ```
@@ -509,6 +547,7 @@ DELETE /api/questions/{id}
 POST   /api/quizzes/generate                 # Generate quiz session config
 POST   /api/quizzes/sessions                 # Start quiz session
 POST   /api/quizzes/sessions/{id}/answer     # Submit answer, get feedback + grading
+POST   /api/quizzes/sessions/{id}/confidence # Record pre-answer confidence
 POST   /api/quizzes/sessions/{id}/complete   # End session, save stats
 GET    /api/quizzes/sessions/{id}/results    # Session results + breakdown
 ```
@@ -518,6 +557,7 @@ GET    /api/quizzes/sessions/{id}/results    # Session results + breakdown
 GET    /api/concepts?module_id=              # All concepts for module
 GET    /api/concepts/{id}                    # Concept detail + linked cards/questions
 GET    /api/modules/{id}/knowledge-graph     # Graph nodes + edges JSON
+GET    /api/modules/{id}/concept-gaps        # Concepts mentioned but not fully defined
 POST   /api/concepts/{id}/drill              # Create targeted quiz on this concept
 ```
 
@@ -535,9 +575,16 @@ GET    /api/search?q=&module_id=&limit=20    # Semantic search across all conten
 ### Sessions / Analytics
 ```
 GET    /api/sessions?module_id=&limit=       # Study session history
+GET    /api/sessions/{id}/replay             # Full session replay with answers + feedback
+GET    /api/study-sessions/estimate          # Due cards + predicted duration for planned session
+POST   /api/free-recall/sessions             # Score free recall response against source material
+POST   /api/writing-practice/sessions        # Timed essay session + grading
 GET    /api/analytics/overview               # Dashboard stats
 GET    /api/analytics/streaks                # Study streak data
 GET    /api/analytics/performance-over-time  # Score trends
+GET    /api/analytics/retention-forecast     # Module retention forecast at 1/3/7/14 days
+GET    /api/analytics/mastery-calendar       # Daily mastery-gain heatmap data
+POST   /api/revision-plans                   # Generate revision timeline from exam date
 ```
 
 ---
@@ -551,6 +598,7 @@ GET    /api/analytics/performance-over-time  # Score trends
 - **Sidebar navigation**: collapsible, modules listed with coloured dots + due card badges
 - **Icons**: Lucide React
 - **Animations**: Framer Motion for card flips, page transitions, progress fills
+- **Keyboard system**: global shortcut registry with discoverable `?` cheatsheet overlay
 
 ### Key Screens
 
@@ -559,6 +607,8 @@ GET    /api/analytics/performance-over-time  # Score trends
 - Module grid (2-col): coloured cards showing name, doc count, mastery bar, due badge
 - Sidebar: today's recommended session with estimated time
 - Weakness spotlight: 3 concept chips coloured red → "Drill" button
+- Retention forecast widget: 1 / 3 / 7 / 14 day cards per module
+- Mastery heatmap calendar below recent activity
 
 #### Flashcard Review
 - Large card centre-screen, flip on click or Space
@@ -566,6 +616,9 @@ GET    /api/analytics/performance-over-time  # Score trends
 - FSRS info bottom: "Due in 3 days if you press Good"
 - Keyboard hints shown first time, hideable
 - Session complete screen: cards reviewed, new cards introduced, time taken
+- Confidence picker shown before reveal when enabled
+- Markdown + KaTeX rendered inline on front/back and in answer preview
+- Expandable retention curve chart and "Go Deeper" follow-up panel
 
 #### Quiz Mode
 - Clean question card, full-width
@@ -573,12 +626,19 @@ GET    /api/analytics/performance-over-time  # Score trends
 - Short answer: textarea + submit button
 - AI grading feedback appears below in an animated panel
 - Score ring at top-right, updates live
+- Timed Exam mode locks to one question at a time with persistent countdown
+- Writing practice mode uses a distraction-free timed editor with autosave
 
 #### Weakness Map
 - Heatmap grid: each cell = a concept, colour = confidence
 - Hover tooltip: concept name, accuracy %, last reviewed date
 - Click → slide-in panel with drill button and linked content
 - Toggle: "Show Mastered" (greyed out by default)
+- Orange unresolved concepts indicate detected concept gaps from the source material
+
+#### Free Recall
+- Blank topic canvas with source-backed grading summary
+- Missing concepts highlighted in a side panel with direct links to source excerpts
 
 ---
 
@@ -651,6 +711,29 @@ Score this 0-100 based on:
 Return JSON: {score: int, feedback: str (2-3 sentences), what_was_correct: str, what_was_missing: str, improved_answer: str}
 ```
 
+### 9.5 Free Recall / Gap Analysis Prompt
+```
+System: You are evaluating a student's free-recall response against the supplied source material.
+
+User: Compare the student's response with the source material and return:
+- coverage_score (0-100)
+- correctly recalled concepts
+- missing concepts
+- misconceptions
+- 3 next-best follow-up prompts
+
+Return JSON: {coverage_score: int, recalled: [], missing: [], misconceptions: [], follow_up_prompts: []}
+```
+
+### 9.6 Elaboration Prompt Generator
+```
+System: You are helping a student deepen understanding after answering a flashcard.
+
+User: Generate 2-3 short follow-up questions that force application, comparison, or transfer of the concept rather than pure recall.
+
+Return JSON: {prompts: []}
+```
+
 ---
 
 ## 10. Implementation Phases
@@ -674,18 +757,25 @@ Return JSON: {score: int, feedback: str (2-3 sentences), what_was_correct: str, 
 - [ ] Short answer AI grading
 - [ ] Cloze deletion flashcards
 - [ ] Analytics / streak tracking
+- [ ] Confidence calibration tracking
+- [ ] Smart session estimator + forgetting curve visualiser
 
 ### Phase 3 — Rich Ingestion
 - [ ] PPTX/DOCX support
 - [ ] Audio/video upload + Whisper transcription
+- [ ] YouTube URL ingest with `yt-dlp`
+- [ ] Web clipper endpoint with `trafilatura`
 - [ ] Transcript + slide sync viewer
 - [ ] Image/OCR support
+- [ ] Handwritten notes OCR with layout preservation
 - [ ] Bulk folder import (local path)
 
 ### Phase 4 — Knowledge & Export
 - [ ] Concept knowledge graph (D3 visualisation)
+- [ ] Concept gap detection and orange-node highlighting
 - [ ] Semantic search (FAISS)
 - [ ] Curriculum generator + study plan
+- [ ] Cross-module synthesis cards
 - [ ] Anki .apkg export
 - [ ] JSON data export/import
 - [ ] Exam-style questions + grading
@@ -694,6 +784,11 @@ Return JSON: {score: int, feedback: str (2-3 sentences), what_was_correct: str, 
 - [ ] Docker compose for one-command startup
 - [ ] Dark/light theme toggle
 - [ ] Keyboard shortcut system
+- [ ] Markdown / LaTeX card rendering
+- [ ] Free Recall mode
+- [ ] Timed exam mode + writing practice
+- [ ] Retention forecast + mastery heatmap calendar
+- [ ] Session replay
 - [ ] Mobile-responsive layout
 - [ ] Performance optimisation (lazy loading, pagination)
 - [ ] Notifications for due cards
@@ -735,7 +830,55 @@ The build is complete when Sam can:
 7. See his mastery % increase over multiple sessions
 8. Export a module's flashcards as an Anki deck
 9. Search his entire knowledge base semantically
+10. Paste a YouTube URL or web URL and have it processed like any other study source
+11. View a card's predicted retention curve and estimated next-forget date
+12. Run a timed exam, free-recall session, or writing practice session and review the full replay afterwards
+13. See unresolved concept gaps as orange nodes in the knowledge graph
+14. Review retention forecasts and a day-by-day exam revision timeline
+15. Study formula-heavy cards with Markdown and LaTeX rendering plus keyboard-only navigation
 
 ---
 
-*End of PRD — RevisionOS v1.0*
+## 14. Follow-Up Spec for Claude Code — Full Scholium Parity
+
+Claude Code should treat the following as the next major product increment after the current PRD baseline:
+
+### Workstream A — Study Intelligence
+- Add forgetting-curve visualisation for every flashcard using FSRS stability data.
+- Add smart session estimation before session start using due-count and rolling average pace.
+- Add concept gap detection across all uploaded materials and surface unresolved concepts as orange graph nodes.
+- Generate cross-module synthesis cards when multiple modules share related concepts.
+- Add post-answer elaboration prompts ("Go Deeper") that generate 2–3 applied follow-up questions.
+- Add Free Recall mode with source-grounded scoring and missing-concept highlighting.
+
+### Workstream B — Content Processing
+- Support YouTube URL ingestion via `yt-dlp`, `ffmpeg`, and Whisper transcription.
+- Add `POST /api/documents/clip-url` to fetch readable content with `trafilatura`.
+- Improve image ingestion to support handwritten-notes OCR with preserved layout structure.
+- Expand bulk folder import so subfolders can automatically become sub-modules or grouped imports.
+
+### Workstream C — Review & Testing
+- Add full Timed Exam mode with one-question flow, countdown, auto-submit, and mark-scheme review.
+- Record pre-answer confidence ratings and expose calibration analytics in the dashboard and weakness map.
+- Add image occlusion card authoring and review support.
+- Add spaced writing practice with timed essays, AI grading, and paragraph-level feedback.
+
+### Workstream D — Analytics & Progress
+- Add retention forecasts at 1, 3, 7, and 14 day horizons for every module.
+- Add optimal exam revision timeline generation from a supplied exam date.
+- Add session replay so every past session can be audited question-by-question.
+- Add a concept mastery heatmap calendar showing daily mastery gains.
+
+### Workstream E — UX & Integrations
+- Expand keyboard shortcuts into a complete, discoverable shortcut system with `?` cheatsheet.
+- Render Markdown and LaTeX in flashcards and related study surfaces using KaTeX.
+
+### Delivery Notes
+- Keep these features additive to the existing local-first architecture.
+- Reuse the current Groq-first AI stack wherever possible.
+- Prioritise data-model and API changes that unlock multiple UI surfaces at once.
+- Preserve offline behaviour for all non-AI interactions.
+
+---
+
+*End of PRD — RevisionOS v1.1*
