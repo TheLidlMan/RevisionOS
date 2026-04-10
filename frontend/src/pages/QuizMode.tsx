@@ -30,6 +30,7 @@ export default function QuizMode() {
   const [moduleId, setModuleId] = useState(preModule);
   const [numQuestions, setNumQuestions] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty | 'MIXED'>('MEDIUM');
+  const [mode, setMode] = useState<'random' | 'weakness_drill' | 'unseen'>('random');
 
   // Quiz state
   const [phase, setPhase] = useState<Phase>('config');
@@ -195,6 +196,32 @@ export default function QuizMode() {
                   }`}
                 >
                   {d.charAt(0) + d.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mode */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Mode
+            </label>
+            <div className="flex gap-2">
+              {([
+                { value: 'random' as const, label: 'Random' },
+                { value: 'weakness_drill' as const, label: 'Weakness Drill' },
+                { value: 'unseen' as const, label: 'Unseen' },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setMode(value)}
+                  className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                    mode === value
+                      ? 'bg-teal text-white'
+                      : 'bg-navy-lighter border border-gray-700 text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  {label}
                 </button>
               ))}
             </div>

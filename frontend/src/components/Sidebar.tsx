@@ -7,6 +7,10 @@ import {
   ChevronLeft,
   ChevronRight,
   BookOpen,
+  Map,
+  BarChart3,
+  Share2,
+  Calendar,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { getModules } from '../api/client';
@@ -23,6 +27,10 @@ export default function Sidebar() {
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/upload', icon: Upload, label: 'Upload Center' },
+    { to: '/weakness-map', icon: Map, label: 'Weakness Map' },
+    { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+    { to: '/knowledge-graph', icon: Share2, label: 'Knowledge Graph' },
+    { to: '/curriculum', icon: Calendar, label: 'Study Plan' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 

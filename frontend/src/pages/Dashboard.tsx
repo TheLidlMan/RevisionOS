@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Clock, Flame, TrendingUp, Loader2 } from 'lucide-react';
-import { getModules, getAnalyticsOverview } from '../api/client';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Clock, Flame, TrendingUp, Loader2, AlertTriangle } from 'lucide-react';
+import { getModules, getAnalyticsOverview, getWeaknessMap } from '../api/client';
 import ModuleCard from '../components/ModuleCard';
 import CreateModuleModal from '../components/CreateModuleModal';
 
 export default function Dashboard() {
   const [showCreate, setShowCreate] = useState(false);
+  const navigate = useNavigate();
 
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics'],
@@ -16,6 +18,11 @@ export default function Dashboard() {
   const { data: modules, isLoading: modulesLoading } = useQuery({
     queryKey: ['modules'],
     queryFn: getModules,
+  });
+
+  const { data: weaknessData } = useQuery({
+    queryKey: ['weakness-map-spotlight'],
+    queryFn: () => getWeaknessMap(),
   });
 
   return (
@@ -105,6 +112,45 @@ export default function Dashboard() {
           </button>
         </div>
       )}
+
+      {/* Weakness Spotlight */}
+      {weaknessData && weaknessData.concepts.length > 0 && (() => {
+        const weakest = [...weaknessData.concepts]
+          .sort((a, b) => a.confidence_score - b.confidence_score)
+          .slice(0, 3);
+        return (
+          <div className="mt-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-orange-400" />
+                Weakness Spotlight
+              </h2>
+              <button
+                onClick={() => navigate('/weakness-map')}
+                className="text-sm text-teal hover:underline"
+              >
+                View All →
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {weakest.map((c) => (
+                <div key={c.id} className="bg-navy-light rounded-xl border border-gray-800 px-4 py-3 flex items-center gap-3">
+                  <span className="text-sm font-medium">{c.name}</span>
+                  <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-medium">
+                    {Math.round(c.confidence_score)}%
+                  </span>
+                </div>
+              ))}
+              <button
+                onClick={() => navigate('/weakness-map')}
+                className="bg-teal hover:bg-teal-dark text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors"
+              >
+                Drill Weakest
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       <CreateModuleModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>

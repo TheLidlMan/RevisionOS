@@ -12,8 +12,11 @@ import {
   Brain,
   Loader2,
   ArrowLeft,
+  Download,
+  Share2,
+  Calendar,
 } from 'lucide-react';
-import { getModule, deleteDocument, generateCards } from '../api/client';
+import { getModule, deleteDocument, generateCards, exportAnki, exportJson } from '../api/client';
 import type { Document } from '../types';
 
 function StatusBadge({ status }: { status: string }) {
@@ -183,6 +186,50 @@ export default function ModuleView() {
         >
           <Brain className="w-4 h-4" />
           Take Quiz
+        </button>
+        <button
+          onClick={async () => {
+            const blob = await exportAnki(id!);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${mod.name}.apkg`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          Export Anki
+        </button>
+        <button
+          onClick={async () => {
+            const blob = await exportJson(id!);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${mod.name}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          Export JSON
+        </button>
+        <button
+          onClick={() => navigate(`/knowledge-graph?module=${id}`)}
+          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+        >
+          <Share2 className="w-4 h-4 text-teal" />
+          View Knowledge Graph
+        </button>
+        <button
+          onClick={() => navigate(`/curriculum?module=${id}`)}
+          className="flex items-center gap-2 bg-navy-light border border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2 text-sm transition-colors"
+        >
+          <Calendar className="w-4 h-4 text-teal" />
+          Generate Study Plan
         </button>
       </div>
 

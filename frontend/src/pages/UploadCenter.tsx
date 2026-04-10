@@ -8,8 +8,9 @@ import {
   XCircle,
   Loader2,
   CloudUpload,
+  FolderOpen,
 } from 'lucide-react';
-import { getModules, uploadDocument } from '../api/client';
+import { getModules, uploadDocument, importFolder } from '../api/client';
 import type { Document } from '../types';
 
 interface UploadItem {
@@ -137,13 +138,13 @@ export default function UploadCenter() {
           Drag & drop files here, or click to browse
         </p>
         <p className="text-sm text-gray-500">
-          Accepted: .pdf, .txt, .md
+          Accepted: .pdf, .txt, .md, .pptx, .docx, .mp3, .mp4, .png, .jpg, .jpeg
         </p>
         <input
           ref={fileRef}
           type="file"
           multiple
-          accept=".pdf,.txt,.md"
+          accept=".pdf,.txt,.md,.pptx,.docx,.mp3,.mp4,.png,.jpg,.jpeg"
           className="hidden"
           onChange={(e) => {
             if (e.target.files?.length) {
@@ -153,6 +154,9 @@ export default function UploadCenter() {
           }}
         />
       </div>
+
+      {/* Folder import */}
+      <FolderImportSection moduleId={moduleId} />
 
       {/* Upload list */}
       {uploads.length > 0 && (
@@ -183,6 +187,60 @@ export default function UploadCenter() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function FolderImportSection({ moduleId }: { moduleId: string }) {
+  const [folderPath, setFolderPath] = useState('');
+  const queryClient = useQueryClient();
+
+  const folderMutation = useMutation({
+    mutationFn: () => importFolder(moduleId, folderPath),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      setFolderPath('');
+    },
+  });
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+        <FolderOpen className="w-5 h-5 text-teal" />
+        Folder Import
+      </h2>
+      <div className="bg-navy-light rounded-xl border border-gray-800 p-5">
+        <label className="block text-sm font-medium text-gray-300 mb-2">
+          Local Folder Path
+        </label>
+        <div className="flex gap-3">
+          <input
+            type="text"
+            value={folderPath}
+            onChange={(e) => setFolderPath(e.target.value)}
+            placeholder="/path/to/your/notes"
+            className="flex-1 bg-navy-lighter border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-teal transition-colors"
+          />
+          <button
+            onClick={() => folderMutation.mutate()}
+            disabled={!moduleId || !folderPath || folderMutation.isPending}
+            className="bg-teal hover:bg-teal-dark disabled:opacity-50 text-white rounded-lg px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 shrink-0"
+          >
+            {folderMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FolderOpen className="w-4 h-4" />
+            )}
+            Import Folder
+          </button>
+        </div>
+        {folderMutation.isSuccess && (
+          <p className="text-green-400 text-sm mt-2">✅ Folder imported successfully!</p>
+        )}
+        {folderMutation.isError && (
+          <p className="text-red-400 text-sm mt-2">Failed to import folder.</p>
+        )}
+      </div>
     </div>
   );
 }

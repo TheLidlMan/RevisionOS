@@ -23,6 +23,15 @@ import type {
   Concept,
   Settings,
   SettingsUpdate,
+  WeaknessMapData,
+  OptimalSession,
+  ConceptDetail,
+  DrillSession,
+  StreakData,
+  PerformancePoint,
+  KnowledgeGraphData,
+  SearchResponse,
+  CurriculumData,
 } from '../types';
 
 const client = axios.create({
@@ -166,3 +175,53 @@ export const search = (query: string, moduleId?: string) =>
   client
     .get('/search', { params: { q: query, module_id: moduleId } })
     .then((r) => r.data);
+
+// ---- Phase 2: Weakness Map & Analytics ----
+
+export const getWeaknessMap = (moduleId?: string) =>
+  client.get<WeaknessMapData>('/weakness-map', { params: { module_id: moduleId } }).then((r) => r.data);
+
+export const getOptimalSession = (moduleId?: string, maxItems?: number) =>
+  client.get<OptimalSession>('/weakness-map/optimal-session', { params: { module_id: moduleId, max_items: maxItems } }).then((r) => r.data);
+
+export const getConceptDetail = (id: string) =>
+  client.get<ConceptDetail>(`/concepts/${id}`).then((r) => r.data);
+
+export const drillConcept = (id: string) =>
+  client.post<DrillSession>(`/concepts/${id}/drill`).then((r) => r.data);
+
+export const getStreaks = () =>
+  client.get<StreakData>('/analytics/streaks').then((r) => r.data);
+
+export const getPerformanceOverTime = (moduleId?: string, days?: number) =>
+  client.get<PerformancePoint[]>('/analytics/performance-over-time', { params: { module_id: moduleId, days } }).then((r) => r.data);
+
+// ---- Phase 3: Folder Import ----
+
+export const importFolder = (moduleId: string, folderPath: string) =>
+  client.post(`/documents/import-folder/${moduleId}`, { folder_path: folderPath }).then((r) => r.data);
+
+// ---- Phase 4: Knowledge & Export ----
+
+export const getKnowledgeGraph = (moduleId: string) =>
+  client.get<KnowledgeGraphData>(`/modules/${moduleId}/knowledge-graph`).then((r) => r.data);
+
+export const searchAll = (query: string, moduleId?: string, limit?: number) =>
+  client.get<SearchResponse>('/search', { params: { q: query, module_id: moduleId, limit } }).then((r) => r.data);
+
+export const generateCurriculum = (moduleId: string, hoursPerWeek: number, examDate?: string) =>
+  client.post<CurriculumData>(`/modules/${moduleId}/curriculum`, { hours_per_week: hoursPerWeek, exam_date: examDate }).then((r) => r.data);
+
+export const exportAnki = (moduleId: string) =>
+  client.get(`/modules/${moduleId}/export-anki`, { responseType: 'blob' }).then((r) => r.data);
+
+export const exportJson = (moduleId: string) =>
+  client.get(`/modules/${moduleId}/export-json`, { responseType: 'blob' }).then((r) => r.data);
+
+export const importJson = (file: File) => {
+  const form = new FormData();
+  form.append('file', file);
+  return client.post('/modules/import-json', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data);
+};
