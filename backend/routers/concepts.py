@@ -76,6 +76,14 @@ class DrillSessionResponse(BaseModel):
 
 # ---------- Endpoints ----------
 
+
+@router.get("/content-map/{module_id}")
+async def get_content_map(module_id: str, db: Session = Depends(get_db)):
+    """Get content map showing all topics/subtopics for a module."""
+    from services.content_indexer import generate_content_map
+    return await generate_content_map(module_id, db)
+
+
 @router.get("", response_model=list[ConceptResponse])
 def list_concepts(
     module_id: Optional[str] = None,

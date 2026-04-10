@@ -64,7 +64,7 @@ def _get_file_type(filename: str) -> str:
 # ---------- Endpoints ----------
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
-def upload_document(
+async def upload_document(
     module_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -155,6 +155,14 @@ def upload_document(
         db.commit()
         db.refresh(doc)
 
+    # Auto-index: extract topics
+    if doc.processing_status == "done":
+        try:
+            from services.content_indexer import index_document
+            await index_document(doc.id, db)
+        except Exception:
+            pass  # Non-critical, indexing can be re-triggered
+
     return DocumentResponse(
         id=doc.id,
         module_id=doc.module_id,
@@ -166,6 +174,23 @@ def upload_document(
         word_count=doc.word_count,
         created_at=doc.created_at,
     )
+
+
+@router.post("/{document_id}/index")
+async def index_document_endpoint(
+    document_id: str,
+    db: Session = Depends(get_db),
+):
+    """Trigger topic extraction for a document."""
+    from services.content_indexer import index_document
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.raw_text:
+        raise HTTPException(status_code=400, detail="Document has no extracted text")
+
+    concepts = await index_document(document_id, db)
+    return {"indexed": len(concepts), "concepts": concepts}
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
