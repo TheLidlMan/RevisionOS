@@ -387,8 +387,9 @@ def _fsrs_retention(stability: float, days: float) -> float:
 
 def _strip_html(html: str) -> str:
     """Crude HTML → plain-text conversion."""
-    text = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<\s*style\b[^>]*>.*?<\s*/\s*style\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove script elements (handles </script>, </script >, </script\n>, etc.)
+    text = re.sub(r"<\s*script[\s>].*?<\s*/\s*script[\s>]", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<\s*style[\s>].*?<\s*/\s*style[\s>]", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
@@ -405,8 +406,9 @@ def _is_youtube_url(url: str) -> bool:
 
 def _validate_external_url(url: str) -> str:
     """Validate that a URL is an acceptable external HTTP(S) URL (SSRF mitigation)."""
-    from urllib.parse import urlparse
     import ipaddress
+    import socket
+    from urllib.parse import urlparse
 
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -416,17 +418,24 @@ def _validate_external_url(url: str) -> str:
 
     hostname = parsed.hostname.lower()
     # Block obviously internal hostnames
-    blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google.internal"}
+    blocked_hosts = {
+        "localhost", "localhost.localdomain",
+        "127.0.0.1", "0.0.0.0", "[::1]",
+        "metadata.google.internal", "metadata.internal",
+    }
     if hostname in blocked_hosts:
         raise HTTPException(status_code=400, detail="Requests to internal addresses are not allowed")
 
-    # Block private/reserved IP addresses
+    # Resolve hostname and validate all resulting IPs are public
     try:
-        ip = ipaddress.ip_address(hostname)
+        addr_infos = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="Could not resolve hostname")
+
+    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
+        ip = ipaddress.ip_address(sockaddr[0])
         if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
             raise HTTPException(status_code=400, detail="Requests to internal addresses are not allowed")
-    except ValueError:
-        pass  # hostname is a DNS name, not a raw IP — OK
 
     return url
 
@@ -913,8 +922,13 @@ async def clip_url(
     validated_url = _validate_external_url(body.url)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             resp = await client.get(validated_url)
+            # If we get a redirect, validate the target too
+            if resp.is_redirect and resp.has_redirect_location:
+                redirect_url = str(resp.headers.get("location", ""))
+                _validate_external_url(redirect_url)
+                resp = await client.get(redirect_url)
             resp.raise_for_status()
             html = resp.text
     except httpx.HTTPError as exc:
