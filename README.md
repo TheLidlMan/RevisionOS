@@ -148,6 +148,32 @@ RevisionOS/
 | `QUESTIONS_PER_DOCUMENT` | `10` | Quiz questions per doc |
 | `DESIRED_RETENTION` | `0.9` | FSRS target retention rate |
 
+## GitHub Auto-Deploy (Main Branch)
+
+This repository includes a GitHub Actions workflow at `.github/workflows/deploy-main.yml`.
+
+On every push to `main`, it will:
+1. Run Alembic migrations against your production Supabase/Postgres database.
+2. Deploy the backend to Railway.
+3. Build and deploy the frontend to Cloudflare Pages.
+
+### Required GitHub Secrets
+
+Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repository secret**.
+
+| Secret | Description |
+|---|---|
+| `DATABASE_URL` | Production Postgres URL used for Alembic migrations |
+| `RAILWAY_TOKEN` | Railway API token |
+| `RAILWAY_PROJECT_ID` | Railway project id |
+| `RAILWAY_SERVICE_NAME` | Railway backend service name (e.g. `revisionos-api`) |
+| `VITE_API_BASE_URL` | Public backend API base URL for frontend builds (e.g. `https://revisionos-api-production.up.railway.app/api`) |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Pages deploy permissions |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
+| `CLOUDFLARE_PAGES_PROJECT` | Cloudflare Pages project name (e.g. `revisionos-frontend`) |
+
+After these secrets are set, every push to `main` will automatically update production.
+
 ## License
 
 MIT
