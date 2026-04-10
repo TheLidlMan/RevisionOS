@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import get_db
 from models.quiz_session import StudySession
+from models.review_log import ReviewLog
 from models.flashcard import Flashcard
 from models.module import Module
 
@@ -36,6 +37,30 @@ class OverviewResponse(BaseModel):
     due_today: int = 0
     streak: int = 0
     overall_mastery: float = 0.0
+
+
+class DailyActivity(BaseModel):
+    date: str
+    sessions: int = 0
+    items_reviewed: int = 0
+
+
+class StreakResponse(BaseModel):
+    current_streak: int = 0
+    longest_streak: int = 0
+    daily_activity: list[DailyActivity] = []
+
+
+class DailyScore(BaseModel):
+    date: str
+    avg_score: float = 0.0
+    sessions: int = 0
+
+
+class PerformanceOverTimeResponse(BaseModel):
+    daily_scores: list[DailyScore] = []
+    days: int = 30
+    module_id: Optional[str] = None
 
 
 # ---------- Endpoints ----------
@@ -115,4 +140,130 @@ def analytics_overview(db: Session = Depends(get_db)):
         due_today=due_today,
         streak=streak,
         overall_mastery=overall_mastery,
+    )
+
+
+@router.get("/api/analytics/streaks", response_model=StreakResponse)
+def get_streaks(db: Session = Depends(get_db)):
+    """Current streak, longest streak, and daily activity for last 30 days."""
+    today = datetime.utcnow().date()
+
+    # Build daily activity for last 30 days
+    daily_activity: list[DailyActivity] = []
+    active_days: list[bool] = []
+
+    for i in range(30):
+        check_date = today - timedelta(days=i)
+        day_start = datetime.combine(check_date, datetime.min.time())
+        day_end = datetime.combine(check_date, datetime.max.time())
+
+        session_count = (
+            db.query(func.count(StudySession.id))
+            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
+            .scalar()
+        ) or 0
+
+        items_reviewed = 0
+        if session_count > 0:
+            session_ids = [
+                s.id for s in
+                db.query(StudySession)
+                .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
+                .all()
+            ]
+            if session_ids:
+                items_reviewed = (
+                    db.query(func.count(ReviewLog.id))
+                    .filter(ReviewLog.session_id.in_(session_ids))
+                    .scalar()
+                ) or 0
+
+        daily_activity.append(DailyActivity(
+            date=check_date.isoformat(),
+            sessions=session_count,
+            items_reviewed=items_reviewed,
+        ))
+        active_days.append(session_count > 0)
+
+    # Current streak
+    current_streak = 0
+    for i, active in enumerate(active_days):
+        if active:
+            current_streak += 1
+        else:
+            if i == 0:
+                continue  # Today may not have activity yet
+            break
+
+    # Longest streak (check up to 365 days)
+    longest_streak = 0
+    temp_streak = 0
+    for i in range(365):
+        check_date = today - timedelta(days=i)
+        day_start = datetime.combine(check_date, datetime.min.time())
+        day_end = datetime.combine(check_date, datetime.max.time())
+        has_session = (
+            db.query(StudySession)
+            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
+            .first()
+        )
+        if has_session:
+            temp_streak += 1
+            longest_streak = max(longest_streak, temp_streak)
+        else:
+            temp_streak = 0
+
+    daily_activity.reverse()  # Chronological order
+
+    return StreakResponse(
+        current_streak=current_streak,
+        longest_streak=longest_streak,
+        daily_activity=daily_activity,
+    )
+
+
+@router.get("/api/analytics/performance-over-time", response_model=PerformanceOverTimeResponse)
+def get_performance_over_time(
+    module_id: Optional[str] = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """Daily average scores over time."""
+    today = datetime.utcnow().date()
+    daily_scores: list[DailyScore] = []
+
+    for i in range(days):
+        check_date = today - timedelta(days=i)
+        day_start = datetime.combine(check_date, datetime.min.time())
+        day_end = datetime.combine(check_date, datetime.max.time())
+
+        query = db.query(StudySession).filter(
+            StudySession.started_at >= day_start,
+            StudySession.started_at <= day_end,
+            StudySession.ended_at.isnot(None),
+        )
+        if module_id:
+            query = query.filter(StudySession.module_id == module_id)
+
+        sessions = query.all()
+        if sessions:
+            avg_score = sum(s.score_pct for s in sessions) / len(sessions)
+            daily_scores.append(DailyScore(
+                date=check_date.isoformat(),
+                avg_score=round(avg_score, 1),
+                sessions=len(sessions),
+            ))
+        else:
+            daily_scores.append(DailyScore(
+                date=check_date.isoformat(),
+                avg_score=0.0,
+                sessions=0,
+            ))
+
+    daily_scores.reverse()  # Chronological order
+
+    return PerformanceOverTimeResponse(
+        daily_scores=daily_scores,
+        days=days,
+        module_id=module_id,
     )
