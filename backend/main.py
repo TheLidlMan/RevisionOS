@@ -9,6 +9,7 @@ from database import create_tables
 from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
 from routers import settings as settings_router
 from routers import weakness_map, knowledge_graph, search as search_router, curriculum, exports
+from routers import social, integrations, collaboration
 
 app = FastAPI(
     title="RevisionOS API",
@@ -39,6 +40,9 @@ app.include_router(knowledge_graph.router)
 app.include_router(search_router.router)
 app.include_router(curriculum.router)
 app.include_router(exports.router)
+app.include_router(social.router)
+app.include_router(integrations.router)
+app.include_router(collaboration.router)
 
 
 @app.on_event("startup")
