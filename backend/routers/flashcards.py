@@ -269,6 +269,10 @@ async def generate_cards_for_module(
     if not docs:
         raise HTTPException(status_code=400, detail="No processed documents found in this module")
 
+    num_cards = body.num_cards if body and body.num_cards is not None else settings.CARDS_PER_DOCUMENT
+    if num_cards <= 0:
+        raise HTTPException(status_code=400, detail="num_cards must be greater than 0")
+
     # Use chunked generation for massive flashcard output
     from services.rag_service import retrieve_all_document_chunks
     chunks = retrieve_all_document_chunks(db, module_id, chunk_size=4000)
@@ -279,10 +283,8 @@ async def generate_cards_for_module(
         max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
         if len(all_text) > max_chars:
             all_text = all_text[:max_chars]
-        num_cards = (body.num_cards if body and body.num_cards else settings.CARDS_PER_DOCUMENT)
         generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
     else:
-        num_cards = (body.num_cards if body and body.num_cards else settings.CARDS_PER_DOCUMENT)
         chunk_count = min(len(chunks), max(1, num_cards))
         selected_chunks = chunks[:chunk_count]
         cards_per_chunk = max(1, math.ceil(num_cards / chunk_count))

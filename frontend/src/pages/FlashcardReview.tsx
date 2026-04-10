@@ -45,7 +45,7 @@ export default function FlashcardReview() {
   const [reviewed, setReviewed] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
   const [startTime] = useState(() => Date.now());
-  const [completedAt, setCompletedAt] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [done, setDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -59,9 +59,10 @@ export default function FlashcardReview() {
     mutationFn: ({ id, rating }: { id: string; rating: Rating }) =>
       reviewFlashcard(id, rating),
   });
+  const isProcessing = reviewMutation.isPending;
 
   const handleSubmit = useCallback(async () => {
-    if (!cards || submitted || reviewMutation.isPending) return;
+    if (!cards || submitted || isProcessing) return;
     const card = cards[currentIdx];
     const correctAnswer = extractClozeAnswer(card.back);
     const correct = userAnswer.trim().toLowerCase() === correctAnswer.toLowerCase();
@@ -75,22 +76,22 @@ export default function FlashcardReview() {
     } catch {
       return;
     }
-  }, [cards, currentIdx, reviewMutation, submitted, userAnswer]);
+  }, [cards, currentIdx, isProcessing, reviewMutation, submitted, userAnswer]);
 
   const handleNext = useCallback(() => {
-    if (reviewMutation.isPending) return;
+    if (isProcessing) return;
     setReviewed((r) => r + 1);
     setUserAnswer('');
     setSubmitted(false);
     setIsCorrect(false);
     reviewMutation.reset();
     if (cards && currentIdx + 1 >= cards.length) {
-      setCompletedAt(Date.now());
+      setElapsedSeconds(Math.round((Date.now() - startTime) / 1000));
       setDone(true);
     } else {
       setCurrentIdx((i) => i + 1);
     }
-  }, [cards, currentIdx, reviewMutation]);
+  }, [cards, currentIdx, isProcessing, reviewMutation, startTime]);
 
   useEffect(() => {
     if (!submitted && inputRef.current) {
@@ -142,9 +143,8 @@ export default function FlashcardReview() {
   }
 
   if (done) {
-    const elapsed = Math.round(((completedAt ?? startTime) - startTime) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
+    const mins = Math.floor(elapsedSeconds / 60);
+    const secs = elapsedSeconds % 60;
     const accuracy = reviewed > 0 ? Math.round((correctCount / reviewed) * 100) : 0;
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
@@ -182,7 +182,7 @@ export default function FlashcardReview() {
               setIsCorrect(false);
               setReviewed(0);
               setCorrectCount(0);
-              setCompletedAt(null);
+              setElapsedSeconds(0);
               setDone(false);
             }}
             className="scholar-btn flex items-center gap-2"
@@ -266,9 +266,9 @@ export default function FlashcardReview() {
             ref={inputRef}
             type="text"
             value={userAnswer}
-            onChange={(e) => !submitted && !reviewMutation.isPending && setUserAnswer(e.target.value)}
+            onChange={(e) => !submitted && !isProcessing && setUserAnswer(e.target.value)}
             placeholder="Type your answer..."
-            disabled={submitted || reviewMutation.isPending}
+            disabled={submitted || isProcessing}
             style={{
               ...glass,
               width: '100%',
@@ -328,15 +328,15 @@ export default function FlashcardReview() {
         {!submitted ? (
           <button
             onClick={() => void handleSubmit()}
-            disabled={!userAnswer.trim() || reviewMutation.isPending}
+            disabled={!userAnswer.trim() || isProcessing}
             className="scholar-btn disabled:opacity-50 px-8 py-3"
           >
-            {reviewMutation.isPending ? 'Saving...' : 'Check Answer'}
+            {isProcessing ? 'Saving...' : 'Check Answer'}
           </button>
         ) : (
           <button
             onClick={handleNext}
-            disabled={reviewMutation.isPending}
+            disabled={isProcessing}
             className="scholar-btn px-8 py-3"
           >
             {currentIdx + 1 >= cards.length ? 'Finish' : 'Next Card'}
