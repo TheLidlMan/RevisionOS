@@ -72,15 +72,21 @@ def upload_document(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    # Save file to uploads dir
-    upload_dir = os.path.join(settings.UPLOAD_DIR, module_id)
+    # Save file to uploads dir — sanitize filename to prevent path traversal
+    upload_dir = os.path.realpath(os.path.join(settings.UPLOAD_DIR, module_id))
     os.makedirs(upload_dir, exist_ok=True)
 
     file_id = str(uuid.uuid4())
     file_type = _get_file_type(file.filename or "unknown.txt")
-    ext = os.path.splitext(file.filename or ".txt")[1]
+    safe_basename = os.path.basename(file.filename or "unknown.txt")
+    ext = os.path.splitext(safe_basename)[1]
     saved_filename = f"{file_id}{ext}"
     file_path = os.path.join(upload_dir, saved_filename)
+
+    # Verify resolved path is inside uploads dir
+    base_upload = os.path.realpath(settings.UPLOAD_DIR)
+    if not os.path.realpath(file_path).startswith(base_upload):
+        raise HTTPException(status_code=400, detail="Invalid file path")
 
     with open(file_path, "wb") as f:
         content = file.file.read()
