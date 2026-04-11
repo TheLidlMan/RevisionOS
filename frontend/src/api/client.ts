@@ -120,6 +120,20 @@ const getApiUrl = (path: string) => {
   return `${normalizedBase}${normalizedPath}`;
 };
 
+export const getAuthGoogleStartUrl = (returnTo?: string, redirect: boolean = false) => {
+  const params = new URLSearchParams();
+  if (returnTo) {
+    params.set('return_to', returnTo);
+  }
+  if (redirect) {
+    params.set('redirect', 'true');
+  }
+
+  const baseUrl = getApiUrl('/auth/google/start');
+  const query = params.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
+};
+
 const consumeEventStream = async <T>(
   response: Response,
   onEvent?: (event: AIStreamEvent<T>) => void,
@@ -462,7 +476,7 @@ export const authLogout = () =>
   client.post('/auth/logout').then((r) => r.data);
 
 export const authGoogleStart = (returnTo?: string) =>
-  client.get('/auth/google/start', { params: returnTo ? { return_to: returnTo } : {} }).then((r) => r.data);
+  client.get(getAuthGoogleStartUrl(returnTo)).then((r) => r.data);
 
 // ---- Social / Leaderboard ----
 export const getLeaderboard = (timeframe?: string) =>

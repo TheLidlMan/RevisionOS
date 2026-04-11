@@ -65,7 +65,7 @@ class Settings(BaseSettings):
 
     # Public URLs
     PUBLIC_APP_URL: str = "https://app.reviseos.co.uk"
-    PUBLIC_LOGIN_URL: str = "https://login.reviseos.co.uk"
+    PUBLIC_LOGIN_URL: str = "https://app.reviseos.co.uk/login"
     PUBLIC_MARKETING_URL: str = "https://reviseos.co.uk"
     PUBLIC_API_URL: str = "https://api.reviseos.co.uk"
 

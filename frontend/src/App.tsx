@@ -19,6 +19,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
   const { loadFromStorage, isAuthenticated, loading } = useAuthStore();
+  const nextPath = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
     loadFromStorage();
@@ -35,19 +36,20 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Full-screen pages without sidebar
-  if (location.pathname === '/login') {
-    return <LoginPage />;
-  }
-
-  // Wait for session check before rendering protected content
   if (loading) {
     return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} />;
   }
 
-  // Redirect unauthenticated users to login
+  if (location.pathname === '/login') {
+    if (isAuthenticated) {
+      return <Navigate to="/" replace />;
+    }
+    return <LoginPage />;
+  }
+
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    const loginUrl = nextPath && nextPath !== '/' ? `/login?next=${encodeURIComponent(nextPath)}` : '/login';
+    return <Navigate to={loginUrl} replace />;
   }
 
   return (

@@ -204,7 +204,7 @@ def update_profile(
 # ---------- Google OAuth ----------
 
 @router.get("/google/start")
-def google_start(return_to: Optional[str] = None):
+def google_start(return_to: Optional[str] = None, redirect: bool = False):
     """Initiate Google OAuth2 authorization code flow with PKCE."""
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Google login is not configured")
@@ -241,6 +241,8 @@ def google_start(return_to: Optional[str] = None):
         "prompt": "select_account",
     }
     url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    if redirect:
+        return Response(status_code=302, headers={"Location": url})
     return {"url": url}
 
 
