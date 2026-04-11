@@ -337,6 +337,9 @@ export interface GraphNode {
   importance: number;
   mastery: number;
   group: string;
+  parent_id?: string | null;
+  order_index?: number;
+  item_count?: number;
 }
 
 export interface GraphEdge {

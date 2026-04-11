@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey
+from sqlalchemy import CheckConstraint, Column, String, Integer, Float, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -9,6 +9,12 @@ from database import Base
 
 class StudySession(Base):
     __tablename__ = "study_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('ready', 'generating', 'in_progress', 'completed')",
+            name="ck_study_sessions_status",
+        ),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
@@ -21,6 +27,7 @@ class StudySession(Base):
     incorrect = Column(Integer, default=0)
     skipped = Column(Integer, default=0)
     score_pct = Column(Float, default=0.0)
+    status = Column(String(20), default="in_progress", nullable=False)  # ready, generating, in_progress, completed
 
     module = relationship("Module", back_populates="study_sessions")
     review_logs = relationship("ReviewLog", back_populates="session", cascade="all, delete-orphan")

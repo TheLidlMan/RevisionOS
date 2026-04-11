@@ -1,9 +1,10 @@
+import logging
 import os
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ from services.auth_service import get_current_user
 from models.user import User
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
 
 # ---------- Pydantic schemas ----------
 
@@ -29,6 +31,7 @@ class DocumentResponse(BaseModel):
     processed: bool
     processing_status: str
     word_count: int
+    summary: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -65,6 +68,7 @@ def _get_file_type(filename: str) -> str:
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     module_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -155,13 +159,22 @@ async def upload_document(
         db.commit()
         db.refresh(doc)
 
-    # Auto-index: extract topics
+    # Auto-index: extract topics and generate summary
     if doc.processing_status == "done":
         try:
             from services.content_indexer import index_document
             await index_document(doc.id, db)
-        except Exception:
-            pass  # Non-critical, indexing can be re-triggered
+        except Exception as exc:
+            logger.exception("Document indexing failed for doc_id=%s: %s", doc.id, exc)
+
+        # Pre-generate quiz questions in background
+        if settings.GROQ_API_KEY:
+            from routers.quizzes import _run_generate_quiz_for_module_background
+            background_tasks.add_task(
+                _run_generate_quiz_for_module_background,
+                module_id,
+                user.id if user else None,
+            )
 
     return DocumentResponse(
         id=doc.id,
@@ -172,6 +185,7 @@ async def upload_document(
         processed=doc.processed,
         processing_status=doc.processing_status,
         word_count=doc.word_count,
+        summary=doc.summary,
         created_at=doc.created_at,
     )
 
@@ -210,6 +224,7 @@ def get_document(document_id: str, db: Session = Depends(get_db), user: Optional
         processed=doc.processed,
         processing_status=doc.processing_status,
         word_count=doc.word_count,
+        summary=doc.summary,
         created_at=doc.created_at,
     )
 

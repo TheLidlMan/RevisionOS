@@ -38,7 +38,7 @@ const buttonStyle: React.CSSProperties = {
 };
 
 const headingFont: React.CSSProperties = {
-  fontFamily: "Georgia, 'Times New Roman', serif",
+  fontFamily: "'Clash Display', sans-serif",
   color: '#f5f0e8',
 };
 
@@ -321,7 +321,7 @@ function FolderImportSection({ moduleId }: { moduleId: string }) {
         </div>
         {folderMutation.isSuccess && (
           <p className="mt-2" style={{ color: 'rgba(120,180,120,0.8)', fontSize: '0.875rem', fontWeight: 300 }}>
-            ✅ Folder imported successfully!
+            Folder imported successfully!
           </p>
         )}
         {folderMutation.isError && (

@@ -94,7 +94,7 @@ export default function Analytics() {
       <div className="flex items-center gap-3 mb-8">
         <Activity className="w-6 h-6" style={{ color: '#c4956a' }} />
         <h1
-          style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }}
+          style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600 }}
           className="text-2xl"
         >
           Analytics
@@ -158,7 +158,7 @@ export default function Analytics() {
           {/* Mastery Heatmap */}
           <div className="mb-8">
             <h2
-              style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+              style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' }}
               className="text-lg mb-4"
             >
               Mastery Heatmap
@@ -225,7 +225,7 @@ export default function Analytics() {
           {performance && performance.length > 0 && (
             <div className="mb-8">
               <h2
-                style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+                style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' }}
                 className="text-lg mb-4"
               >
                 Performance Over Time
@@ -376,7 +376,7 @@ export default function Analytics() {
           {sessions && sessions.length > 0 && (
             <div>
               <h2
-                style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }}
+                style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8' }}
                 className="text-lg mb-4"
               >
                 Recent Sessions

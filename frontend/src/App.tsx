@@ -17,7 +17,6 @@ import LoginPage from './pages/LoginPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import CollaborationPage from './pages/CollaborationPage';
 import IntegrationsPage from './pages/IntegrationsPage';
-import ThemePreview from './pages/ThemePreview';
 import FreeRecall from './pages/FreeRecall';
 import TimedExam from './pages/TimedExam';
 import WritingPractice from './pages/WritingPractice';
@@ -68,7 +67,6 @@ export default function App() {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/collaboration" element={<CollaborationPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
-          <Route path="/themes" element={<ThemePreview />} />
           <Route path="/free-recall" element={<FreeRecall />} />
           <Route path="/timed-exam" element={<TimedExam />} />
           <Route path="/writing-practice" element={<WritingPractice />} />

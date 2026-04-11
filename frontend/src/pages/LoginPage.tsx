@@ -74,7 +74,7 @@ export default function LoginPage() {
           <BookOpen className="w-12 h-12 mx-auto mb-3" style={{ color: '#c4956a' }} />
           <h1
             className="text-3xl"
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 700 }}
+            style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 700 }}
           >
             RevisionOS
           </h1>

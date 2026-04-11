@@ -1,9 +1,11 @@
+import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,9 +17,13 @@ from models.quiz_session import StudySession
 from models.review_log import ReviewLog
 from models.module import Module
 from models.document import Document
+from models.user import User
 from services import ai_service
+from services.auth_service import get_current_user
 
 router = APIRouter(tags=["quizzes"])
+logger = logging.getLogger(__name__)
+_quiz_generation_locks: dict[str, asyncio.Lock] = {}
 
 
 # ---------- Pydantic schemas ----------
@@ -111,6 +117,28 @@ class SessionResultsResponse(BaseModel):
 
 # ---------- Helpers ----------
 
+
+def _get_owned_session(db: Session, session_id: str, user: Optional[User]) -> StudySession:
+    session_query = db.query(StudySession).filter(StudySession.id == session_id)
+    if user:
+        session_query = session_query.filter(StudySession.user_id == user.id)
+    else:
+        session_query = session_query.filter(StudySession.user_id.is_(None))
+
+    session = session_query.first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+def _run_generate_quiz_for_module_background(module_id: str, user_id: Optional[str] = None):
+    asyncio.run(_generate_quiz_for_module(module_id, user_id))
+
+
+def _run_generate_next_quiz_background(module_id: str, completed_session_id: str):
+    asyncio.run(_generate_next_quiz_background(module_id, completed_session_id))
+
+
 def _question_to_response(q: QuizQuestion) -> QuestionResponse:
     options = None
     if q.options:
@@ -149,6 +177,45 @@ def _question_for_quiz(q: QuizQuestion) -> QuestionForQuiz:
         options=options,
         difficulty=q.difficulty,
     )
+
+
+def _normalize_question_type(value: Optional[str], default: str = "MCQ") -> str:
+    normalized = (value or default).strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "MCQ": "MCQ",
+        "MULTIPLE_CHOICE": "MCQ",
+        "MULTIPLECHOICE": "MCQ",
+        "SHORT_ANSWER": "SHORT_ANSWER",
+        "SHORTANSWER": "SHORT_ANSWER",
+        "TRUE_FALSE": "TRUE_FALSE",
+        "TRUEFALSE": "TRUE_FALSE",
+        "FILL_BLANK": "FILL_BLANK",
+        "FILL_IN_THE_BLANK": "FILL_BLANK",
+        "FILLINBLANK": "FILL_BLANK",
+        "EXAM_STYLE": "EXAM_STYLE",
+        "EXAM": "EXAM_STYLE",
+    }
+    return aliases.get(normalized, default)
+
+
+def _normalize_question_difficulty(value: Optional[str], default: str = "MEDIUM") -> str:
+    normalized = (value or default).strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "EASY": "EASY",
+        "MEDIUM": "MEDIUM",
+        "HARD": "HARD",
+        "EXAM": "EXAM",
+        "EXAM_STYLE": "EXAM",
+    }
+    return aliases.get(normalized, default)
+
+
+def _quiz_generation_lock(module_id: str) -> asyncio.Lock:
+    lock = _quiz_generation_locks.get(module_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _quiz_generation_locks[module_id] = lock
+    return lock
 
 
 # ---------- Endpoints ----------
@@ -193,9 +260,15 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
     if len(all_text) > max_chars:
         all_text = all_text[:max_chars]
 
+    num_questions = min(
+        max(1, body.num_questions),
+        settings.QUESTIONS_PER_DOCUMENT,
+        settings.MAX_QUESTIONS_PER_REQUEST,
+    )
+
     generated = await ai_service.generate_quiz_questions(
         text=all_text,
-        num_questions=body.num_questions,
+        num_questions=num_questions,
         question_types=body.question_types,
         difficulty=body.difficulty,
         subject=module.name,
@@ -203,16 +276,12 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
     created_questions = []
     for qdata in generated:
-        q_type = qdata.get("type", qdata.get("question_type", "MCQ")).upper()
-        if q_type not in ("MCQ", "SHORT_ANSWER", "TRUE_FALSE", "FILL_BLANK", "EXAM_STYLE"):
-            q_type = "MCQ"
+        q_type = _normalize_question_type(qdata.get("type", qdata.get("question_type")), default="MCQ")
 
         options = qdata.get("options")
         options_json = json.dumps(options) if options else None
 
-        diff = qdata.get("difficulty", body.difficulty).upper()
-        if diff not in ("EASY", "MEDIUM", "HARD", "EXAM"):
-            diff = "MEDIUM"
+        diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
 
         question = QuizQuestion(
             module_id=body.module_id,
@@ -238,12 +307,17 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
 
 @router.post("/api/quizzes/sessions", response_model=SessionResponse)
-def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db)):
+def start_quiz_session(
+    body: StartSessionRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
     session = StudySession(
         module_id=body.module_id,
         session_type=body.session_type.upper(),
         started_at=datetime.utcnow(),
         total_items=len(body.question_ids),
+        user_id=user.id if user else None,
     )
     db.add(session)
     db.commit()
@@ -282,10 +356,13 @@ def start_quiz_session(body: StartSessionRequest, db: Session = Depends(get_db))
 
 
 @router.post("/api/quizzes/sessions/{session_id}/answer", response_model=AnswerResponse)
-async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depends(get_db)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def submit_answer(
+    session_id: str,
+    body: AnswerRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    session = _get_owned_session(db, session_id, user)
 
     question = db.query(QuizQuestion).filter(QuizQuestion.id == body.question_id).first()
     if not question:
@@ -349,18 +426,30 @@ async def submit_answer(session_id: str, body: AnswerRequest, db: Session = Depe
 
 
 @router.post("/api/quizzes/sessions/{session_id}/complete", response_model=SessionResultsResponse)
-def complete_session(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+def complete_session(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    session = _get_owned_session(db, session_id, user)
 
     session.ended_at = datetime.utcnow()
     total = session.correct + session.incorrect + session.skipped
     if total > 0:
         session.score_pct = round((session.correct / total) * 100, 1)
     session.total_items = total
+    session.status = "completed"
     db.commit()
     db.refresh(session)
+
+    # Trigger background generation of next quiz
+    if session.module_id and settings.GROQ_API_KEY:
+        background_tasks.add_task(
+            _run_generate_next_quiz_background,
+            session.module_id,
+            session_id,
+        )
 
     logs = db.query(ReviewLog).filter(ReviewLog.session_id == session_id).all()
     log_dicts = [
@@ -391,10 +480,8 @@ def complete_session(session_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/api/quizzes/sessions/{session_id}/results", response_model=SessionResultsResponse)
-def get_session_results(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+def get_session_results(session_id: str, db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user)):
+    session = _get_owned_session(db, session_id, user)
 
     logs = db.query(ReviewLog).filter(ReviewLog.session_id == session_id).all()
     log_dicts = [
@@ -422,3 +509,100 @@ def get_session_results(session_id: str, db: Session = Depends(get_db)):
         score_pct=session.score_pct,
         review_logs=log_dicts,
     )
+
+
+# ---------- Background quiz pre-generation ----------
+
+async def _generate_quiz_for_module(module_id: str, user_id: str = None):
+    """Generate quiz questions for a module in the background."""
+    from database import SessionLocal
+    async with _quiz_generation_lock(module_id):
+        db = SessionLocal()
+        try:
+            module = db.query(Module).filter(Module.id == module_id).first()
+            if not module:
+                return
+
+            docs = db.query(Document).filter(
+                Document.module_id == module_id,
+                Document.processing_status == "done",
+            ).all()
+            if not docs:
+                return
+
+            combined_text = "\n\n".join(d.raw_text for d in docs if d.raw_text)
+            if not combined_text.strip():
+                return
+
+            question_types = ["MCQ"]
+            difficulty = "MEDIUM"
+            num_questions = min(settings.QUESTIONS_PER_DOCUMENT, settings.MAX_QUESTIONS_PER_REQUEST)
+            questions = await ai_service.generate_quiz_questions(
+                combined_text,
+                num_questions,
+                question_types,
+                difficulty,
+                subject=module.name,
+            )
+
+            normalized_questions: list[QuizQuestion] = []
+            for q_data in questions:
+                if not isinstance(q_data, dict):
+                    logger.debug("Skipping malformed background quiz payload for module %s: %r", module_id, q_data)
+                    continue
+
+                question_text = q_data.get("question_text", q_data.get("question", ""))
+                correct_answer = q_data.get("correct_answer", "")
+                if not question_text or not correct_answer:
+                    continue
+
+                options = q_data.get("options")
+                options_json = json.dumps(options) if isinstance(options, list) and options else None
+                normalized_questions.append(
+                    QuizQuestion(
+                        id=str(uuid.uuid4()),
+                        module_id=module_id,
+                        question_text=question_text,
+                        question_type=_normalize_question_type(q_data.get("type", q_data.get("question_type")), default="MCQ"),
+                        options=options_json,
+                        correct_answer=correct_answer,
+                        explanation=q_data.get("explanation", ""),
+                        difficulty=_normalize_question_difficulty(q_data.get("difficulty", difficulty), default="MEDIUM"),
+                        source_document_id=docs[0].id if docs else None,
+                        user_id=user_id,
+                    )
+                )
+
+            if not normalized_questions:
+                return
+
+            db.query(QuizQuestion).filter(QuizQuestion.module_id == module_id).delete(synchronize_session=False)
+            for question in normalized_questions:
+                db.add(question)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Background quiz generation failed for module %s: %s", module_id, exc)
+        finally:
+            db.close()
+
+
+async def _generate_next_quiz_background(module_id: str, completed_session_id: str):
+    """After a quiz session completes, pre-generate the next set of questions."""
+    await _generate_quiz_for_module(module_id)
+
+
+class QuizStatusResponse(BaseModel):
+    module_id: str
+    status: str  # ready, generating, no_questions
+    question_count: int = 0
+
+
+@router.get("/api/modules/{module_id}/quiz-status", response_model=QuizStatusResponse)
+def get_quiz_status(module_id: str, db: Session = Depends(get_db)):
+    count = db.query(QuizQuestion).filter(QuizQuestion.module_id == module_id).count()
+    if count == 0:
+        status = "no_questions"
+    else:
+        status = "ready"
+    return QuizStatusResponse(module_id=module_id, status=status, question_count=count)

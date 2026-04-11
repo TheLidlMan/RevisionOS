@@ -22,7 +22,6 @@ const CONFIDENCE_LEVELS = [
   { value: 4, label: '4', desc: 'Fairly sure' },
   { value: 5, label: '5', desc: 'Certain' },
 ];
-
 const glass = {
   background: 'rgba(255,248,240,0.04)',
   border: '1px solid rgba(139,115,85,0.15)',
@@ -30,35 +29,49 @@ const glass = {
   backdropFilter: 'blur(20px)',
 } as const;
 
-/** Render text with Markdown bold/italic and LaTeX ($..$ and $$..$$) */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function RichText({ text }: { text: string }) {
   const html = useMemo(() => {
-    let result = text;
-    // Render display math $$...$$
-    result = result.replace(/\$\$([^$]+)\$\$/g, (_m, tex) => {
+    let result = escapeHtml(text);
+
+    result = result.replace(/\$\$([^$]+)\$\$/g, (_match, tex) => {
       try {
         return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
-      } catch { return `$$${tex}$$`; }
+      } catch {
+        return `$$${tex}$$`;
+      }
     });
-    // Render inline math $...$
-    result = result.replace(/\$([^$]+)\$/g, (_m, tex) => {
+
+    result = result.replace(/\$([^$]+)\$/g, (_match, tex) => {
       try {
         return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
-      } catch { return `$${tex}$`; }
+      } catch {
+        return `$${tex}$`;
+      }
     });
-    // Markdown bold **text**
+
     result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    // Markdown italic *text*
     result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // Markdown inline code `text`
-    result = result.replace(/`([^`]+)`/g, '<code style="background:rgba(196,149,106,0.15);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>');
+    result = result.replace(
+      /`([^`]+)`/g,
+      '<code style="background:rgba(196,149,106,0.15);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>'
+    );
+
     return result;
   }, [text]);
 
   return (
-    <span
+    <div
       dangerouslySetInnerHTML={{ __html: html }}
-      style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontSize: '1.25rem', lineHeight: 1.7 }}
+      style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.25rem', lineHeight: 1.7 }}
       className="text-center whitespace-pre-wrap"
     />
   );
@@ -72,10 +85,8 @@ export default function FlashcardReview() {
   const [reviewed, setReviewed] = useState(0);
   const [startTime] = useState(Date.now());
   const [done, setDone] = useState(false);
-  // Confidence rating state
   const [confidence, setConfidence] = useState<number | null>(null);
   const [confidenceSubmitted, setConfidenceSubmitted] = useState(false);
-  // Elaboration prompts state
   const [elaboration, setElaboration] = useState<ElaborationResponse | null>(null);
   const [showElaboration, setShowElaboration] = useState(false);
   const elaborationLoadingRef = useRef(false);
@@ -128,8 +139,7 @@ export default function FlashcardReview() {
   const handleRate = useCallback(
     (rating: Rating) => {
       if (!cards) return;
-      const card = cards[currentIdx];
-      reviewMutation.mutate({ id: card.id, rating });
+      reviewMutation.mutate({ id: cards[currentIdx].id, rating });
     },
     [cards, currentIdx, reviewMutation]
   );
@@ -149,18 +159,15 @@ export default function FlashcardReview() {
     elaborationMutation.mutate(cards[currentIdx].id);
   }, [cards, currentIdx, elaborationMutation]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter') {
+      if ((e.key === ' ' || e.key === 'Enter') && !flipped) {
         e.preventDefault();
         handleFlip();
       }
       if (flipped && ['1', '2', '3', '4'].includes(e.key)) {
-        const idx = parseInt(e.key) - 1;
-        handleRate(RATINGS[idx].value);
+        handleRate(RATINGS[parseInt(e.key, 10) - 1].value);
       }
-      // D key for elaborate (Go Deeper)
       if (flipped && (e.key === 'd' || e.key === 'D') && !e.metaKey && !e.ctrlKey) {
         handleElaborate();
       }
@@ -172,7 +179,7 @@ export default function FlashcardReview() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin" style={{ color: '#c4956a' }} />
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
       </div>
     );
   }
@@ -180,14 +187,14 @@ export default function FlashcardReview() {
   if (!cards || cards.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
-        <PartyPopper className="w-16 h-16 mb-4" style={{ color: '#c4956a' }} />
-        <h2 style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }} className="text-2xl mb-2">
-          No cards due! 🎉
+        <PartyPopper className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
+        <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)' }} className="text-2xl mb-2">
+          No cards due
         </h2>
-        <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="mb-6">
+        <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }} className="mb-6">
           You're all caught up. Come back later for more reviews.
         </p>
-        <button onClick={() => navigate(-1)} style={{ background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500 }} className="px-4 py-2 text-sm transition-opacity hover:opacity-90">
+        <button onClick={() => navigate(-1)} className="scholar-btn">
           Go Back
         </button>
       </div>
@@ -200,23 +207,36 @@ export default function FlashcardReview() {
     const secs = elapsed % 60;
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
-        <PartyPopper className="w-16 h-16 mb-4" style={{ color: '#c4956a' }} />
-        <h2 style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8' }} className="text-2xl mb-2">
-          Session Complete!
+        <PartyPopper className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
+        <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)' }} className="text-2xl mb-2">
+          Session Complete
         </h2>
-        <p style={{ color: '#c4956a', fontWeight: 200, fontSize: '3rem' }} className="my-4">{reviewed}</p>
-        <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="mb-1">cards reviewed</p>
-        <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.9rem' }} className="mb-6">
+        <p style={{ color: 'var(--accent)', fontWeight: 200, fontSize: '3rem' }} className="my-4">{reviewed}</p>
+        <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }} className="mb-1">cards reviewed</p>
+        <p style={{ color: 'var(--text-tertiary)', fontWeight: 300, fontSize: '0.9rem' }} className="mb-6">
           Time: {mins > 0 ? `${mins}m ` : ''}{secs}s
         </p>
         <div className="flex gap-3">
-          <button onClick={() => navigate(-1)} style={{ ...glass, color: '#f5f0e8', fontWeight: 300, fontSize: '0.9rem' }} className="px-4 py-2 text-sm transition-all hover:opacity-80">
+          <button
+            onClick={() => navigate(-1)}
+            style={{ ...glass, color: 'var(--text)', fontWeight: 300, fontSize: '0.9rem' }}
+            className="px-4 py-2 text-sm transition-all hover:opacity-80"
+          >
             Go Back
           </button>
           <button
-            onClick={() => { setCurrentIdx(0); setFlipped(false); setReviewed(0); setDone(false); setConfidence(null); setConfidenceSubmitted(false); setElaboration(null); setShowElaboration(false); }}
-            style={{ background: '#c4956a', color: '#1a1714', borderRadius: '8px', fontWeight: 500 }}
-            className="px-4 py-2 text-sm transition-opacity hover:opacity-90 flex items-center gap-2"
+            onClick={() => {
+              setCurrentIdx(0);
+              setFlipped(false);
+              setReviewed(0);
+              setDone(false);
+              setConfidence(null);
+              setConfidenceSubmitted(false);
+              setElaboration(null);
+              setShowElaboration(false);
+              elaborationLoadingRef.current = false;
+            }}
+            className="scholar-btn flex items-center gap-2"
           >
             <RotateCcw className="w-4 h-4" />
             Review Again
@@ -235,27 +255,38 @@ export default function FlashcardReview() {
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-1 text-sm transition-colors"
-          style={{ color: 'rgba(245,240,232,0.5)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = '#f5f0e8')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(245,240,232,0.5)')}
+          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
         >
           <ArrowLeft className="w-4 h-4" />
           Back
         </button>
-        <span style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>
+        <span style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }}>
           {currentIdx + 1} / {cards.length}
         </span>
       </div>
 
       {/* Progress bar */}
-      <div className="mb-8 overflow-hidden" style={{ height: '3px', background: 'rgba(255,248,240,0.06)', borderRadius: '4px' }}>
-        <div style={{ height: '100%', background: '#c4956a', borderRadius: '4px', transition: 'width 0.3s ease', width: `${((currentIdx) / cards.length) * 100}%` }} />
+      <div
+        className="mb-8 overflow-hidden"
+        style={{ height: '3px', background: 'rgba(255,248,240,0.06)', borderRadius: '4px' }}
+      >
+        <div
+          style={{
+            height: '100%',
+            background: 'var(--accent)',
+            borderRadius: '4px',
+            transition: 'width 0.3s ease',
+            width: `${((currentIdx) / cards.length) * 100}%`,
+          }}
+        />
       </div>
 
       {/* Confidence rating (before flip) — Feature 12 */}
       {!flipped && !confidenceSubmitted && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-4">
-          <p style={{ color: 'rgba(245,240,232,0.4)', fontWeight: 300, fontSize: '0.8rem', textAlign: 'center' }} className="mb-2">
+          <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.8rem', textAlign: 'center' }} className="mb-2">
             How confident are you? (before flipping)
           </p>
           <div className="flex justify-center gap-2">
@@ -268,7 +299,7 @@ export default function FlashcardReview() {
                   background: confidence === cl.value ? 'rgba(196,149,106,0.3)' : 'rgba(255,248,240,0.04)',
                   border: confidence === cl.value ? '1px solid rgba(196,149,106,0.5)' : '1px solid rgba(139,115,85,0.15)',
                   borderRadius: '8px',
-                  color: confidence === cl.value ? '#c4956a' : 'rgba(245,240,232,0.4)',
+                  color: confidence === cl.value ? 'var(--accent)' : 'var(--text-secondary)',
                   fontWeight: 400,
                   width: 36, height: 36,
                   transition: 'all 0.2s',
@@ -282,7 +313,7 @@ export default function FlashcardReview() {
         </motion.div>
       )}
       {confidenceSubmitted && !flipped && (
-        <p style={{ color: 'rgba(196,149,106,0.5)', fontWeight: 300, fontSize: '0.75rem', textAlign: 'center' }} className="mb-4">
+        <p style={{ color: 'var(--accent)', fontWeight: 300, fontSize: '0.75rem', textAlign: 'center' }} className="mb-4">
           <TrendingUp className="w-3 h-3 inline mr-1" />
           Confidence: {confidence}/5 recorded
         </p>
@@ -300,12 +331,12 @@ export default function FlashcardReview() {
             style={{ ...glass, borderRadius: '16px', cursor: 'pointer', userSelect: 'none' }}
             className="p-8 min-h-[300px] flex flex-col items-center justify-center"
           >
-            <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase' }} className="mb-4">
+            <p style={{ color: 'var(--text-tertiary)', fontWeight: 300, fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase' }} className="mb-4">
               {flipped ? 'Answer' : 'Question'}
             </p>
             <RichText text={flipped ? card.back : card.front} />
             {!flipped && (
-              <p style={{ color: 'rgba(245,240,232,0.25)', fontWeight: 300, fontSize: '0.8rem' }} className="mt-6">
+              <p style={{ color: 'var(--text-tertiary)', fontWeight: 300, fontSize: '0.8rem' }} className="mt-6">
                 Click or press Space to flip
               </p>
             )}
@@ -337,7 +368,7 @@ export default function FlashcardReview() {
             <button
               onClick={handleElaborate}
               disabled={elaborationMutation.isPending || showElaboration}
-              style={{ ...glass, color: '#c4956a', fontWeight: 300, fontSize: '0.85rem', borderRadius: '8px' }}
+              style={{ ...glass, color: 'var(--accent)', fontWeight: 300, fontSize: '0.85rem', borderRadius: '8px' }}
               className="px-4 py-2 text-sm transition-all hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
             >
               {elaborationMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
@@ -350,17 +381,17 @@ export default function FlashcardReview() {
       {/* Elaboration prompts — Feature 5 */}
       {showElaboration && elaboration && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={glass} className="mt-4 p-5">
-          <p style={{ color: '#c4956a', fontWeight: 400, fontSize: '0.85rem', marginBottom: 12 }}>
+          <p style={{ color: 'var(--accent)', fontWeight: 400, fontSize: '0.85rem', marginBottom: 12 }}>
             <Lightbulb className="w-4 h-4 inline mr-1" /> Follow-up Questions
           </p>
           <div className="space-y-3">
             {elaboration.follow_up_questions.map((fq, i) => (
               <div key={i} style={{ borderLeft: '2px solid rgba(196,149,106,0.3)', paddingLeft: 12 }}>
-                <p style={{ color: '#f5f0e8', fontWeight: 400, fontSize: '0.9rem', marginBottom: 4 }}>
+                <p style={{ color: 'var(--text)', fontWeight: 400, fontSize: '0.9rem', marginBottom: 4 }}>
                   {i + 1}. {fq.question}
                 </p>
-                <p style={{ color: 'rgba(245,240,232,0.35)', fontWeight: 300, fontSize: '0.8rem' }}>
-                  💡 Hint: {fq.hint}
+                <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.8rem' }}>
+                  Hint: {fq.hint}
                 </p>
               </div>
             ))}
@@ -368,8 +399,14 @@ export default function FlashcardReview() {
         </motion.div>
       )}
 
+      {reviewMutation.isError && (
+        <p className="mt-4 text-sm text-center" style={{ color: 'rgba(220,120,100,0.9)' }}>
+          Couldn&apos;t save this review. Please try again.
+        </p>
+      )}
+
       {/* Card info */}
-      <div className="mt-8 flex justify-center gap-6" style={{ fontSize: '0.75rem', color: 'rgba(245,240,232,0.25)' }}>
+      <div className="mt-8 flex justify-center gap-6" style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
         <span>State: {card.state}</span>
         <span>Stability: {card.stability.toFixed(1)}</span>
         <span>Reviews: {card.reps}</span>

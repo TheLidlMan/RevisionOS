@@ -25,7 +25,7 @@ const glass = {
     border: 'none',
   } as React.CSSProperties,
   serif: {
-    fontFamily: "Georgia, 'Times New Roman', serif",
+    fontFamily: "'Clash Display', sans-serif",
   } as React.CSSProperties,
   text: { color: '#f5f0e8', fontWeight: 300 } as React.CSSProperties,
   secondary: { color: 'rgba(245,240,232,0.5)' } as React.CSSProperties,
@@ -68,7 +68,7 @@ export default function IntegrationsPage() {
       </div>
 
       <div className="p-6 mb-4" style={glass.card}>
-        <h3 className="mb-4" style={{ ...glass.serif, color: '#f5f0e8', fontWeight: 500 }}>📝 Notion Import</h3>
+        <h3 className="mb-4" style={{ ...glass.serif, color: '#f5f0e8', fontWeight: 500 }}>Notion Import</h3>
         <div className="space-y-3">
           <input value={notionToken} onChange={(e) => setNotionToken(e.target.value)} placeholder="Notion Integration Token"
             className="w-full px-3 py-2 text-sm font-mono"
@@ -88,7 +88,7 @@ export default function IntegrationsPage() {
       </div>
 
       <div className="p-6" style={glass.card}>
-        <h3 className="mb-4" style={{ ...glass.serif, color: '#f5f0e8', fontWeight: 500 }}>📁 Google Drive Import</h3>
+        <h3 className="mb-4" style={{ ...glass.serif, color: '#f5f0e8', fontWeight: 500 }}>Google Drive Import</h3>
         <div className="space-y-3">
           <input value={gdriveToken} onChange={(e) => setGdriveToken(e.target.value)} placeholder="Google OAuth Access Token"
             className="w-full px-3 py-2 text-sm font-mono"

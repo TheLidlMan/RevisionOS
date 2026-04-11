@@ -34,7 +34,7 @@ export default function PomodoroTimer() {
   return (
     <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 40, width: 240, padding: '1.25rem', ...glass, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
       <div className="flex items-center justify-between mb-3">
-        <span style={{ fontFamily: "Georgia, serif", color: '#f5f0e8', fontWeight: 600, fontSize: '0.85rem' }}>{isBreak ? '☕ Break' : '📖 Focus'}</span>
+        <span style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600, fontSize: '0.85rem' }}>{isBreak ? 'Break' : 'Focus'}</span>
         <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}><X className="w-4 h-4" /></button>
       </div>
       <div style={{ textAlign: 'center', margin: '0.5rem 0' }}>
