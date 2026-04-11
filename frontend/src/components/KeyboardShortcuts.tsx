@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Keyboard, X } from 'lucide-react';
+import { Keyboard, X } from '@phosphor-icons/react';
 
 const glass = {
   background: 'rgba(255,248,240,0.04)',
@@ -21,12 +21,10 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['⌘/Ctrl', 'K'], description: 'Open search', category: 'Navigation' },
   { keys: ['G', 'D'], description: 'Go to Dashboard', category: 'Navigation' },
   { keys: ['G', 'Q'], description: 'Go to Quiz Mode', category: 'Navigation' },
-  { keys: ['G', 'A'], description: 'Go to Analytics', category: 'Navigation' },
-  { keys: ['G', 'U'], description: 'Go to Upload', category: 'Navigation' },
+  { keys: ['G', 'K'], description: 'Go to Knowledge Graph', category: 'Navigation' },
+  { keys: ['G', 'P'], description: 'Go to Study Plan', category: 'Navigation' },
+  { keys: ['G', 'F'], description: 'Go to Forgetting Curve', category: 'Navigation' },
   { keys: ['G', 'S'], description: 'Go to Settings', category: 'Navigation' },
-  { keys: ['G', 'W'], description: 'Go to Weakness Map', category: 'Navigation' },
-  { keys: ['G', 'F'], description: 'Go to Free Recall', category: 'Navigation' },
-  { keys: ['G', 'E'], description: 'Go to Timed Exam', category: 'Navigation' },
   { keys: ['?'], description: 'Show keyboard shortcuts', category: 'Navigation' },
   { keys: ['Esc'], description: 'Close modal / go back', category: 'Navigation' },
   // Flashcard Review
@@ -89,12 +87,10 @@ export default function KeyboardShortcuts() {
         const routes: Record<string, string> = {
           d: '/',
           q: '/quiz',
-          a: '/analytics',
-          u: '/upload',
+          k: '/knowledge-graph',
+          p: '/curriculum',
+          f: '/forgetting-curve',
           s: '/settings',
-          w: '/weakness-map',
-          f: '/free-recall',
-          e: '/timed-exam',
         };
         if (routes[key]) {
           e.preventDefault();
@@ -134,13 +130,13 @@ export default function KeyboardShortcuts() {
           >
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
-                <Keyboard className="w-5 h-5" style={{ color: '#c4956a' }} />
+                <Keyboard size={20} style={{ color: '#c4956a' }} />
                 <h2 style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: '#f5f0e8', fontWeight: 600 }} className="text-xl">
                   Keyboard Shortcuts
                 </h2>
               </div>
               <button onClick={handleClose} style={{ color: 'rgba(245,240,232,0.4)' }} className="hover:opacity-80 transition-opacity">
-                <X className="w-5 h-5" />
+                <X size={20} />
               </button>
             </div>
 

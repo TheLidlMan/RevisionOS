@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search,
-  FileText,
-  Layers,
-  HelpCircle,
   BookOpen,
+  CardsThree,
+  FileText,
+  MagnifyingGlass,
+  Question,
   X,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import { searchAll, getModules } from '../api/client';
 import type { SearchResult } from '../types';
 
@@ -40,11 +40,11 @@ const sg = {
 
 function resultIcon(type: string) {
   switch (type.toLowerCase()) {
-    case 'document': return <FileText className="w-4 h-4" style={{ color: sg.accent }} />;
-    case 'flashcard': return <Layers className="w-4 h-4" style={{ color: sg.accent }} />;
-    case 'question': return <HelpCircle className="w-4 h-4" style={{ color: sg.accent }} />;
-    case 'concept': return <BookOpen className="w-4 h-4" style={{ color: sg.accent }} />;
-    default: return <Search className="w-4 h-4" style={{ color: sg.secondary }} />;
+    case 'document': return <FileText size={16} style={{ color: sg.accent }} />;
+    case 'flashcard': return <CardsThree size={16} style={{ color: sg.accent }} />;
+    case 'question': return <Question size={16} style={{ color: sg.accent }} />;
+    case 'concept': return <BookOpen size={16} style={{ color: sg.accent }} />;
+    default: return <MagnifyingGlass size={16} style={{ color: sg.secondary }} />;
   }
 }
 
@@ -156,7 +156,7 @@ export default function SearchModal({ open, onClose }: Props) {
               className="flex items-center gap-3 px-4"
               style={{ borderBottom: `1px solid ${sg.warmBorder}` }}
             >
-              <Search className="w-5 h-5 shrink-0" style={{ color: sg.accent }} />
+              <MagnifyingGlass size={20} style={{ color: sg.accent, flexShrink: 0 }} />
               <input
                 ref={inputRef}
                 type="text"
@@ -191,7 +191,7 @@ export default function SearchModal({ open, onClose }: Props) {
                 onMouseEnter={(e) => { e.currentTarget.style.color = sg.text; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = sg.secondary; }}
               >
-                <X className="w-4 h-4" />
+                <X size={16} />
               </button>
             </div>
 

@@ -5,10 +5,19 @@ export interface Module {
   color: string;
   created_at: string;
   updated_at: string;
+  exam_date?: string;
   total_cards: number;
   due_cards: number;
   mastery_pct: number;
   total_documents: number;
+  auto_cards: number;
+  manual_cards: number;
+  pipeline_status: string;
+  pipeline_stage: string;
+  pipeline_completed: number;
+  pipeline_total: number;
+  pipeline_error?: string;
+  has_study_plan: boolean;
 }
 
 export interface ModuleDetail extends Module {
@@ -19,12 +28,14 @@ export interface ModuleCreate {
   name: string;
   description?: string;
   color?: string;
+  exam_date?: string;
 }
 
 export interface ModuleUpdate {
   name?: string;
   description?: string;
   color?: string;
+  exam_date?: string;
 }
 
 export interface ModuleStats {
@@ -39,6 +50,8 @@ export interface ModuleStats {
   total_documents: number;
   total_concepts: number;
   total_questions: number;
+  auto_cards: number;
+  manual_cards: number;
 }
 
 export interface Document {
@@ -50,6 +63,7 @@ export interface Document {
   processed: boolean;
   processing_status: 'pending' | 'processing' | 'done' | 'failed';
   word_count: number;
+  summary?: string;
   created_at: string;
 }
 
@@ -60,12 +74,14 @@ export interface Concept {
   definition?: string;
   explanation?: string;
   importance_score: number;
+  study_weight: number;
   created_at: string;
 }
 
 export type CardType = 'BASIC' | 'CLOZE';
 export type CardState = 'NEW' | 'LEARNING' | 'REVIEW' | 'RELEARNING';
 export type Rating = 'AGAIN' | 'HARD' | 'GOOD' | 'EASY';
+export type GenerationSource = 'AUTO' | 'MANUAL';
 
 export interface Flashcard {
   id: string;
@@ -78,6 +94,7 @@ export interface Flashcard {
   source_document_id?: string;
   source_excerpt?: string;
   tags: string[];
+  generation_source: GenerationSource;
   due?: string;
   stability: number;
   difficulty: number;
@@ -388,6 +405,7 @@ export interface CurriculumData {
   total_weeks: number;
   hours_per_week: number;
   exam_date?: string;
+  generated_at?: string;
   weeks: CurriculumWeek[];
 }
 
@@ -443,6 +461,9 @@ export interface ContentMapTopic {
   name: string;
   definition: string;
   importance_score: number;
+  study_weight: number;
+  parent_id?: string | null;
+  order_index: number;
   flashcard_count: number;
   question_count: number;
   has_content: boolean;

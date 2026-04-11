@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Loader2, RotateCcw, PartyPopper, Lightbulb, TrendingUp } from 'lucide-react';
+import { ArrowCounterClockwise, ArrowLeft, Confetti, Lightbulb, SpinnerGap, TrendUp } from '@phosphor-icons/react';
 import { getFlashcards, reviewFlashcard, getElaborationPrompts, submitConfidence } from '../api/client';
 import type { Flashcard, Rating, ElaborationResponse } from '../types';
 import katex from 'katex';
@@ -179,7 +179,7 @@ export default function FlashcardReview() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
+        <SpinnerGap className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
       </div>
     );
   }
@@ -187,7 +187,7 @@ export default function FlashcardReview() {
   if (!cards || cards.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
-        <PartyPopper className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
+        <Confetti className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
         <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)' }} className="text-2xl mb-2">
           No cards due
         </h2>
@@ -207,7 +207,7 @@ export default function FlashcardReview() {
     const secs = elapsed % 60;
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
-        <PartyPopper className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
+        <Confetti className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
         <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)' }} className="text-2xl mb-2">
           Session Complete
         </h2>
@@ -238,7 +238,7 @@ export default function FlashcardReview() {
             }}
             className="scholar-btn flex items-center gap-2"
           >
-            <RotateCcw className="w-4 h-4" />
+            <ArrowCounterClockwise className="w-4 h-4" />
             Review Again
           </button>
         </div>
@@ -314,7 +314,7 @@ export default function FlashcardReview() {
       )}
       {confidenceSubmitted && !flipped && (
         <p style={{ color: 'var(--accent)', fontWeight: 300, fontSize: '0.75rem', textAlign: 'center' }} className="mb-4">
-          <TrendingUp className="w-3 h-3 inline mr-1" />
+          <TrendUp className="w-3 h-3 inline mr-1" />
           Confidence: {confidence}/5 recorded
         </p>
       )}
@@ -371,7 +371,7 @@ export default function FlashcardReview() {
               style={{ ...glass, color: 'var(--accent)', fontWeight: 300, fontSize: '0.85rem', borderRadius: '8px' }}
               className="px-4 py-2 text-sm transition-all hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
             >
-              {elaborationMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
+              {elaborationMutation.isPending ? <SpinnerGap className="w-3 h-3 animate-spin" /> : <Lightbulb className="w-3 h-3" />}
               Go Deeper <span style={{ opacity: 0.5, fontSize: '0.7rem' }}>(D)</span>
             </button>
           </div>

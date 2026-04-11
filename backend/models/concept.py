@@ -17,6 +17,7 @@ class Concept(Base):
     definition = Column(Text, nullable=True, default="")
     explanation = Column(Text, nullable=True, default="")
     importance_score = Column(Float, default=0.5)
+    study_weight = Column(Float, default=1.0)
     parent_concept_id = Column(String(36), ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True)
     order_index = Column(Integer, default=0)  # Logical ordering within parent
     source_document_ids = Column(Text, nullable=True, default="[]")  # JSON array of document IDs

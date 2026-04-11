@@ -12,7 +12,7 @@ from config import settings
 from database import get_db
 from models.document import Document
 from models.module import Module
-from services.file_processor import extract_text, extract_image_text, transcribe_audio
+from services.pipeline_service import create_module_job, process_document_pipeline
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
 from models.user import User
@@ -75,7 +75,10 @@ async def upload_document(
     user: OptionalType[User] = Depends(get_current_user),
 ):
     # Verify module exists
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module_query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        module_query = module_query.filter(Module.user_id == user.id)
+    module = module_query.first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -120,61 +123,16 @@ async def upload_document(
     db.add(doc)
     db.commit()
     db.refresh(doc)
+    job = create_module_job(db, module_id=module.id, document_id=doc.id)
+    module.pipeline_status = "queued"
+    module.pipeline_stage = "queued"
+    module.pipeline_completed = 0
+    module.pipeline_total = 5
+    module.pipeline_error = None
+    db.commit()
+    db.refresh(doc)
 
-    # Attempt text extraction for supported types
-    if file_type in ("PDF", "TXT", "MD", "PPTX", "DOCX"):
-        try:
-            raw_text = extract_text(file_path, file_type)
-            doc.raw_text = raw_text
-            doc.word_count = len(raw_text.split())
-            doc.processed = True
-            doc.processing_status = "done"
-        except Exception as e:
-            doc.processing_status = "failed"
-            doc.raw_text = f"Extraction error: {str(e)}"
-        db.commit()
-        db.refresh(doc)
-    elif file_type in ("MP3", "MP4"):
-        try:
-            raw_text = transcribe_audio(file_path)
-            doc.raw_text = raw_text
-            doc.word_count = len(raw_text.split())
-            doc.processed = True
-            doc.processing_status = "done"
-        except Exception as e:
-            doc.processing_status = "failed"
-            doc.raw_text = f"Transcription error: {str(e)}"
-        db.commit()
-        db.refresh(doc)
-    elif file_type == "IMAGE":
-        try:
-            raw_text = extract_image_text(file_path)
-            doc.raw_text = raw_text
-            doc.word_count = len(raw_text.split())
-            doc.processed = True
-            doc.processing_status = "done"
-        except Exception as e:
-            doc.processing_status = "failed"
-            doc.raw_text = f"OCR error: {str(e)}"
-        db.commit()
-        db.refresh(doc)
-
-    # Auto-index: extract topics and generate summary
-    if doc.processing_status == "done":
-        try:
-            from services.content_indexer import index_document
-            await index_document(doc.id, db)
-        except Exception as exc:
-            logger.exception("Document indexing failed for doc_id=%s: %s", doc.id, exc)
-
-        # Pre-generate quiz questions in background
-        if settings.GROQ_API_KEY:
-            from routers.quizzes import _run_generate_quiz_for_module_background
-            background_tasks.add_task(
-                _run_generate_quiz_for_module_background,
-                module_id,
-                user.id if user else None,
-            )
+    background_tasks.add_task(process_document_pipeline, doc.id, module.id, job.id)
 
     return DocumentResponse(
         id=doc.id,

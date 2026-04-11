@@ -37,6 +37,7 @@ class GraphEdge(BaseModel):
 
 
 class KnowledgeGraphResponse(BaseModel):
+    module_name: str = ""
     nodes: list[GraphNode]
     edges: list[GraphEdge]
 
@@ -76,7 +77,7 @@ def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: Opt
         .all()
     )
     if not concepts:
-        return KnowledgeGraphResponse(nodes=[], edges=[])
+        return KnowledgeGraphResponse(module_name=module.name, nodes=[], edges=[])
 
     nodes: list[GraphNode] = []
     concept_doc_map: dict[str, set[str]] = {}
@@ -135,4 +136,4 @@ def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: Opt
                         type="shared_document",
                     ))
 
-    return KnowledgeGraphResponse(nodes=nodes, edges=edges)
+    return KnowledgeGraphResponse(module_name=module.name, nodes=nodes, edges=edges)

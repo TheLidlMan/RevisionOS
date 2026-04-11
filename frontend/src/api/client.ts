@@ -115,6 +115,8 @@ export const deleteDocument = (id: string) =>
 export const getFlashcards = (params?: {
   module_id?: string;
   due?: boolean;
+  generation_source?: string;
+  state?: string;
 }) => client.get<Flashcard[]>('/flashcards', { params }).then((r) => r.data);
 
 export const createFlashcard = (data: FlashcardCreate) =>
@@ -242,8 +244,11 @@ export const getKnowledgeGraph = (moduleId: string) =>
 export const searchAll = (query: string, moduleId?: string, limit?: number): Promise<SearchResponse> =>
   runSearch(query, moduleId, undefined, limit);
 
-export const generateCurriculum = (moduleId: string, hoursPerWeek: number, examDate?: string) =>
-  client.post<CurriculumData>(`/modules/${moduleId}/curriculum`, { hours_per_week: hoursPerWeek, exam_date: examDate }).then((r) => r.data);
+export const getCurriculum = (moduleId: string) =>
+  client.get<CurriculumData>(`/modules/${moduleId}/curriculum`).then((r) => r.data);
+
+export const generateCurriculum = (moduleId: string, examDate: string) =>
+  client.post<CurriculumData>(`/modules/${moduleId}/curriculum`, { exam_date: examDate }).then((r) => r.data);
 
 export const exportAnki = (moduleId: string) =>
   client.get(`/modules/${moduleId}/export-anki`, { responseType: 'blob' }).then((r) => r.data);

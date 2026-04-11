@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Share2, Loader2, AlertTriangle } from 'lucide-react';
+import { Graph, SpinnerGap, WarningCircle } from '@phosphor-icons/react';
 import { getModules, getKnowledgeGraph, detectConceptGaps } from '../api/client';
 import type { GraphNode, ConceptGap } from '../types';
 
@@ -162,7 +162,7 @@ export default function KnowledgeGraph() {
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8">
-        <Share2 className="w-6 h-6" style={{ color: 'var(--accent)' }} />
+        <Graph className="w-6 h-6" style={{ color: 'var(--accent)' }} />
         <h1
           style={{ fontFamily: "var(--heading)", color: 'var(--text)', fontWeight: 600 }}
           className="text-2xl"
@@ -217,9 +217,9 @@ export default function KnowledgeGraph() {
             className="px-3 py-2.5 transition-colors"
           >
             {gapMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <SpinnerGap className="w-4 h-4 animate-spin" />
             ) : (
-              <AlertTriangle className="w-4 h-4" />
+              <WarningCircle className="w-4 h-4" />
             )}
             Detect Gaps
           </button>
@@ -228,12 +228,12 @@ export default function KnowledgeGraph() {
 
       {!moduleId ? (
         <div style={glass} className="text-center py-16">
-          <Share2 className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+          <Graph className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
           <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }}>Select a module to view its knowledge graph.</p>
         </div>
       ) : isLoading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
+          <SpinnerGap className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
         </div>
       ) : !graph || graph.nodes.length === 0 ? (
         <div style={glass} className="text-center py-16">
@@ -467,7 +467,7 @@ export default function KnowledgeGraph() {
                 gap: 8,
               }}
             >
-              <AlertTriangle className="w-4 h-4" style={{ color: 'rgba(255,165,0,0.85)' }} />
+              <WarningCircle className="w-4 h-4" style={{ color: 'rgba(255,165,0,0.85)' }} />
               Detected Concept Gaps ({gaps.length})
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

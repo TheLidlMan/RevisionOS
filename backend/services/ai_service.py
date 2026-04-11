@@ -148,6 +148,55 @@ async def generate_flashcards(text: str, num_cards: int, subject: str) -> list[d
         return []
 
 
+async def generate_flashcards_for_concept(
+    concept_name: str,
+    concept_definition: str,
+    context: str,
+    num_cards: int,
+    subject: str,
+) -> list[dict]:
+    """Generate targeted cloze cards for a single concept."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You create fill-in-the-blank study flashcards focused on a single concept. "
+                "Every card must contain exactly one ___ blank and stay grounded in the supplied context."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Subject: {subject}\n"
+                f"Target concept: {concept_name}\n"
+                f"Concept definition: {concept_definition}\n\n"
+                f"Create {num_cards} cloze flashcards only about {concept_name}.\n"
+                "Rules:\n"
+                "- front: sentence with one missing term shown as ___\n"
+                "- back: the missing answer\n"
+                "- concept_name: repeat the target concept name\n"
+                "- tags: include the concept name\n"
+                "- Avoid duplicate or trivial cards\n\n"
+                "Return ONLY valid JSON array:\n"
+                '[{"front":"... ___ ...","back":"...","concept_name":"...","tags":["..."]}]\n\n'
+                f"Context:\n{context}"
+            ),
+        },
+    ]
+
+    response_text = await _call_groq(messages, max_tokens=4096)
+    try:
+        cards = _parse_json_response(response_text)
+        if isinstance(cards, dict) and "cards" in cards:
+            cards = cards["cards"]
+        if not isinstance(cards, list):
+            cards = [cards]
+        return cards
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error("Failed to parse concept flashcard response: %s", e)
+        return []
+
+
 async def generate_flashcards_chunked(
     chunks: list[dict],
     subject: str,

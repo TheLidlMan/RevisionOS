@@ -29,6 +29,7 @@ class ConceptResponse(BaseModel):
     definition: Optional[str] = None
     explanation: Optional[str] = None
     importance_score: float = 0.5
+    study_weight: float = 1.0
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -104,6 +105,7 @@ def list_concepts(
             definition=c.definition,
             explanation=c.explanation,
             importance_score=c.importance_score,
+            study_weight=c.study_weight,
             created_at=c.created_at,
         )
         for c in concepts

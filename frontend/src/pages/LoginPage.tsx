@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, UserPlus, BookOpen, Loader2, AlertCircle } from 'lucide-react';
+import { BookOpen, SignIn, SpinnerGap, UserCirclePlus, WarningCircle } from '@phosphor-icons/react';
 import { useAuthStore } from '../store/auth';
 
 const glass = {
@@ -153,7 +153,7 @@ export default function LoginPage() {
 
             {error && (
               <div className="flex items-center gap-2 text-sm" style={{ color: 'rgba(220,120,100,0.8)' }}>
-                <AlertCircle className="w-4 h-4" />
+                <WarningCircle className="w-4 h-4" />
                 {error}
               </div>
             )}
@@ -165,11 +165,11 @@ export default function LoginPage() {
               className="w-full px-4 py-3 flex items-center justify-center gap-2 transition-opacity"
             >
               {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <SpinnerGap className="w-4 h-4 animate-spin" />
               ) : mode === 'login' ? (
-                <LogIn className="w-4 h-4" />
+                <SignIn className="w-4 h-4" />
               ) : (
-                <UserPlus className="w-4 h-4" />
+                <UserCirclePlus className="w-4 h-4" />
               )}
               {mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>

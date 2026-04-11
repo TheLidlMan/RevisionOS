@@ -23,6 +23,7 @@ class Document(Base):
     transcript = Column(Text, nullable=True)  # Whisper transcription output
     summary = Column(Text, nullable=True)  # AI-generated document summary
     slide_count = Column(Integer, nullable=True)  # For PPTX files
+    embedding = Column(Text, nullable=True)  # Base64-encoded embedding vector
     created_at = Column(DateTime, default=datetime.utcnow)
 
     module = relationship("Module", back_populates="documents")

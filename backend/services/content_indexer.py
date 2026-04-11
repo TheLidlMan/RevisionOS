@@ -81,7 +81,7 @@ async def summarize_document(document_id: str, db: Session) -> Optional[str]:
         return None
 
 
-async def index_document(document_id: str, db: Session) -> list[dict]:
+async def index_document(document_id: str, db: Session, skip_summary: bool = False) -> list[dict]:
     """
     Auto-index a document: generate summary, extract topics and subtopics,
     create Concept entries with hierarchy.
@@ -93,7 +93,8 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
     if not settings.GROQ_API_KEY:
         return []
 
-    await summarize_document(document_id, db)
+    if not skip_summary:
+        await summarize_document(document_id, db)
 
     text = doc.raw_text
     max_chars = 120000
@@ -141,6 +142,8 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
                         existing.importance_score,
                         topic["importance_score"],
                     )
+                if topic.get("study_weight") is not None:
+                    existing.study_weight = max(existing.study_weight or 1.0, topic["study_weight"])
                 existing.parent_concept_id = parent_id
                 existing.order_index = topic.get("order_index", 0)
                 concept = existing
@@ -153,6 +156,7 @@ async def index_document(document_id: str, db: Session) -> list[dict]:
                     definition=topic.get("definition", ""),
                     explanation=topic.get("explanation", ""),
                     importance_score=topic.get("importance_score", 0.5),
+                    study_weight=topic.get("study_weight", 1.0),
                     parent_concept_id=parent_id,
                     order_index=topic.get("order_index", 0),
                     user_id=doc.user_id,
@@ -243,6 +247,7 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
                 "- definition: 1-2 sentence definition\n"
                 "- explanation: Brief context\n"
                 "- importance_score: 0.0-1.0 (exam likelihood)\n"
+                "- study_weight: 1.0-5.0 based on difficulty and amount of material\n"
                 "- parent: The name of the parent topic (null for top-level topics)\n"
                 "- order_index: Integer ordering within its level (0-based)\n\n"
                 "Rules:\n"
@@ -252,7 +257,7 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
                 "- Order from prerequisite/foundational to advanced\n\n"
                 "Return ONLY valid JSON array:\n"
                 '[{"name": "...", "definition": "...", "explanation": "...", '
-                '"importance_score": 0.0-1.0, "parent": null or "Parent Name", "order_index": 0}]\n\n'
+                '"importance_score": 0.0-1.0, "study_weight": 1.0-5.0, "parent": null or "Parent Name", "order_index": 0}]\n\n'
                 f"Content:\n{text}"
             ),
         },
@@ -285,6 +290,12 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
                 importance_score = min(max(importance_score, 0.0), 1.0)
 
                 try:
+                    study_weight = float(topic.get("study_weight", 1 + importance_score * 2))
+                except (TypeError, ValueError):
+                    study_weight = 1 + importance_score * 2
+                study_weight = min(max(study_weight, 1.0), 5.0)
+
+                try:
                     order_index = int(topic.get("order_index", i))
                 except (TypeError, ValueError):
                     order_index = i
@@ -297,6 +308,7 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
                     "definition": str(topic.get("definition", ""))[:500],
                     "explanation": str(topic.get("explanation", ""))[:500],
                     "importance_score": importance_score,
+                    "study_weight": study_weight,
                     "parent": parent_name or None,
                     "order_index": order_index,
                 })
@@ -349,6 +361,7 @@ async def generate_content_map(module_id: str, db: Session) -> dict:
             "name": concept.name,
             "definition": concept.definition or "",
             "importance_score": concept.importance_score,
+            "study_weight": concept.study_weight,
             "parent_id": concept.parent_concept_id,
             "order_index": concept.order_index,
             "flashcard_count": flashcard_count,

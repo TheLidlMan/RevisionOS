@@ -1,24 +1,19 @@
-import math
 import json
-import logging
-import uuid
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
 from models.flashcard import Flashcard
 from models.module import Module
-from models.document import Document
 from services.fsrs_service import schedule_review
-from services import ai_service
+from services.pipeline_service import _generate_missing_flashcards
 
 router = APIRouter(tags=["flashcards"])
-logger = logging.getLogger(__name__)
 
 
 # ---------- Pydantic schemas ----------
@@ -54,6 +49,7 @@ class FlashcardResponse(BaseModel):
     source_document_id: Optional[str] = None
     source_excerpt: Optional[str] = None
     tags: list[str] = []
+    generation_source: str = "MANUAL"
     due: Optional[datetime] = None
     stability: float = 0.0
     difficulty: float = 0.0
@@ -114,6 +110,7 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
         source_document_id=card.source_document_id,
         source_excerpt=card.source_excerpt,
         tags=tags,
+        generation_source=card.generation_source,
         due=card.due,
         stability=card.stability,
         difficulty=card.difficulty,
@@ -133,6 +130,8 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
 def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
+    generation_source: Optional[str] = None,
+    state: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Flashcard)
@@ -141,6 +140,10 @@ def list_flashcards(
     if due:
         now = datetime.utcnow()
         query = query.filter(Flashcard.due <= now)
+    if generation_source:
+        query = query.filter(Flashcard.generation_source == generation_source.upper())
+    if state:
+        query = query.filter(Flashcard.state == state.upper())
     cards = query.order_by(Flashcard.due.asc()).all()
     return [_card_to_response(c) for c in cards]
 
@@ -161,6 +164,7 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
         source_document_id=body.source_document_id,
         source_excerpt=body.source_excerpt,
         tags=json.dumps(body.tags),
+        generation_source="MANUAL",
         due=datetime.utcnow(),
         state="NEW",
     )
@@ -263,107 +267,13 @@ async def generate_cards_for_module(
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
-    docs = (
-        db.query(Document)
-        .filter(Document.module_id == module_id, Document.processing_status == "done")
-        .all()
-    )
-    if not docs:
-        raise HTTPException(status_code=400, detail="No processed documents found in this module")
-
-    requested_cards = body.num_cards if body and body.num_cards is not None else settings.CARDS_PER_DOCUMENT
-    if requested_cards <= 0:
-        raise HTTPException(status_code=400, detail="num_cards must be greater than 0")
-
-    num_cards = min(
-        requested_cards,
-        settings.CARDS_PER_DOCUMENT,
-        settings.MAX_CARDS_PER_REQUEST,
-    )
-
-    # Use chunked generation for massive flashcard output
-    from services.rag_service import retrieve_all_document_chunks
-    chunks = retrieve_all_document_chunks(db, module_id, chunk_size=4000)
-
-    if not chunks:
-        # Fallback: concatenate all text and generate a single batch
-        all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
-        max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
-        if len(all_text) > max_chars:
-            all_text = all_text[:max_chars]
-        generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
-    else:
-        cards_per_chunk = max(1, math.ceil(num_cards / len(chunks)))
-        generated_cards_data = await ai_service.generate_flashcards_chunked(
-            chunks,
-            module.name,
-            cards_per_chunk=cards_per_chunk,
-            max_total_cards=num_cards,
-        )
-
-    # Load concepts for tagging
-    from models.concept import Concept
-    concepts = db.query(Concept).filter(Concept.module_id == module_id).all()
-    concept_map = {c.name.lower(): c.id for c in concepts}
-
-    created_cards = []
-    for card_data in generated_cards_data:
-        if not isinstance(card_data, dict):
-            logger.debug("Skipping malformed flashcard payload for module %s: %r", module_id, card_data)
-            continue
-
-        card_type = "CLOZE"  # All cards are now fill-in-the-gap
-
-        tags = card_data.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
-
-        front_val = card_data.get("front") or ""
-        back_val = card_data.get("back") or ""
-
-        if not front_val or not back_val:
-            logger.debug("Skipping incomplete flashcard for module %s", module_id)
-            continue
-
-        if "___" not in front_val and "___" not in back_val:
-            logger.debug("Skipping CLOZE flashcard without placeholder for module %s", module_id)
-            continue
-
-        # Try to match a concept
-        concept_name = card_data.get("concept_name", "")
-        concept_id = None
-        if concept_name:
-            concept_id = concept_map.get(concept_name.lower())
-            if not concept_id:
-                # Fuzzy match: find closest concept name
-                for cname, cid in concept_map.items():
-                    if concept_name.lower() in cname or cname in concept_name.lower():
-                        concept_id = cid
-                        break
-
-        source_doc_id = card_data.get("source_document_id") or (docs[0].id if docs else None)
-
-        card = Flashcard(
-            module_id=module_id,
-            front=front_val,
-            back=back_val,
-            card_type=card_type,
-            cloze_text=front_val,
-            concept_id=concept_id,
-            source_document_id=source_doc_id,
-            source_excerpt=card_data.get("source_excerpt"),
-            tags=json.dumps(tags),
-            due=datetime.utcnow(),
-            state="NEW",
-        )
-        db.add(card)
-        created_cards.append(card)
-
+    before_ids = {card.id for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()}
+    await _generate_missing_flashcards(module, db)
     db.commit()
-    for c in created_cards:
-        db.refresh(c)
+    created_cards = [
+        card
+        for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
+        if card.id not in before_ids
+    ]
 
-    return GenerateCardsResponse(
-        generated=len(created_cards),
-        cards=[_card_to_response(c) for c in created_cards],
-    )
+    return GenerateCardsResponse(generated=len(created_cards), cards=[_card_to_response(card) for card in created_cards])

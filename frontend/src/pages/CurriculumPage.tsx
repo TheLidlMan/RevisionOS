@@ -1,217 +1,137 @@
-import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Calendar, Loader2, BookOpen, Clock } from 'lucide-react';
-import { getModules, generateCurriculum } from '../api/client';
-import type { CurriculumData } from '../types';
+import { CalendarDots, SpinnerGap } from '@phosphor-icons/react';
+import { getCurriculum, getModule, getModules, updateModule } from '../api/client';
 
 const glass = {
-  background: 'rgba(255,248,240,0.04)',
-  border: '1px solid rgba(139,115,85,0.15)',
-  borderRadius: '12px',
-  backdropFilter: 'blur(20px)',
+  background: 'var(--surface)',
+  border: '1px solid var(--border)',
+  borderRadius: '16px',
+  backdropFilter: 'var(--blur)',
+  WebkitBackdropFilter: 'var(--blur)',
 } as const;
-
-const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,248,240,0.04)',
-  border: '1px solid rgba(139,115,85,0.15)',
-  borderRadius: '8px',
-  color: '#f5f0e8',
-  outline: 'none',
-  fontWeight: 300,
-};
-
-const btnGold: React.CSSProperties = {
-  background: '#c4956a',
-  color: '#1a1714',
-  borderRadius: '8px',
-  fontWeight: 500,
-  border: 'none',
-};
-
-const heading: React.CSSProperties = {
-  fontFamily: "'Clash Display', sans-serif",
-  color: '#f5f0e8',
-};
 
 export default function CurriculumPage() {
   const [searchParams] = useSearchParams();
-  const preModule = searchParams.get('module') ?? '';
-  const [moduleId, setModuleId] = useState(preModule);
-  const [hoursPerWeek, setHoursPerWeek] = useState(5);
+  const preselectedModule = searchParams.get('module') ?? '';
+  const [moduleId, setModuleId] = useState(preselectedModule);
   const [examDate, setExamDate] = useState('');
-  const [curriculum, setCurriculum] = useState<CurriculumData | null>(null);
 
-  const { data: modules } = useQuery({
+  const modulesQuery = useQuery({
     queryKey: ['modules'],
     queryFn: getModules,
   });
 
-  const generateMutation = useMutation({
-    mutationFn: () => generateCurriculum(moduleId, hoursPerWeek, examDate || undefined),
-    onSuccess: (data) => setCurriculum(data),
+  const moduleQuery = useQuery({
+    queryKey: ['module', moduleId],
+    queryFn: () => getModule(moduleId),
+    enabled: Boolean(moduleId),
   });
 
+  const curriculumQuery = useQuery({
+    queryKey: ['curriculum', moduleId],
+    queryFn: () => getCurriculum(moduleId),
+    enabled: Boolean(moduleId) && Boolean(moduleQuery.data?.has_study_plan),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (payload: { exam_date?: string }) => updateModule(moduleId, payload),
+    onSuccess: () => {
+      moduleQuery.refetch();
+      curriculumQuery.refetch();
+    },
+  });
+
+  useEffect(() => {
+    if (moduleQuery.data?.exam_date) {
+      setExamDate(moduleQuery.data.exam_date.slice(0, 10));
+    } else {
+      setExamDate('');
+    }
+  }, [moduleQuery.data?.exam_date]);
+
   return (
-    <div className="p-6 lg:p-8 max-w-4xl mx-auto w-full" style={{ fontWeight: 300 }}>
+    <div className="p-6 lg:p-8 max-w-5xl mx-auto w-full">
       <div className="flex items-center gap-3 mb-8">
-        <Calendar className="w-6 h-6" style={{ color: '#c4956a' }} />
-        <h1 className="text-2xl" style={{ ...heading, fontWeight: 700 }}>Study Plan</h1>
+        <CalendarDots size={24} style={{ color: 'var(--accent)' }} />
+        <div>
+          <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.8rem' }}>Study Plan</h1>
+          <p style={{ color: 'var(--text-secondary)' }}>Plans are built automatically from topic order and study weight.</p>
+        </div>
       </div>
 
-      {/* Config */}
-      <div className="p-6 mb-8 space-y-5" style={glass}>
+      <div className="p-5 mb-6 grid grid-cols-1 md:grid-cols-[1.4fr_1fr_auto] gap-3 items-end" style={glass}>
         <div>
-          <label className="block text-sm mb-2" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>Module</label>
-          <select
-            value={moduleId}
-            onChange={(e) => setModuleId(e.target.value)}
-            style={inputStyle}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(196,149,106,0.6)'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(139,115,85,0.15)'; }}
-            className="w-full px-3 py-2.5"
-          >
+          <label className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Module</label>
+          <select value={moduleId} onChange={(event) => setModuleId(event.target.value)} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
             <option value="">Choose a module…</option>
-            {modules?.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+            {modulesQuery.data?.map((module) => (
+              <option key={module.id} value={module.id}>
+                {module.name}
+              </option>
             ))}
           </select>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm mb-2" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>Hours per Week</label>
-            <input
-              type="number"
-              min={1}
-              max={40}
-              value={hoursPerWeek}
-              onChange={(e) => setHoursPerWeek(parseInt(e.target.value) || 5)}
-              style={inputStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(196,149,106,0.6)'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(139,115,85,0.15)'; }}
-              className="w-full px-3 py-2.5"
-            />
-          </div>
-          <div>
-            <label className="block text-sm mb-2" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>
-              Exam Date <span style={{ color: 'rgba(245,240,232,0.25)' }}>(optional)</span>
-            </label>
-            <input
-              type="date"
-              value={examDate}
-              onChange={(e) => setExamDate(e.target.value)}
-              style={inputStyle}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(196,149,106,0.6)'; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(139,115,85,0.15)'; }}
-              className="w-full px-3 py-2.5"
-            />
-          </div>
+        <div>
+          <label className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Exam date</label>
+          <input type="date" value={examDate} onChange={(event) => setExamDate(event.target.value)} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
         </div>
-
-        {generateMutation.isError && (
-          <p className="text-sm" style={{ color: 'rgba(220,120,100,0.8)', fontWeight: 300 }}>Failed to generate study plan. Please try again.</p>
-        )}
-
-        <button
-          onClick={() => generateMutation.mutate()}
-          disabled={!moduleId || generateMutation.isPending}
-          style={{ ...btnGold, opacity: (!moduleId || generateMutation.isPending) ? 0.5 : 1 }}
-          className="w-full px-4 py-3 flex items-center justify-center gap-2 transition-opacity"
-        >
-          {generateMutation.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Calendar className="w-4 h-4" />
-          )}
-          Generate Plan
+        <button type="button" className="scholar-btn" disabled={!moduleId} onClick={() => updateMutation.mutate({ exam_date: examDate || undefined })}>
+          Save Date
         </button>
       </div>
 
-      {/* Results */}
-      {curriculum && (
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-lg" style={{ ...heading, fontWeight: 600 }}>{curriculum.module_name}</h2>
-              <p className="text-sm" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>
-                {curriculum.total_concepts} concepts · {curriculum.total_weeks} weeks · {curriculum.hours_per_week}h/week
-                {curriculum.exam_date && ` · Exam: ${new Date(curriculum.exam_date).toLocaleDateString()}`}
-              </p>
-            </div>
+      {!moduleId ? (
+        <div className="p-10 text-center" style={glass}>
+          <p style={{ color: 'var(--text-secondary)' }}>Choose a module to view its study plan.</p>
+        </div>
+      ) : moduleQuery.isLoading || curriculumQuery.isLoading ? (
+        <div className="flex justify-center py-16">
+          <SpinnerGap size={28} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        </div>
+      ) : curriculumQuery.data ? (
+        <div className="space-y-4">
+          <div className="p-5" style={glass}>
+            <p style={{ color: 'var(--text)', fontSize: '1rem' }}>
+              {curriculumQuery.data.total_concepts} topics across {curriculumQuery.data.total_weeks} weeks
+            </p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              Generated for {curriculumQuery.data.exam_date}
+            </p>
           </div>
-
-          <div className="space-y-4">
-            {curriculum.weeks.map((week) => (
-              <div key={week.week} className="p-5" style={glass}>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 style={{ ...heading, fontWeight: 600 }}>Week {week.week}</h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {week.focus_areas.map((area) => (
-                      <span
-                        key={area}
-                        className="text-xs px-2 py-0.5 rounded-full"
-                        style={{ background: 'rgba(196,149,106,0.15)', color: '#c4956a' }}
-                      >
-                        {area}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {week.sessions.map((session, si) => (
-                    <div
-                      key={si}
-                      className="p-3 flex items-start gap-3"
-                      style={{
-                        background: 'rgba(255,248,240,0.04)',
-                        border: '1px solid rgba(139,115,85,0.15)',
-                        borderRadius: '8px',
-                      }}
-                    >
-                      <div className="shrink-0 mt-0.5">
-                        <div
-                          className="w-8 h-8 flex items-center justify-center"
-                          style={{ background: 'rgba(196,149,106,0.15)', borderRadius: '8px' }}
-                        >
-                          {session.activity.toLowerCase().includes('review') ? (
-                            <BookOpen className="w-4 h-4" style={{ color: '#c4956a' }} />
-                          ) : (
-                            <Clock className="w-4 h-4" style={{ color: '#c4956a' }} />
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm" style={{ color: '#f5f0e8', fontWeight: 500 }}>{session.day}</span>
-                          <span className="text-xs" style={{ color: 'rgba(245,240,232,0.25)' }}>{session.duration_minutes} min</span>
-                        </div>
-                        <p className="text-sm" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>{session.activity}</p>
-                        {session.concepts.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {session.concepts.map((c) => (
-                              <span
-                                key={c}
-                                className="text-xs px-1.5 py-0.5 rounded"
-                                style={{
-                                  background: 'transparent',
-                                  border: '1px solid rgba(139,115,85,0.15)',
-                                  color: 'rgba(245,240,232,0.5)',
-                                }}
-                              >
-                                {c}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+          {curriculumQuery.data.weeks.map((week) => (
+            <div key={week.week} className="p-5" style={glass}>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem' }}>Week {week.week}</h2>
+                <div className="flex flex-wrap gap-2">
+                  {week.focus_areas.map((area) => (
+                    <span key={area} className="px-2 py-1 rounded-full" style={{ background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: '0.8rem' }}>
+                      {area}
+                    </span>
                   ))}
                 </div>
               </div>
-            ))}
-          </div>
+              <div className="space-y-2">
+                {week.sessions.map((session) => (
+                  <div key={`${week.week}-${session.day}-${session.activity}`} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="flex items-center justify-between gap-3">
+                      <p style={{ color: 'var(--text)', fontSize: '0.92rem' }}>{session.day}</p>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>{session.duration_minutes} min</p>
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: 6 }}>{session.activity}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="p-10 text-center" style={glass}>
+          <p style={{ color: 'var(--text)', marginBottom: 8 }}>No study plan yet.</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+            Add an exam date and upload documents so the backend has topics to schedule.
+          </p>
         </div>
       )}
     </div>

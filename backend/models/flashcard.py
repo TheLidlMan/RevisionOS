@@ -21,6 +21,7 @@ class Flashcard(Base):
     source_document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
     source_excerpt = Column(Text, nullable=True)
     tags = Column(Text, nullable=True, default="[]")  # JSON string
+    generation_source = Column(String(10), nullable=False, default="MANUAL")  # AUTO, MANUAL
 
     # FSRS scheduling fields
     due = Column(DateTime, default=datetime.utcnow)

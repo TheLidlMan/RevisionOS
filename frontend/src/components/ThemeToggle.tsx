@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sun, Moon } from 'lucide-react';
+import { Moon, Sun } from '@phosphor-icons/react';
 
 export default function ThemeToggle() {
   const [dark, setDark] = useState(() => {
@@ -32,7 +32,7 @@ export default function ThemeToggle() {
       }}
       title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
-      {dark ? <Sun style={{ width: 16, height: 16 }} /> : <Moon style={{ width: 16, height: 16 }} />}
+      {dark ? <Sun size={16} /> : <Moon size={16} />}
     </button>
   );
 }

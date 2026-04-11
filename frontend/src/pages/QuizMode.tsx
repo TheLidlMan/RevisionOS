@@ -4,12 +4,12 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
-  Loader2,
   CheckCircle,
-  XCircle,
   ArrowRight,
+  SpinnerGap,
   Trophy,
-} from 'lucide-react';
+  XCircle,
+} from '@phosphor-icons/react';
 import { getModules, startQuizSession, submitAnswer, completeSession } from '../api/client';
 import type {
   Difficulty,
@@ -276,7 +276,7 @@ export default function QuizMode() {
             className="w-full px-4 py-3 transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {startMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <SpinnerGap className="w-4 h-4 animate-spin" />
             ) : (
               <Brain className="w-4 h-4" />
             )}
@@ -532,7 +532,7 @@ export default function QuizMode() {
             className="px-6 py-2.5 text-sm transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
           >
             {answerMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <SpinnerGap className="w-4 h-4 animate-spin" />
             ) : (
               'Submit Answer'
             )}
@@ -545,7 +545,7 @@ export default function QuizMode() {
             className="px-6 py-2.5 text-sm transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
           >
             {completeMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <SpinnerGap className="w-4 h-4 animate-spin" />
             ) : questionIdx + 1 >= session.questions.length ? (
               'See Results'
             ) : (
