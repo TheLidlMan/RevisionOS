@@ -84,13 +84,20 @@ export default function FlashcardReview() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [reviewed, setReviewed] = useState(0);
-  const [startTime] = useState(Date.now());
   const [done, setDone] = useState(false);
+  const [completedDurationSec, setCompletedDurationSec] = useState(0);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [confidenceSubmitted, setConfidenceSubmitted] = useState(false);
   const [elaboration, setElaboration] = useState<ElaborationResponse | null>(null);
   const [showElaboration, setShowElaboration] = useState(false);
   const elaborationLoadingRef = useRef(false);
+  const startTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (startTimeRef.current === 0 && typeof performance !== 'undefined') {
+      startTimeRef.current = performance.now();
+    }
+  }, []);
 
   const { data: cards, isLoading } = useQuery({
     queryKey: ['flashcards', moduleId, 'due'],
@@ -110,6 +117,9 @@ export default function FlashcardReview() {
       setShowElaboration(false);
       elaborationLoadingRef.current = false;
       if (cards && currentIdx + 1 >= cards.length) {
+        if (typeof performance !== 'undefined') {
+          setCompletedDurationSec(Math.round((performance.now() - startTimeRef.current) / 1000));
+        }
         setDone(true);
       } else {
         setCurrentIdx((i) => i + 1);
@@ -179,7 +189,7 @@ export default function FlashcardReview() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [flipped, handleFlip, handleRate, handleElaborate]);
+  }, [flipped, handleFlip, handleRate, handleElaborate, navigate]);
 
   if (isLoading) {
     return (
@@ -207,9 +217,8 @@ export default function FlashcardReview() {
   }
 
   if (done) {
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
+    const mins = Math.floor(completedDurationSec / 60);
+    const secs = completedDurationSec % 60;
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
         <Confetti className="w-16 h-16 mb-4" style={{ color: 'var(--accent)' }} />
@@ -240,6 +249,10 @@ export default function FlashcardReview() {
               setElaboration(null);
               setShowElaboration(false);
               elaborationLoadingRef.current = false;
+              setCompletedDurationSec(0);
+              if (typeof performance !== 'undefined') {
+                startTimeRef.current = performance.now();
+              }
             }}
             className="scholar-btn flex items-center gap-2"
           >

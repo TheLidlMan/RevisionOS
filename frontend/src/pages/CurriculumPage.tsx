@@ -19,7 +19,7 @@ export default function CurriculumPage() {
   const preselectedModule = searchParams.get('module') ?? '';
   const [storedModuleId, setStoredModuleId] = usePersistentState('curriculum:module', preselectedModule);
   const [moduleId, setModuleId] = useState(storedModuleId || preselectedModule);
-  const [examDate, setExamDate] = useState('');
+  const [examDateDraft, setExamDateDraft] = useState<string | null>(null);
 
   const modulesQuery = useQuery({
     queryKey: ['modules'],
@@ -50,13 +50,7 @@ export default function CurriculumPage() {
     setStoredModuleId(moduleId);
   }, [moduleId, setStoredModuleId]);
 
-  useEffect(() => {
-    if (moduleQuery.data?.exam_date) {
-      setExamDate(moduleQuery.data.exam_date.slice(0, 10));
-    } else {
-      setExamDate('');
-    }
-  }, [moduleQuery.data?.exam_date]);
+  const examDate = examDateDraft ?? (moduleQuery.data?.exam_date ? moduleQuery.data.exam_date.slice(0, 10) : '');
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto w-full">
@@ -71,7 +65,10 @@ export default function CurriculumPage() {
       <div className="p-5 mb-6 grid grid-cols-1 md:grid-cols-[1.4fr_1fr_auto] gap-3 items-end" style={glass}>
         <div>
           <label className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Module</label>
-          <select value={moduleId} onChange={(event) => setModuleId(event.target.value)} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+          <select value={moduleId} onChange={(event) => {
+            setModuleId(event.target.value);
+            setExamDateDraft(null);
+          }} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
             <option value="">Choose a module…</option>
             {modulesQuery.data?.map((module) => (
               <option key={module.id} value={module.id}>
@@ -82,7 +79,7 @@ export default function CurriculumPage() {
         </div>
         <div>
           <label className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Exam date</label>
-          <input type="date" value={examDate} onChange={(event) => setExamDate(event.target.value)} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+          <input type="date" value={examDate} onChange={(event) => setExamDateDraft(event.target.value)} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
         </div>
         <button type="button" className="scholar-btn" disabled={!moduleId} onClick={() => updateMutation.mutate({ exam_date: examDate || undefined })}>
           Save Date

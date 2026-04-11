@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -61,12 +61,11 @@ function resultRoute(result: SearchResult): string {
   }
 }
 
-interface Props {
-  open: boolean;
+interface SearchDialogProps {
   onClose: () => void;
 }
 
-export default function SearchModal({ open, onClose }: Props) {
+function SearchDialog({ onClose }: SearchDialogProps) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
@@ -77,16 +76,15 @@ export default function SearchModal({ open, onClose }: Props) {
   const { data: modules } = useQuery({
     queryKey: ['modules'],
     queryFn: getModules,
-    enabled: open,
   });
 
   const { data: searchData } = useQuery({
     queryKey: ['search', debouncedQuery, moduleFilter],
     queryFn: () => searchAll(debouncedQuery, moduleFilter || undefined, 20),
-    enabled: open && debouncedQuery.length >= 2,
+    enabled: debouncedQuery.length >= 2,
   });
 
-  const results = searchData?.results ?? [];
+  const results = useMemo(() => searchData?.results ?? [], [searchData]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300);
@@ -94,17 +92,11 @@ export default function SearchModal({ open, onClose }: Props) {
   }, [query]);
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setDebouncedQuery('');
-      setSelectedIdx(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [open]);
+    const timeout = window.setTimeout(() => inputRef.current?.focus(), 50);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
-  useEffect(() => {
-    setSelectedIdx(0);
-  }, [results.length]);
+  const highlightedIdx = results.length === 0 ? -1 : Math.min(selectedIdx, results.length - 1);
 
   const handleSelect = useCallback(
     (result: SearchResult) => {
@@ -124,34 +116,32 @@ export default function SearchModal({ open, onClose }: Props) {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIdx((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter' && results[selectedIdx]) {
-        handleSelect(results[selectedIdx]);
+      } else if (e.key === 'Enter' && highlightedIdx >= 0 && results[highlightedIdx]) {
+        handleSelect(results[highlightedIdx]);
       }
     },
-    [results, selectedIdx, onClose, handleSelect],
+    [highlightedIdx, results, onClose, handleSelect],
   );
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
-          style={{ background: sg.overlay }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) onClose();
-          }}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -10 }}
-            className="w-full max-w-xl shadow-2xl overflow-hidden"
-            style={sg.glass}
-            onKeyDown={handleKeyDown}
-          >
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      style={{ background: sg.overlay }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: -10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: -10 }}
+        className="w-full max-w-xl shadow-2xl overflow-hidden"
+        style={sg.glass}
+        onKeyDown={handleKeyDown}
+      >
             <div
               className="flex items-center gap-3 px-4"
               style={{ borderBottom: `1px solid ${sg.warmBorder}` }}
@@ -161,7 +151,10 @@ export default function SearchModal({ open, onClose }: Props) {
                 ref={inputRef}
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelectedIdx(0);
+                }}
                 placeholder="Search concepts, flashcards, questions…"
                 className="flex-1 py-4"
                 style={{
@@ -175,7 +168,10 @@ export default function SearchModal({ open, onClose }: Props) {
               />
               <select
                 value={moduleFilter}
-                onChange={(e) => setModuleFilter(e.target.value)}
+                onChange={(e) => {
+                  setModuleFilter(e.target.value);
+                  setSelectedIdx(0);
+                }}
                 className="px-2 py-1 text-xs"
                 style={sg.input}
               >
@@ -209,14 +205,15 @@ export default function SearchModal({ open, onClose }: Props) {
                           onClick={() => handleSelect(result)}
                           className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
                           style={{
-                            background: idx === selectedIdx ? sg.accentSoft : 'transparent',
+                            background: idx === highlightedIdx ? sg.accentSoft : 'transparent',
                             color: sg.text,
                           }}
                           onMouseEnter={(e) => {
-                            if (idx !== selectedIdx) e.currentTarget.style.background = sg.hover;
+                            if (idx !== highlightedIdx) e.currentTarget.style.background = sg.hover;
+                            setSelectedIdx(idx);
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.background = idx === selectedIdx ? sg.accentSoft : 'transparent';
+                            e.currentTarget.style.background = idx === highlightedIdx ? sg.accentSoft : 'transparent';
                           }}
                         >
                           <div className="mt-0.5 shrink-0">{resultIcon(result.type)}</div>
@@ -244,9 +241,16 @@ export default function SearchModal({ open, onClose }: Props) {
               <span>↵ Open</span>
               <span>Esc Close</span>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+      </motion.div>
+    </motion.div>
   );
+}
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function SearchModal({ open, onClose }: Props) {
+  return <AnimatePresence>{open ? <SearchDialog onClose={onClose} /> : null}</AnimatePresence>;
 }

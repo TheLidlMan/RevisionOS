@@ -5,7 +5,6 @@ export function usePersistentState<T>(
   key: string,
   initialValue: T | (() => T),
 ): [T, Dispatch<SetStateAction<T>>, boolean] {
-  const [hydrated, setHydrated] = useState(false);
   const [value, setValue] = useState<T>(() => {
     if (typeof window === 'undefined') {
       return typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
@@ -23,9 +22,7 @@ export function usePersistentState<T>(
     return typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
   });
 
-  useEffect(() => {
-    setHydrated(true);
-  }, []);
+  const hydrated = typeof window !== 'undefined';
 
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') {

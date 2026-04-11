@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -232,6 +233,11 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalT
     module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
+
+    for document in list(module.documents):
+        if document.file_path and os.path.exists(document.file_path):
+            os.remove(document.file_path)
+
     db.delete(module)
     db.commit()
     return None

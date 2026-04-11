@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision: str = 'f1a2b3c4d5e6'
@@ -17,37 +18,78 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _table_exists(inspector, table_name: str) -> bool:
+    return table_name in inspector.get_table_names()
+
+
+def _column_exists(inspector, table_name: str, column_name: str) -> bool:
+    if not _table_exists(inspector, table_name):
+        return False
+    return any(column["name"] == column_name for column in inspector.get_columns(table_name))
+
+
+def _index_exists(inspector, table_name: str, index_name: str) -> bool:
+    if not _table_exists(inspector, table_name):
+        return False
+    return any(index["name"] == index_name for index in inspector.get_indexes(table_name))
+
+
 def upgrade() -> None:
-    op.add_column('documents', sa.Column('file_size_bytes', sa.Integer(), nullable=True, server_default='0'))
-    op.add_column('documents', sa.Column('file_sha256', sa.String(length=64), nullable=True))
-    op.add_column('documents', sa.Column('processing_stage', sa.String(length=50), nullable=True, server_default='uploaded'))
-    op.add_column('documents', sa.Column('processing_error', sa.Text(), nullable=True))
-    op.add_column('documents', sa.Column('processing_completed', sa.Integer(), nullable=False, server_default='0'))
-    op.add_column('documents', sa.Column('processing_total', sa.Integer(), nullable=False, server_default='0'))
-    op.add_column('documents', sa.Column('last_pipeline_updated_at', sa.DateTime(), nullable=True))
-    op.add_column('documents', sa.Column('cancel_requested_at', sa.DateTime(), nullable=True))
-    op.add_column('documents', sa.Column('cancelled_at', sa.DateTime(), nullable=True))
-    op.add_column('documents', sa.Column('delete_requested_at', sa.DateTime(), nullable=True))
+    bind = op.get_bind()
+    inspector = inspect(bind)
 
-    op.add_column('modules', sa.Column('pipeline_updated_at', sa.DateTime(), nullable=True))
+    document_columns = [
+        ("file_size_bytes", sa.Column('file_size_bytes', sa.Integer(), nullable=True, server_default='0')),
+        ("file_sha256", sa.Column('file_sha256', sa.String(length=64), nullable=True)),
+        ("processing_stage", sa.Column('processing_stage', sa.String(length=50), nullable=True, server_default='uploaded')),
+        ("processing_error", sa.Column('processing_error', sa.Text(), nullable=True)),
+        ("processing_completed", sa.Column('processing_completed', sa.Integer(), nullable=False, server_default='0')),
+        ("processing_total", sa.Column('processing_total', sa.Integer(), nullable=False, server_default='0')),
+        ("last_pipeline_updated_at", sa.Column('last_pipeline_updated_at', sa.DateTime(), nullable=True)),
+        ("cancel_requested_at", sa.Column('cancel_requested_at', sa.DateTime(), nullable=True)),
+        ("cancelled_at", sa.Column('cancelled_at', sa.DateTime(), nullable=True)),
+        ("delete_requested_at", sa.Column('delete_requested_at', sa.DateTime(), nullable=True)),
+    ]
+    for column_name, column in document_columns:
+        if not _column_exists(inspector, 'documents', column_name):
+            op.add_column('documents', column)
+            inspector = inspect(bind)
 
-    op.add_column('module_jobs', sa.Column('started_at', sa.DateTime(), nullable=True))
-    op.add_column('module_jobs', sa.Column('finished_at', sa.DateTime(), nullable=True))
-    op.add_column('module_jobs', sa.Column('cancel_requested_at', sa.DateTime(), nullable=True))
-    op.add_column('module_jobs', sa.Column('cancelled_at', sa.DateTime(), nullable=True))
+    if not _column_exists(inspector, 'modules', 'pipeline_updated_at'):
+        op.add_column('modules', sa.Column('pipeline_updated_at', sa.DateTime(), nullable=True))
+        inspector = inspect(bind)
 
-    op.create_table(
-        'ai_usage_events',
-        sa.Column('id', sa.String(length=36), nullable=False),
-        sa.Column('user_id', sa.String(length=36), nullable=False),
-        sa.Column('kind', sa.String(length=50), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-    )
-    op.create_index(op.f('ix_ai_usage_events_user_id'), 'ai_usage_events', ['user_id'], unique=False)
-    op.create_index(op.f('ix_ai_usage_events_kind'), 'ai_usage_events', ['kind'], unique=False)
-    op.create_index(op.f('ix_ai_usage_events_created_at'), 'ai_usage_events', ['created_at'], unique=False)
+    module_job_columns = [
+        ("started_at", sa.Column('started_at', sa.DateTime(), nullable=True)),
+        ("finished_at", sa.Column('finished_at', sa.DateTime(), nullable=True)),
+        ("cancel_requested_at", sa.Column('cancel_requested_at', sa.DateTime(), nullable=True)),
+        ("cancelled_at", sa.Column('cancelled_at', sa.DateTime(), nullable=True)),
+    ]
+    for column_name, column in module_job_columns:
+        if not _column_exists(inspector, 'module_jobs', column_name):
+            op.add_column('module_jobs', column)
+            inspector = inspect(bind)
+
+    if not _table_exists(inspector, 'ai_usage_events'):
+        op.create_table(
+            'ai_usage_events',
+            sa.Column('id', sa.String(length=36), nullable=False),
+            sa.Column('user_id', sa.String(length=36), nullable=False),
+            sa.Column('kind', sa.String(length=50), nullable=False),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id'),
+        )
+        inspector = inspect(bind)
+
+    for index_name, columns in [
+        (op.f('ix_ai_usage_events_user_id'), ['user_id']),
+        (op.f('ix_ai_usage_events_kind'), ['kind']),
+        (op.f('ix_ai_usage_events_created_at'), ['created_at']),
+    ]:
+        if not _index_exists(inspector, 'ai_usage_events', index_name):
+            op.create_index(index_name, 'ai_usage_events', columns, unique=False)
+            inspector = inspect(bind)
 
 
 def downgrade() -> None:

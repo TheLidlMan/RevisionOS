@@ -11,8 +11,14 @@ export function useAutosaveDraft<T>(
   delayMs = 500,
 ) {
   const [draft, setDraft, hydrated] = usePersistentState<T>(storageKey, initialValue);
-  const [status, setStatus] = useState<AutosaveStatus>('idle');
-  const [restored, setRestored] = useState(false);
+  const [initialStored] = useState(() => {
+    if (typeof window === 'undefined' || !enabled) {
+      return false;
+    }
+    return window.localStorage.getItem(storageKey) !== null;
+  });
+  const [status, setStatus] = useState<AutosaveStatus>(initialStored ? 'saved' : 'idle');
+  const [restored, setRestored] = useState(initialStored);
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -22,15 +28,9 @@ export function useAutosaveDraft<T>(
 
     if (!mountedRef.current) {
       mountedRef.current = true;
-      const stored = typeof window !== 'undefined' ? window.localStorage.getItem(storageKey) : null;
-      if (stored) {
-        setRestored(true);
-        setStatus('saved');
-      }
       return;
     }
 
-    setStatus('saving');
     const timeout = window.setTimeout(() => {
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(draft));
@@ -55,7 +55,12 @@ export function useAutosaveDraft<T>(
 
   return {
     draft,
-    setDraft: setDraft as Dispatch<SetStateAction<T>>,
+    setDraft: ((value) => {
+      if (enabled && hydrated) {
+        setStatus('saving');
+      }
+      setDraft(value);
+    }) as Dispatch<SetStateAction<T>>,
     status,
     restored,
     clearDraft,

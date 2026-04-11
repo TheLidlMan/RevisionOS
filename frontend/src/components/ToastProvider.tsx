@@ -1,31 +1,11 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CheckCircle, WarningCircle, X } from '@phosphor-icons/react';
-
-type ToastTone = 'success' | 'error' | 'info';
-
-interface ToastAction {
-  label: string;
-  onClick: () => void;
-}
-
-interface ToastInput {
-  title: string;
-  description?: string;
-  tone?: ToastTone;
-  durationMs?: number;
-  action?: ToastAction;
-}
+import { ToastContext, type ToastInput, type ToastTone } from './toast-context';
 
 interface Toast extends ToastInput {
   id: string;
 }
-
-interface ToastContextValue {
-  showToast: (toast: ToastInput) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
 
 const glass = {
   background: 'var(--surface)',
@@ -122,12 +102,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-export function useToast() {
-  const context = useContext(ToastContext);
-  if (!context) {
-    throw new Error('useToast must be used within a ToastProvider');
-  }
-  return context;
 }

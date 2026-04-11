@@ -12,7 +12,7 @@ import {
 import { deleteFlashcard, getFlashcards, getModule, updateFlashcard } from '../api/client';
 import ShowMoreText from '../components/ShowMoreText';
 import Skeleton from '../components/Skeleton';
-import { useToast } from '../components/ToastProvider';
+import { useToast } from '../hooks/useToast';
 import { useAutosaveDraft } from '../hooks/useAutosaveDraft';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
@@ -123,14 +123,14 @@ export default function ModuleFlashcards() {
     return visible.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   }, [cardsQuery.data, pendingDeleteIds, search, sortBy]);
 
-  useEffect(() => {
+  const activeSelectedCardId = useMemo(() => {
     if (!filteredCards.length) {
-      setSelectedCardId(null);
-      return;
+      return null;
     }
-    if (!selectedCardId || !filteredCards.some((card) => card.id === selectedCardId)) {
-      setSelectedCardId(filteredCards[0].id);
+    if (selectedCardId && filteredCards.some((card) => card.id === selectedCardId)) {
+      return selectedCardId;
     }
+    return filteredCards[0].id;
   }, [filteredCards, selectedCardId]);
 
   useEffect(() => {
@@ -163,7 +163,7 @@ export default function ModuleFlashcards() {
         return;
       }
 
-      const currentIndex = filteredCards.findIndex((card) => card.id === selectedCardId);
+      const currentIndex = filteredCards.findIndex((card) => card.id === activeSelectedCardId);
       if (['ArrowRight', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
         const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % filteredCards.length : 0;
@@ -174,9 +174,9 @@ export default function ModuleFlashcards() {
         const nextIndex = currentIndex > 0 ? currentIndex - 1 : filteredCards.length - 1;
         setSelectedCardId(filteredCards[nextIndex].id);
       }
-      if (event.key === 'Enter' && selectedCardId) {
+      if (event.key === 'Enter' && activeSelectedCardId) {
         event.preventDefault();
-        const selected = filteredCards.find((card) => card.id === selectedCardId);
+        const selected = filteredCards.find((card) => card.id === activeSelectedCardId);
         if (selected) {
           setEditing(selected);
         }
@@ -185,7 +185,7 @@ export default function ModuleFlashcards() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [clearEditDraft, editing, filteredCards, selectedCardId]);
+  }, [activeSelectedCardId, clearEditDraft, editing, filteredCards]);
 
   const queueDelete = (card: Flashcard) => {
     setPendingDeleteIds((current) => [...current, card.id]);
@@ -315,7 +315,7 @@ export default function ModuleFlashcards() {
       {filteredCards.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filteredCards.map((card) => {
-            const isSelected = selectedCardId === card.id;
+            const isSelected = activeSelectedCardId === card.id;
             return (
               <div
                 key={card.id}

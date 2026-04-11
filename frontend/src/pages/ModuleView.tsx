@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -35,7 +35,7 @@ import {
 } from '../api/client';
 import ShowMoreText from '../components/ShowMoreText';
 import Skeleton from '../components/Skeleton';
-import { useToast } from '../components/ToastProvider';
+import { useToast } from '../hooks/useToast';
 import UploadDocumentsModal from '../components/UploadDocumentsModal';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
@@ -79,14 +79,13 @@ export default function ModuleView() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [examDateInput, setExamDateInput] = useState('');
+  const [examDateDraft, setExamDateDraft] = useState<string | null>(null);
   const [documentSort, setDocumentSort] = usePersistentState<DocumentSort>(`module:${id}:document-sort`, 'UPDATED');
   const [pendingDocumentDeletes, setPendingDocumentDeletes] = useState<string[]>([]);
   const [cancellingDocumentId, setCancellingDocumentId] = useState<string | null>(null);
   const [flashcardStatus, setFlashcardStatus] = useState('');
   const deleteTimeoutsRef = useRef<Map<string, number>>(new Map());
   const moduleDeleteTimeoutRef = useRef<number | null>(null);
-  const lastServerExamDateRef = useRef('');
   useScrollRestoration(`module:${id}`);
 
   const refreshModuleData = () => {
@@ -127,13 +126,8 @@ export default function ModuleView() {
     enabled: !!id && Boolean(mod?.has_study_plan),
   });
 
-  useEffect(() => {
-    const serverValue = mod?.exam_date ? mod.exam_date.slice(0, 10) : '';
-    if (examDateInput === lastServerExamDateRef.current || examDateInput === '') {
-      setExamDateInput(serverValue);
-    }
-    lastServerExamDateRef.current = serverValue;
-  }, [examDateInput, mod?.exam_date]);
+  const serverExamDate = mod?.exam_date ? mod.exam_date.slice(0, 10) : '';
+  const examDateInput = examDateDraft ?? serverExamDate;
 
   const deleteDocumentMutation = useMutation({
     mutationFn: deleteDocument,
@@ -147,7 +141,7 @@ export default function ModuleView() {
   const updateModuleMutation = useMutation({
     mutationFn: (payload: { exam_date?: string }) => updateModule(id!, payload),
     onSuccess: (updated) => {
-      setExamDateInput(updated.exam_date ? updated.exam_date.slice(0, 10) : '');
+      setExamDateDraft(updated.exam_date ? updated.exam_date.slice(0, 10) : '');
       queryClient.invalidateQueries({ queryKey: ['module', id] });
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       queryClient.invalidateQueries({ queryKey: ['curriculum', id] });
@@ -158,7 +152,24 @@ export default function ModuleView() {
   const deleteModuleMutation = useMutation({
     mutationFn: () => deleteModule(id!),
     onSuccess: () => {
+      if (typeof window !== 'undefined') {
+        ['curriculum:module', 'forgetting-curve:module'].forEach((storageKey) => {
+          if (window.localStorage.getItem(storageKey) === id) {
+            window.localStorage.removeItem(storageKey);
+          }
+        });
+      }
+      queryClient.setQueryData(['modules'], (current: Array<{ id: string }> | undefined) =>
+        current?.filter((module) => module.id !== id),
+      );
       queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics'] });
+      queryClient.removeQueries({
+        predicate: ({ queryKey }) =>
+          Array.isArray(queryKey)
+          && typeof queryKey[0] === 'string'
+          && ['module', 'content-map', 'knowledge-graph', 'curriculum', 'flashcards', 'forgetting-curve', 'search'].includes(queryKey[0]),
+      });
       navigate('/');
     },
   });
@@ -357,7 +368,7 @@ export default function ModuleView() {
 
   const pipelineActive = ['queued', 'running', 'cancelling'].includes(mod.pipeline_status);
   const pipelineUpdatedAt = mod.pipeline_updated_at || mod.updated_at;
-  const planSaveDisabled = updateModuleMutation.isPending || examDateInput === (mod.exam_date ? mod.exam_date.slice(0, 10) : '');
+  const planSaveDisabled = updateModuleMutation.isPending || examDateInput === serverExamDate;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto w-full">
@@ -676,7 +687,7 @@ export default function ModuleView() {
             <input
               type="date"
               value={examDateInput}
-              onChange={(event) => setExamDateInput(event.target.value)}
+              onChange={(event) => setExamDateDraft(event.target.value)}
               className="flex-1 px-3 py-2.5"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
             />

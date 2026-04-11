@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, CheckCircle, FolderSimplePlus, X } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
@@ -48,11 +48,11 @@ export default function CreateModuleModal({ open, onClose }: Props) {
     },
   });
 
-  const reset = () => {
+  const reset = useCallback(() => {
     clearDraft();
     setCreatedModule(null);
     mutation.reset();
-  };
+  }, [clearDraft, mutation]);
 
   useEffect(() => {
     if (!open) {
@@ -66,7 +66,7 @@ export default function CreateModuleModal({ open, onClose }: Props) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose, open]);
+  }, [onClose, open, reset]);
 
   const trimmedName = draft.name.trim();
   const canSubmit = useMemo(() => trimmedName.length > 0 && !mutation.isPending, [trimmedName, mutation.isPending]);
