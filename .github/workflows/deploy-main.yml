@@ -32,8 +32,13 @@ jobs:
       - name: Validate required secrets (DB)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_DIRECT_URL: ${{ secrets.DATABASE_DIRECT_URL }}
         run: |
           test -n "$DATABASE_URL" || (echo "Missing GitHub secret: DATABASE_URL" && exit 1)
+          if [ -z "$DATABASE_DIRECT_URL" ]; then
+            echo "Warning: DATABASE_DIRECT_URL is not set; Alembic will fall back to DATABASE_URL."
+            echo "For Supabase production migrations, set DATABASE_DIRECT_URL to the direct Postgres connection string to avoid pooler limits."
+          fi
 
       - name: Install migration dependencies
         run: |
@@ -43,4 +48,13 @@ jobs:
       - name: Run Alembic migrations
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: alembic upgrade head
+          DATABASE_DIRECT_URL: ${{ secrets.DATABASE_DIRECT_URL }}
+        run: |
+          if [ -n "$DATABASE_DIRECT_URL" ]; then
+            export ALEMBIC_DATABASE_URL="$DATABASE_DIRECT_URL"
+            echo "Using DATABASE_DIRECT_URL for Alembic migrations."
+          else
+            export ALEMBIC_DATABASE_URL="$DATABASE_URL"
+            echo "Using DATABASE_URL for Alembic migrations."
+          fi
+          alembic upgrade head

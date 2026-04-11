@@ -9,9 +9,13 @@ from alembic import context
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+migration_database_url = (
+    os.getenv("ALEMBIC_DATABASE_URL")
+    or os.getenv("DATABASE_DIRECT_URL")
+    or os.getenv("DATABASE_URL")
+)
+if migration_database_url:
+    config.set_main_option("sqlalchemy.url", migration_database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
