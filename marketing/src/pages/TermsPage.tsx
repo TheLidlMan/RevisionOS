@@ -1,6 +1,16 @@
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 
+const H2 = ({ children }: { children: React.ReactNode }) => (
+  <h2 style={{ fontSize: '1.25rem', marginTop: '2.25rem', marginBottom: '0.75rem', color: 'var(--text)', fontFamily: 'var(--heading)' }}>
+    {children}
+  </h2>
+)
+
+const P = ({ children }: { children: React.ReactNode }) => (
+  <p style={{ marginBottom: '1rem' }}>{children}</p>
+)
+
 export default function TermsPage() {
   return (
     <>
@@ -8,59 +18,119 @@ export default function TermsPage() {
       <main style={{ paddingTop: 96 }}>
         <div className="container-narrow section">
           <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>Terms of Service</h1>
-          <p style={{
-            color: 'var(--danger)', fontSize: '0.875rem', fontWeight: 500,
-            marginBottom: '2rem', padding: '0.75rem 1rem',
-            background: 'rgba(220,120,100,0.08)', borderRadius: 'var(--radius-sm)',
-            border: '1px solid rgba(220,120,100,0.2)',
-          }}>
-            ⚠️ DRAFT — This is placeholder text and does not constitute a binding agreement. Finalised terms will be published before public launch.
-          </p>
 
           <div style={{ color: 'var(--text-secondary)', lineHeight: 1.8, fontSize: '0.9375rem' }}>
-            <p style={{ marginBottom: '1rem' }}>
-              <strong style={{ color: 'var(--text)' }}>Last updated:</strong> {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+            <p style={{ marginBottom: '2rem' }}>
+              <strong style={{ color: 'var(--text)' }}>Last updated:</strong> 11 April 2026
             </p>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>1. Service description</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              Revise OS ("the Service") is an AI-powered adaptive study platform that helps users create, organise, and review revision materials. The Service includes features such as flashcard generation, quiz creation, knowledge graphs, and spaced repetition scheduling.
-            </p>
+            <P>
+              Please read these Terms of Service ("Terms") carefully before using ReviseOS (the "Service"), operated by ReviseOS Ltd ("we", "us", or "our"). By creating an account or accessing the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>2. Account registration</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              You may register using Google Sign-In. You are responsible for maintaining the security of your account. You must provide accurate information during registration. [Placeholder: age restrictions and eligibility requirements will be specified here.]
-            </p>
+            <H2>1. About the Service</H2>
+            <P>
+              ReviseOS is an AI-powered adaptive learning platform that enables users to upload study materials, generate flashcards and quiz questions, explore knowledge graphs, and schedule revision sessions using spaced repetition algorithms. The Service is intended for personal educational use by students, professionals, and lifelong learners.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>3. Acceptable use</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              You agree not to upload illegal, harmful, or copyrighted content without rights. The Service is intended for personal educational use. [Placeholder: detailed acceptable use policy will be provided.]
-            </p>
+            <H2>2. Eligibility</H2>
+            <P>
+              You must be at least 13 years of age to use the Service. If you are under 18, you confirm that you have obtained the consent of a parent or legal guardian. By registering, you represent that all information you provide is accurate and that you have the legal capacity to enter into this agreement.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>4. Your content</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              You retain ownership of all materials you upload. By uploading, you grant Revise OS a limited licence to process your content solely for the purpose of providing the Service. We do not claim ownership of your study materials.
-            </p>
+            <H2>3. Account registration and security</H2>
+            <P>
+              You may register an account using Google Sign-In or by providing an email address and password. You are solely responsible for maintaining the confidentiality of your login credentials and for all activity that occurs under your account. You must notify us immediately at <strong style={{ color: 'var(--text)' }}>hello@reviseos.co.uk</strong> if you suspect any unauthorised access to your account. We reserve the right to suspend or terminate accounts that we reasonably believe have been compromised.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>5. AI-generated content</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              Flashcards, quiz questions, and other content generated by the Service are produced by AI models and may contain errors. The Service is a study aid and should not be relied upon as the sole source of information. Always verify important facts with authoritative sources.
-            </p>
+            <H2>4. Acceptable use</H2>
+            <P>
+              You agree to use the Service only for lawful educational purposes. You must not:
+            </P>
+            <ul style={{ marginBottom: '1rem', paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <li>Upload, share, or generate content that is illegal, defamatory, obscene, or infringes the intellectual property rights of any third party;</li>
+              <li>Attempt to reverse-engineer, scrape, or extract data from the Service by automated means without our written consent;</li>
+              <li>Use the Service to train, fine-tune, or distil any machine learning model without prior written permission;</li>
+              <li>Impersonate any person or entity, or misrepresent your affiliation with any person or entity;</li>
+              <li>Interfere with or disrupt the integrity or performance of the Service or its underlying infrastructure;</li>
+              <li>Circumvent any rate limits, access controls, or security measures.</li>
+            </ul>
+            <P>
+              We reserve the right to suspend or permanently terminate accounts that violate this policy, with or without prior notice.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>6. Limitation of liability</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              The Service is provided "as is" without warranty. [Placeholder: complete limitation of liability and indemnification terms to be drafted by legal counsel.]
-            </p>
+            <H2>5. Your content</H2>
+            <P>
+              You retain full ownership of all study materials, notes, documents, and other content you upload to the Service ("Your Content"). By uploading Your Content, you grant ReviseOS Ltd a limited, non-exclusive, royalty-free, worldwide licence to store, process, and reproduce Your Content solely to the extent necessary to provide and improve the Service to you. We do not sell Your Content to third parties and do not use it to train our AI models without your explicit consent.
+            </P>
+            <P>
+              You are solely responsible for ensuring that Your Content does not infringe any third-party rights and that you have the necessary rights to upload it.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>7. Changes to terms</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              We may update these terms from time to time. We will notify registered users of material changes. [Placeholder: notification mechanism details.]
-            </p>
+            <H2>6. AI-generated content</H2>
+            <P>
+              Flashcards, quiz questions, summaries, concept maps, and other outputs generated by the Service's AI features are produced by large language models and may contain inaccuracies, omissions, or errors. ReviseOS is a study aid and must not be relied upon as a substitute for authoritative textbooks, qualified tutors, or professional advice. You are responsible for verifying the accuracy of AI-generated content before relying on it in any academic, professional, or personal context.
+            </P>
 
-            <h2 style={{ fontSize: '1.25rem', marginTop: '2rem', marginBottom: '0.75rem' }}>8. Contact</h2>
-            <p style={{ marginBottom: '1rem' }}>
-              For questions about these terms, contact <strong style={{ color: 'var(--text)' }}>hello@reviseos.co.uk</strong>. [Placeholder: registered company details to be added.]
-            </p>
+            <H2>7. Intellectual property</H2>
+            <P>
+              The Service, including its software, design, interface, and branding, is the exclusive property of ReviseOS Ltd and is protected by copyright, trade mark, and other applicable intellectual property laws. Nothing in these Terms grants you any right to use our trade marks, logos, or other proprietary materials without our prior written consent. All rights not expressly granted herein are reserved.
+            </P>
+
+            <H2>8. Subscriptions, billing, and refunds</H2>
+            <P>
+              Certain features of the Service may require a paid subscription. Subscription fees are billed in advance on a monthly or annual basis and are non-refundable except where required by law. You may cancel your subscription at any time through your account settings; cancellation takes effect at the end of the current billing period and you will retain access until then. We reserve the right to change pricing at any time, with at least 30 days' notice to existing subscribers.
+            </P>
+
+            <H2>9. Availability and modifications</H2>
+            <P>
+              We aim to maintain high availability of the Service but do not guarantee uninterrupted access. We may modify, suspend, or discontinue any part of the Service at any time for maintenance, security, legal, or business reasons. Where reasonably practicable, we will provide advance notice of significant changes.
+            </P>
+
+            <H2>10. Disclaimer of warranties</H2>
+            <P>
+              The Service is provided "as is" and "as available" without warranty of any kind. To the fullest extent permitted by applicable law, ReviseOS Ltd expressly disclaims all warranties, whether express, implied, or statutory, including but not limited to implied warranties of merchantability, fitness for a particular purpose, and non-infringement. We do not warrant that the Service will be error-free, secure, or free of viruses or other harmful components.
+            </P>
+
+            <H2>11. Limitation of liability</H2>
+            <P>
+              To the maximum extent permitted by law, ReviseOS Ltd, its directors, employees, and affiliates shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising out of or in connection with your use of or inability to use the Service, including but not limited to loss of data, loss of profits, or academic detriment, even if we have been advised of the possibility of such damages. Our total aggregate liability to you for any claim arising under or relating to these Terms shall not exceed the greater of (a) the total fees paid by you to us in the twelve months preceding the claim, or (b) £50.
+            </P>
+
+            <H2>12. Indemnification</H2>
+            <P>
+              You agree to indemnify, defend, and hold harmless ReviseOS Ltd and its officers, directors, employees, and agents from and against any claims, liabilities, damages, losses, and expenses (including reasonable legal fees) arising out of or in any way connected with your use of the Service, Your Content, or your breach of these Terms.
+            </P>
+
+            <H2>13. Privacy</H2>
+            <P>
+              Your use of the Service is also governed by our <a href="/privacy" style={{ color: 'var(--accent)', textDecoration: 'none' }}>Privacy Policy</a>, which is incorporated into these Terms by reference. By using the Service, you consent to the collection and use of your information as described in the Privacy Policy.
+            </P>
+
+            <H2>14. Governing law and disputes</H2>
+            <P>
+              These Terms are governed by and construed in accordance with the laws of England and Wales. Any disputes arising out of or in connection with these Terms shall first be subject to good-faith negotiation. If a dispute cannot be resolved within 30 days, it shall be submitted to the exclusive jurisdiction of the courts of England and Wales.
+            </P>
+
+            <H2>15. Changes to these terms</H2>
+            <P>
+              We may update these Terms from time to time. We will notify registered users of material changes by email or by prominent notice within the Service at least 14 days before the changes take effect. Your continued use of the Service after the effective date of revised Terms constitutes your acceptance of the changes. If you do not agree to the revised Terms, you must stop using the Service and may delete your account.
+            </P>
+
+            <H2>16. Termination</H2>
+            <P>
+              You may delete your account at any time through the account settings page. We may suspend or terminate your access to the Service immediately, without prior notice or liability, if you breach these Terms or if we are required to do so by law. Upon termination, your right to use the Service ceases immediately, and we may delete Your Content in accordance with our data retention policy.
+            </P>
+
+            <H2>17. Severability and waiver</H2>
+            <P>
+              If any provision of these Terms is found to be unenforceable by a court of competent jurisdiction, that provision shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions shall continue in full force and effect. Our failure to enforce any right or provision of these Terms shall not constitute a waiver of that right or provision.
+            </P>
+
+            <H2>18. Contact us</H2>
+            <P>
+              If you have any questions or concerns about these Terms, please contact us at <strong style={{ color: 'var(--text)' }}>hello@reviseos.co.uk</strong>.
+            </P>
           </div>
         </div>
       </main>
