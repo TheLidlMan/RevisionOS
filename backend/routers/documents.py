@@ -24,6 +24,8 @@ from models.user import User
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
+SSE_KEEPALIVE_INTERVAL_SECONDS = 15
+SSE_KEEPALIVE_COMMENT = ": keep-alive\n\n"
 
 # ---------- Pydantic schemas ----------
 
@@ -159,6 +161,14 @@ def _save_uploaded_file(module: Module, file: UploadFile) -> tuple[str, str, str
     return file_id, file_type, file_path, total_bytes, digest.hexdigest()
 
 
+def _run_document_pipeline_background(
+    document_id: str,
+    module_id: str,
+    job_id: str,
+) -> None:
+    asyncio.run(process_document_pipeline(document_id, module_id, job_id))
+
+
 # ---------- Endpoints ----------
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
@@ -210,7 +220,7 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(process_document_pipeline, doc.id, module.id, job.id)
+    background_tasks.add_task(_run_document_pipeline_background, doc.id, module.id, job.id)
 
     return _document_to_response(doc)
 
@@ -263,6 +273,7 @@ async def upload_document_stream(
 
     async def event_stream():
         queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
         yield ai_service.encode_sse_event(
             {
                 "event": "status",
@@ -287,14 +298,32 @@ async def upload_document_stream(
                     event["result"] = result
             await queue.put(ai_service.encode_sse_event(event))
 
-        async def run_pipeline():
-            try:
-                await process_document_pipeline(doc.id, module.id, job.id, event_handler=emit)
-            finally:
-                await queue.put(None)
+        def emit_threadsafe(event: dict) -> None:
+            asyncio.run_coroutine_threadsafe(emit(event), loop)
 
+        async def send_keepalives():
+            try:
+                while True:
+                    await asyncio.sleep(SSE_KEEPALIVE_INTERVAL_SECONDS)
+                    await queue.put(SSE_KEEPALIVE_COMMENT)
+            except asyncio.CancelledError:
+                return
+
+        def run_pipeline_in_thread() -> None:
+            try:
+                asyncio.run(process_document_pipeline(doc.id, module.id, job.id, event_handler=emit_threadsafe))
+            except Exception as exc:
+                logger.exception("Streaming document pipeline failed for %s: %s", doc.id, exc)
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    ai_service.encode_sse_event({"event": "error", "stage": "failed", "message": str(exc)}),
+                )
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        keepalive_task = asyncio.create_task(send_keepalives())
         try:
-            pipeline_task = asyncio.create_task(run_pipeline())
+            pipeline_task = asyncio.create_task(asyncio.to_thread(run_pipeline_in_thread))
             while True:
                 item = await queue.get()
                 if item is None:
@@ -303,8 +332,18 @@ async def upload_document_stream(
             await pipeline_task
         except Exception as exc:
             yield ai_service.encode_sse_event({"event": "error", "stage": "failed", "message": str(exc)})
+        finally:
+            keepalive_task.cancel()
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/{document_id}/index")
