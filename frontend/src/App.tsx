@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
@@ -18,7 +18,7 @@ import { useAuthStore } from './store/auth';
 export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
-  const { loadFromStorage } = useAuthStore();
+  const { loadFromStorage, isAuthenticated, loading } = useAuthStore();
 
   useEffect(() => {
     loadFromStorage();
@@ -38,6 +38,16 @@ export default function App() {
   // Full-screen pages without sidebar
   if (location.pathname === '/login') {
     return <LoginPage />;
+  }
+
+  // Wait for session check before rendering protected content
+  if (loading) {
+    return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} />;
+  }
+
+  // Redirect unauthenticated users to login
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
 
   return (
