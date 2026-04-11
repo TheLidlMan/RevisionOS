@@ -85,12 +85,11 @@ jobs:
 
       - name: Configure Railway auth fallback
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_ACCESS_TOKEN: ${{ secrets.RAILWAY_ACCESS_TOKEN }}
           RAILWAY_REFRESH_TOKEN: ${{ secrets.RAILWAY_REFRESH_TOKEN }}
         run: |
-          if [ -n "$RAILWAY_TOKEN" ]; then
-            echo "RAILWAY_TOKEN provided; skipping config.json fallback"
+          if [ -z "$RAILWAY_ACCESS_TOKEN" ] || [ -z "$RAILWAY_REFRESH_TOKEN" ]; then
+            echo "No Railway access/refresh fallback configured"
             exit 0
           fi
           mkdir -p ~/.railway
@@ -109,15 +108,34 @@ jobs:
       - name: Verify Railway auth
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_ACCESS_TOKEN: ${{ secrets.RAILWAY_ACCESS_TOKEN }}
+          RAILWAY_REFRESH_TOKEN: ${{ secrets.RAILWAY_REFRESH_TOKEN }}
         run: |
-          railway whoami --json >/dev/null || {
-            echo "Railway authentication failed. Check that RAILWAY_TOKEN is valid and has access to the target project."
-            exit 1
-          }
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            if railway whoami --json >/dev/null 2>&1; then
+              echo "Using RAILWAY_TOKEN for Railway auth"
+              echo "RAILWAY_TOKEN=$RAILWAY_TOKEN" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "RAILWAY_TOKEN auth failed; trying access/refresh fallback if configured"
+          fi
+
+          if [ -n "$RAILWAY_ACCESS_TOKEN" ] && [ -n "$RAILWAY_REFRESH_TOKEN" ]; then
+            unset RAILWAY_TOKEN
+            railway whoami --json >/dev/null || {
+              echo "Railway authentication failed with both RAILWAY_TOKEN and access/refresh fallback. Check the GitHub secrets."
+              exit 1
+            }
+            echo "Using Railway access/refresh fallback auth"
+            echo "RAILWAY_TOKEN=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "Railway authentication failed. Check that RAILWAY_TOKEN is valid and has access to the target project."
+          exit 1
 
       - name: Deploy to Railway
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME }}
