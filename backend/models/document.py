@@ -25,6 +25,7 @@ class Document(Base):
     slide_count = Column(Integer, nullable=True)  # For PPTX files
     embedding = Column(Text, nullable=True)  # Base64-encoded embedding vector
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     module = relationship("Module", back_populates="documents")
     flashcards = relationship("Flashcard", back_populates="source_document")

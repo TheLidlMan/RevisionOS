@@ -1,6 +1,7 @@
 import { CardsThree, ClockCountdown, FileText, Sparkle } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
+import { formatRelativeTime, titleCase } from '../utils/formatters';
 
 interface Props {
   module: Module;
@@ -70,10 +71,14 @@ export default function ModuleCard({ module }: Props) {
         </span>
       </div>
 
+      <p className="mt-3" style={{ color: 'var(--text-tertiary)', fontSize: '0.78rem' }}>
+        Updated {formatRelativeTime(module.updated_at)}
+      </p>
+
       {(module.pipeline_status === 'running' || module.pipeline_status === 'queued') && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-            <span>{module.pipeline_stage.replace(/_/g, ' ')}</span>
+            <span>{titleCase(module.pipeline_stage)}</span>
             <span>
               {module.pipeline_completed}/{Math.max(module.pipeline_total, 1)}
             </span>
@@ -88,6 +93,9 @@ export default function ModuleCard({ module }: Props) {
               }}
             />
           </div>
+          <p className="mt-2" style={{ color: 'var(--text-tertiary)', fontSize: '0.78rem' }}>
+            {module.pipeline_completed} of {Math.max(module.pipeline_total, 1)} steps completed
+          </p>
         </div>
       )}
     </button>

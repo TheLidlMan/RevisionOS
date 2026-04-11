@@ -65,6 +65,7 @@ export interface Document {
   word_count: number;
   summary?: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Concept {
@@ -105,6 +106,7 @@ export interface Flashcard {
   state: CardState;
   last_review?: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface FlashcardCreate {

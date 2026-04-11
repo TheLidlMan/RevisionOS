@@ -156,8 +156,11 @@ This repository includes a GitHub Actions workflow at `.github/workflows/deploy-
 
 On every push to `main`, it will:
 1. Run Alembic migrations against your production Supabase/Postgres database.
-2. Deploy the backend to Railway.
-3. Build and deploy the frontend to Cloudflare Pages.
+2. Build and deploy the frontend to Cloudflare Pages.
+
+Backend deploys are handled directly by Railway from the connected GitHub repository, so the GitHub Action no longer deploys the backend service.
+
+For Railway direct GitHub deploys, the repository root includes a production Dockerfile that builds the backend from `backend/`, so the Railway service can continue watching `main` without needing a separate GitHub Action deploy step.
 
 ### Required GitHub Secrets
 
@@ -166,14 +169,7 @@ Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repos
 | Secret | Description |
 |---|---|
 | `DATABASE_URL` | Production Postgres URL used for Alembic migrations |
-| `RAILWAY_TOKEN` | Railway API token used by the CLI in GitHub Actions. Recommended and preferred. |
-| `RAILWAY_ACCESS_TOKEN` | Optional fallback access token if you cannot use `RAILWAY_TOKEN` |
-| `RAILWAY_REFRESH_TOKEN` | Optional fallback refresh token paired with `RAILWAY_ACCESS_TOKEN` |
-| `RAILWAY_PROJECT_ID` | Railway project id |
-| `RAILWAY_SERVICE_ID` | Railway backend service id (recommended, avoids name ambiguity) |
-| `RAILWAY_SERVICE_NAME` | Railway backend service name (fallback if service id is not provided) |
 | `VITE_API_BASE_URL` | Public backend API base URL for frontend builds (e.g. `https://revisionos-api-production.up.railway.app/api`) |
-| `CORS_ORIGINS` | Backend allowed frontend origins for Railway (e.g. `https://revisionos-frontend.pages.dev`) |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Pages deploy permissions |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
 | `CLOUDFLARE_PAGES_PROJECT` | Cloudflare Pages project name (e.g. `revisionos-frontend`) |

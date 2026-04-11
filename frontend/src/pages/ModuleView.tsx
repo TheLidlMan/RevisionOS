@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -28,9 +28,14 @@ import {
   getModule,
   updateModule,
 } from '../api/client';
+import ShowMoreText from '../components/ShowMoreText';
+import Skeleton from '../components/Skeleton';
+import { useToast } from '../components/ToastProvider';
 import UploadDocumentsModal from '../components/UploadDocumentsModal';
-import type { ContentMapData, CurriculumData, KnowledgeGraphData, ModuleDetail } from '../types';
-import { titleCase } from '../utils/formatters';
+import { usePersistentState } from '../hooks/usePersistentState';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
+import type { ContentMapData, CurriculumData, Document, KnowledgeGraphData, ModuleDetail } from '../types';
+import { formatDateTime, formatRelativeTime, titleCase } from '../utils/formatters';
 
 const glass = {
   background: 'var(--surface)',
@@ -40,12 +45,21 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
+type DocumentSort = 'UPDATED' | 'NEWEST' | 'OLDEST' | 'A_Z';
+
 export default function ModuleView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [examDateInput, setExamDateInput] = useState('');
+  const [documentSort, setDocumentSort] = usePersistentState<DocumentSort>(`module:${id}:document-sort`, 'UPDATED');
+  const [pendingDocumentDeletes, setPendingDocumentDeletes] = useState<string[]>([]);
+  const deleteTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const moduleDeleteTimeoutRef = useRef<number | null>(null);
+  const lastServerExamDateRef = useRef('');
+  useScrollRestoration(`module:${id}`);
 
   const moduleQuery = useQuery({
     queryKey: ['module', id],
@@ -77,6 +91,14 @@ export default function ModuleView() {
     enabled: !!id && Boolean(mod?.has_study_plan),
   });
 
+  useEffect(() => {
+    const serverValue = mod?.exam_date ? mod.exam_date.slice(0, 10) : '';
+    if (examDateInput === lastServerExamDateRef.current || examDateInput === '') {
+      setExamDateInput(serverValue);
+    }
+    lastServerExamDateRef.current = serverValue;
+  }, [examDateInput, mod?.exam_date]);
+
   const deleteDocumentMutation = useMutation({
     mutationFn: deleteDocument,
     onSuccess: () => {
@@ -93,6 +115,7 @@ export default function ModuleView() {
       queryClient.invalidateQueries({ queryKey: ['module', id] });
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       queryClient.invalidateQueries({ queryKey: ['curriculum', id] });
+      showToast({ title: 'Exam date saved', description: 'The study plan will refresh automatically.', tone: 'success' });
     },
   });
 
@@ -109,10 +132,99 @@ export default function ModuleView() {
     [graphQuery.data],
   );
 
+  const sortedDocuments = useMemo(() => {
+    const documents = [...(mod?.documents || [])].filter((doc) => !pendingDocumentDeletes.includes(doc.id));
+    if (documentSort === 'A_Z') {
+      return documents.sort((a, b) => a.filename.localeCompare(b.filename));
+    }
+    if (documentSort === 'NEWEST') {
+      return documents.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    if (documentSort === 'OLDEST') {
+      return documents.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
+    return documents.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  }, [documentSort, mod?.documents, pendingDocumentDeletes]);
+
+  const queueDocumentDelete = (doc: Document) => {
+    setPendingDocumentDeletes((current) => [...current, doc.id]);
+    const timeout = window.setTimeout(() => {
+      deleteDocumentMutation.mutate(doc.id);
+      setPendingDocumentDeletes((current) => current.filter((value) => value !== doc.id));
+      deleteTimeoutsRef.current.delete(doc.id);
+    }, 5000);
+    deleteTimeoutsRef.current.set(doc.id, timeout);
+    showToast({
+      title: `Deleted "${doc.filename}"`,
+      description: 'Undo within 5 seconds if you still need this file.',
+      tone: 'info',
+      durationMs: 5200,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          const pending = deleteTimeoutsRef.current.get(doc.id);
+          if (pending) {
+            window.clearTimeout(pending);
+            deleteTimeoutsRef.current.delete(doc.id);
+            setPendingDocumentDeletes((current) => current.filter((value) => value !== doc.id));
+          }
+        },
+      },
+    });
+  };
+
+  const queueModuleDelete = () => {
+    if (moduleDeleteTimeoutRef.current) {
+      window.clearTimeout(moduleDeleteTimeoutRef.current);
+    }
+    moduleDeleteTimeoutRef.current = window.setTimeout(() => {
+      deleteModuleMutation.mutate();
+      moduleDeleteTimeoutRef.current = null;
+    }, 5000);
+
+    showToast({
+      title: `Module "${mod?.name}" scheduled for deletion`,
+      description: 'Undo within 5 seconds to keep everything intact.',
+      tone: 'info',
+      durationMs: 5200,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          if (moduleDeleteTimeoutRef.current) {
+            window.clearTimeout(moduleDeleteTimeoutRef.current);
+            moduleDeleteTimeoutRef.current = null;
+          }
+        },
+      },
+    });
+  };
+
   if (moduleQuery.isLoading) {
     return (
-      <div className="flex justify-center py-16">
-        <SpinnerGap size={28} className="animate-spin" style={{ color: 'var(--accent)' }} />
+      <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
+        <Skeleton className="h-5 w-40 mb-6" />
+        <div className="mb-8">
+          <Skeleton className="h-10 w-72 mb-3" />
+          <Skeleton className="h-4 w-full max-w-2xl mb-2" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
+          <div className="xl:col-span-2 p-5" style={glass}>
+            <Skeleton className="h-6 w-32 mb-5" />
+            {[0, 1].map((idx) => (
+              <div key={idx} className="mb-3 p-4" style={{ ...glass, borderRadius: '12px' }}>
+                <Skeleton className="h-4 w-48 mb-2" />
+                <Skeleton className="h-4 w-36 mb-2" />
+                <Skeleton className="h-4 w-full" />
+              </div>
+            ))}
+          </div>
+          <div className="p-5" style={glass}>
+            <Skeleton className="h-6 w-28 mb-5" />
+            <Skeleton className="h-11 w-full mb-3" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -129,6 +241,7 @@ export default function ModuleView() {
   }
 
   const pipelineActive = ['queued', 'running'].includes(mod.pipeline_status);
+  const planSaveDisabled = updateModuleMutation.isPending || examDateInput === (mod.exam_date ? mod.exam_date.slice(0, 10) : '');
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
@@ -142,113 +255,119 @@ export default function ModuleView() {
         Back to Dashboard
       </button>
 
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 mb-8">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3 mb-2">
-            <span style={{ width: 12, height: 12, borderRadius: 999, background: mod.color, flexShrink: 0 }} />
-            <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '2rem' }}>{mod.name}</h1>
-          </div>
-          {mod.description && (
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', maxWidth: 720 }}>{mod.description}</p>
-          )}
-          <div className="flex flex-wrap gap-3 mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <span>{mod.total_documents} documents</span>
-            <span>{mod.total_cards} cards</span>
-            <span>{mod.due_cards} due</span>
-            <span>{Math.round(mod.mastery_pct)}% mastery</span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="scholar-btn" onClick={() => setUploadOpen(true)}>
-            <UploadSimple size={18} />
-            Upload
-          </button>
-          <button
-            type="button"
-            className="scholar-btn"
-            style={{ background: 'rgba(196,149,106,0.25)', color: 'var(--text)' }}
-            onClick={() => navigate(`/flashcards/${mod.id}`)}
-          >
-            <PlayCircle size={18} />
-            Start Review
-          </button>
-          <button
-            type="button"
-            className="scholar-btn"
-            style={{ background: 'rgba(196,149,106,0.18)', color: 'var(--text)' }}
-            onClick={() => navigate(`/quiz?module=${mod.id}`)}
-          >
-            <BookOpen size={18} />
-            Take Quiz
-          </button>
-          <details>
-            <summary
-              className="list-none cursor-pointer px-4 py-2.5 inline-flex items-center gap-2"
-              style={{ ...glass, color: 'var(--text)', fontSize: '0.9rem' }}
-            >
-              <Export size={18} />
-              Export
-            </summary>
-            <div className="mt-2 p-2 space-y-1 absolute" style={{ ...glass, minWidth: 180 }}>
-              <button
-                type="button"
-                className="w-full text-left px-3 py-2 rounded-xl"
-                style={{ color: 'var(--text)' }}
-                onClick={async () => {
-                  const blob = await exportAnki(mod.id);
-                  const url = URL.createObjectURL(blob);
-                  const anchor = document.createElement('a');
-                  anchor.href = url;
-                  anchor.download = `${mod.name}.apkg`;
-                  anchor.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                Export Anki
-              </button>
-              <button
-                type="button"
-                className="w-full text-left px-3 py-2 rounded-xl"
-                style={{ color: 'var(--text)' }}
-                onClick={async () => {
-                  const blob = await exportJson(mod.id);
-                  const url = URL.createObjectURL(blob);
-                  const anchor = document.createElement('a');
-                  anchor.href = url;
-                  anchor.download = `${mod.name}.json`;
-                  anchor.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                Export JSON
-              </button>
+      <div className="sticky top-0 z-20 -mx-2 px-2 pb-4 mb-8" style={{ background: 'linear-gradient(to bottom, var(--bg) 78%, rgba(15,15,15,0))' }}>
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 p-5" style={glass}>
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-2">
+              <span style={{ width: 12, height: 12, borderRadius: 999, background: mod.color, flexShrink: 0 }} />
+              <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '2rem' }}>{mod.name}</h1>
             </div>
-          </details>
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm(`Delete ${mod.name}? This removes the module and all of its content.`)) {
-                deleteModuleMutation.mutate();
-              }
-            }}
-            className="px-4 py-2.5 inline-flex items-center gap-2"
-            style={{ ...glass, color: 'var(--danger)' }}
-          >
-            <Trash size={18} />
-            Delete Module
-          </button>
+            {mod.description ? (
+              <ShowMoreText text={mod.description} collapsedLines={2} color="var(--text-secondary)" fontSize="0.95rem" />
+            ) : (
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>Add source material and let the backend keep this module up to date.</p>
+            )}
+            <div className="flex flex-wrap gap-3 mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <span>{mod.total_documents} documents</span>
+              <span>{mod.total_cards} cards</span>
+              <span>{mod.due_cards} due</span>
+              <span>{Math.round(mod.mastery_pct)}% mastery</span>
+              <span title={formatDateTime(mod.updated_at)}>Updated {formatRelativeTime(mod.updated_at)}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="scholar-btn" onClick={() => setUploadOpen(true)}>
+              <UploadSimple size={18} />
+              Upload
+            </button>
+            <button
+              type="button"
+              className="scholar-btn"
+              style={{ background: 'rgba(196,149,106,0.25)', color: 'var(--text)' }}
+              onClick={() => navigate(`/flashcards/${mod.id}`)}
+            >
+              <PlayCircle size={18} />
+              Start Review
+            </button>
+            <button
+              type="button"
+              className="scholar-btn"
+              style={{ background: 'rgba(196,149,106,0.18)', color: 'var(--text)' }}
+              onClick={() => navigate(`/quiz?module=${mod.id}`)}
+            >
+              <BookOpen size={18} />
+              Take Quiz
+            </button>
+            <details>
+              <summary
+                className="list-none cursor-pointer px-4 py-2.5 inline-flex items-center gap-2"
+                style={{ ...glass, color: 'var(--text)', fontSize: '0.9rem' }}
+              >
+                <Export size={18} />
+                Export
+              </summary>
+              <div className="mt-2 p-2 space-y-1 absolute" style={{ ...glass, minWidth: 180 }}>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 rounded-xl"
+                  style={{ color: 'var(--text)' }}
+                  onClick={async () => {
+                    const blob = await exportAnki(mod.id);
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `${mod.name}.apkg`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export Anki
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 rounded-xl"
+                  style={{ color: 'var(--text)' }}
+                  onClick={async () => {
+                    const blob = await exportJson(mod.id);
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `${mod.name}.json`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export JSON
+                </button>
+              </div>
+            </details>
+            <button
+              type="button"
+              onClick={queueModuleDelete}
+              className="px-4 py-2.5 inline-flex items-center gap-2"
+              style={{ ...glass, color: 'var(--danger)' }}
+            >
+              <Trash size={18} />
+              Delete Module
+            </button>
+          </div>
         </div>
       </div>
 
       {pipelineActive && (
         <div className="p-4 mb-6" style={glass}>
-          <div className="flex items-center gap-3 mb-3">
-            <SpinnerGap size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />
-            <div>
-              <p style={{ color: 'var(--text)', fontSize: '0.95rem' }}>Backend pipeline is running</p>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{titleCase(mod.pipeline_stage)}</p>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-3">
+              <SpinnerGap size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />
+              <div>
+                <p style={{ color: 'var(--text)', fontSize: '0.95rem' }}>Backend pipeline is running</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{titleCase(mod.pipeline_stage)}</p>
+              </div>
             </div>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+              {mod.pipeline_completed} of {Math.max(mod.pipeline_total, 1)} steps complete · updated {formatRelativeTime(mod.updated_at)}
+            </p>
           </div>
           <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 999 }}>
             <div
@@ -277,34 +396,43 @@ export default function ModuleView() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
         <section className="xl:col-span-2 p-5" style={glass}>
-          <div className="flex items-center gap-2 mb-4">
-            <FileText size={20} style={{ color: 'var(--accent)' }} />
-            <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.15rem' }}>Documents</h2>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <FileText size={20} style={{ color: 'var(--accent)' }} />
+              <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.15rem' }}>Documents</h2>
+            </div>
+            <select value={documentSort} onChange={(event) => setDocumentSort(event.target.value as DocumentSort)} className="px-3 py-2.5" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <option value="UPDATED">Recently updated</option>
+              <option value="NEWEST">Newest</option>
+              <option value="OLDEST">Oldest</option>
+              <option value="A_Z">A-Z</option>
+            </select>
           </div>
-          {mod.documents.length > 0 ? (
+          {sortedDocuments.length > 0 ? (
             <div className="space-y-3">
-              {mod.documents.map((doc) => (
+              {sortedDocuments.map((doc) => (
                 <div key={doc.id} className="p-4" style={{ ...glass, borderRadius: '12px' }}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate" style={{ color: 'var(--text)', fontSize: '0.95rem' }}>{doc.filename}</p>
                       <div className="flex flex-wrap gap-3 mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
                         <span>{doc.file_type}</span>
                         <span>{doc.word_count.toLocaleString()} words</span>
                         <span>{titleCase(doc.processing_status)}</span>
+                        <span title={formatDateTime(doc.updated_at)}>Updated {formatRelativeTime(doc.updated_at)}</span>
                       </div>
-                      {doc.summary && (
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginTop: 10 }}>{doc.summary}</p>
+                      {doc.summary ? (
+                        <ShowMoreText text={doc.summary} collapsedLines={3} color="var(--text-secondary)" fontSize="0.88rem" />
+                      ) : (
+                        <p style={{ color: 'var(--text-tertiary)', fontSize: '0.84rem', marginTop: 10 }}>
+                          Summary will appear here when processing completes.
+                        </p>
                       )}
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (window.confirm(`Delete ${doc.filename}?`)) {
-                          deleteDocumentMutation.mutate(doc.id);
-                        }
-                      }}
-                      style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}
+                      onClick={() => queueDocumentDelete(doc)}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', minWidth: 40, minHeight: 40 }}
                       aria-label={`Delete ${doc.filename}`}
                     >
                       <Trash size={18} />
@@ -314,8 +442,15 @@ export default function ModuleView() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-10" style={{ color: 'var(--text-secondary)' }}>
-              No documents yet. Upload files to kick off the backend pipeline.
+            <div className="text-center py-10">
+              <p style={{ color: 'var(--text)', marginBottom: 8 }}>No documents yet.</p>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+                Upload files here to kick off summaries, topic mapping, flashcards, and the study plan.
+              </p>
+              <button type="button" className="scholar-btn" onClick={() => setUploadOpen(true)}>
+                <UploadSimple size={18} />
+                Upload Documents
+              </button>
             </div>
           )}
         </section>
@@ -331,7 +466,7 @@ export default function ModuleView() {
           <div className="flex gap-2 mb-4">
             <input
               type="date"
-              value={examDateInput || (mod.exam_date ? mod.exam_date.slice(0, 10) : '')}
+              value={examDateInput}
               onChange={(event) => setExamDateInput(event.target.value)}
               className="flex-1 px-3 py-2.5"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
@@ -339,13 +474,19 @@ export default function ModuleView() {
             <button
               type="button"
               className="scholar-btn"
+              disabled={planSaveDisabled}
               onClick={() => updateModuleMutation.mutate({ exam_date: examDateInput || undefined })}
             >
               Save
             </button>
           </div>
 
-          {curriculumQuery.data ? (
+          {curriculumQuery.isLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-18 w-full" />
+            </div>
+          ) : curriculumQuery.data ? (
             <div className="space-y-3">
               <div className="p-3 rounded-xl" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
                 {curriculumQuery.data.total_weeks} weeks · {curriculumQuery.data.total_concepts} topics
@@ -360,16 +501,22 @@ export default function ModuleView() {
                   ))}
                 </div>
               ))}
+              <p style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+                Generated {formatRelativeTime(curriculumQuery.data.generated_at)}
+              </p>
               <button type="button" style={{ color: 'var(--accent)' }} onClick={() => navigate(`/curriculum?module=${mod.id}`)}>
                 View Full Plan
               </button>
             </div>
           ) : (
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-              {mod.exam_date
-                ? 'The plan will appear after the backend finishes processing the module.'
-                : 'Add an exam date to generate a deterministic plan automatically.'}
-            </p>
+            <div>
+              <p style={{ color: 'var(--text)', marginBottom: 8 }}>No study plan yet.</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
+                {mod.exam_date
+                  ? 'The plan will appear after the backend finishes processing the module.'
+                  : 'Add an exam date to generate a deterministic plan automatically.'}
+              </p>
+            </div>
           )}
         </section>
       </div>
@@ -385,6 +532,7 @@ export default function ModuleView() {
             <p>{mod.auto_cards} auto-generated</p>
             <p>{mod.manual_cards} manual</p>
             <p>{mod.due_cards} due now</p>
+            <p title={formatDateTime(mod.updated_at)}>Last updated {formatRelativeTime(mod.updated_at)}</p>
           </div>
           <button type="button" className="mt-4 inline-flex items-center gap-2" style={{ color: 'var(--accent)' }} onClick={() => navigate(`/modules/${mod.id}/flashcards`)}>
             Manage Flashcards
@@ -406,7 +554,13 @@ export default function ModuleView() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div>
               <h3 style={{ color: 'var(--text)', fontSize: '0.95rem', marginBottom: 10 }}>Ordered Topics</h3>
-              {contentMapQuery.data?.topics.length ? (
+              {contentMapQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1, 2, 3].map((idx) => (
+                    <Skeleton key={idx} className="h-16 w-full" />
+                  ))}
+                </div>
+              ) : contentMapQuery.data?.topics.length ? (
                 <div className="space-y-2">
                   {contentMapQuery.data.topics.slice(0, 8).map((topic) => (
                     <div key={topic.id} className="flex items-center justify-between gap-3 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
@@ -425,13 +579,19 @@ export default function ModuleView() {
                   ))}
                 </div>
               ) : (
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Topics will appear here after document processing.</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Topics will appear here after document processing finishes.</p>
               )}
             </div>
 
             <div>
               <h3 style={{ color: 'var(--text)', fontSize: '0.95rem', marginBottom: 10 }}>Graph Preview</h3>
-              {graphPreview.length > 0 ? (
+              {graphQuery.isLoading ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {[0, 1, 2, 3].map((idx) => (
+                    <Skeleton key={idx} className="h-20 w-full" />
+                  ))}
+                </div>
+              ) : graphPreview.length > 0 ? (
                 <div className="grid grid-cols-2 gap-2">
                   {graphPreview.map((node) => (
                     <div key={node.id} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
@@ -458,6 +618,8 @@ export default function ModuleView() {
         onUploaded={() => {
           queryClient.invalidateQueries({ queryKey: ['module', id] });
           queryClient.invalidateQueries({ queryKey: ['modules'] });
+          queryClient.invalidateQueries({ queryKey: ['content-map', id] });
+          queryClient.invalidateQueries({ queryKey: ['curriculum', id] });
         }}
       />
     </div>

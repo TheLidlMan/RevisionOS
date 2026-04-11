@@ -3,6 +3,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarDots, SpinnerGap } from '@phosphor-icons/react';
 import { getCurriculum, getModule, getModules, updateModule } from '../api/client';
+import { usePersistentState } from '../hooks/usePersistentState';
+import { formatRelativeTime } from '../utils/formatters';
 
 const glass = {
   background: 'var(--surface)',
@@ -15,7 +17,8 @@ const glass = {
 export default function CurriculumPage() {
   const [searchParams] = useSearchParams();
   const preselectedModule = searchParams.get('module') ?? '';
-  const [moduleId, setModuleId] = useState(preselectedModule);
+  const [storedModuleId, setStoredModuleId] = usePersistentState('curriculum:module', preselectedModule);
+  const [moduleId, setModuleId] = useState(storedModuleId || preselectedModule);
   const [examDate, setExamDate] = useState('');
 
   const modulesQuery = useQuery({
@@ -42,6 +45,10 @@ export default function CurriculumPage() {
       curriculumQuery.refetch();
     },
   });
+
+  useEffect(() => {
+    setStoredModuleId(moduleId);
+  }, [moduleId, setStoredModuleId]);
 
   useEffect(() => {
     if (moduleQuery.data?.exam_date) {
@@ -99,6 +106,11 @@ export default function CurriculumPage() {
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
               Generated for {curriculumQuery.data.exam_date}
             </p>
+            {curriculumQuery.data.generated_at ? (
+              <p style={{ color: 'var(--text-tertiary)', fontSize: '0.82rem', marginTop: 6 }}>
+                Updated {formatRelativeTime(curriculumQuery.data.generated_at)}
+              </p>
+            ) : null}
           </div>
           {curriculumQuery.data.weeks.map((week) => (
             <div key={week.week} className="p-5" style={glass}>

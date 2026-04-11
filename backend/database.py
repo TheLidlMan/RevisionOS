@@ -35,6 +35,7 @@ def _ensure_runtime_schema():
     runtime_columns = {
         "documents": {
             "embedding": "TEXT",
+            "updated_at": "DATETIME",
         },
         "modules": {
             "exam_date": "DATETIME",
@@ -51,6 +52,7 @@ def _ensure_runtime_schema():
         },
         "flashcards": {
             "generation_source": "VARCHAR(10) DEFAULT 'MANUAL' NOT NULL",
+            "updated_at": "DATETIME",
         },
     }
 
@@ -73,5 +75,7 @@ def _ensure_runtime_schema():
         conn.execute(text("UPDATE modules SET pipeline_stage = 'idle' WHERE pipeline_stage IS NULL"))
         conn.execute(text("UPDATE modules SET pipeline_completed = 0 WHERE pipeline_completed IS NULL"))
         conn.execute(text("UPDATE modules SET pipeline_total = 0 WHERE pipeline_total IS NULL"))
+        conn.execute(text("UPDATE documents SET updated_at = COALESCE(updated_at, created_at)"))
         conn.execute(text("UPDATE concepts SET study_weight = COALESCE(study_weight, 1.0)"))
         conn.execute(text("UPDATE flashcards SET generation_source = 'MANUAL' WHERE generation_source IS NULL"))
+        conn.execute(text("UPDATE flashcards SET updated_at = COALESCE(updated_at, created_at)"))

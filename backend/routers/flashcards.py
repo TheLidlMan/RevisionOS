@@ -60,6 +60,7 @@ class FlashcardResponse(BaseModel):
     state: str = "NEW"
     last_review: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -121,6 +122,7 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
         state=card.state,
         last_review=card.last_review,
         created_at=card.created_at,
+        updated_at=card.updated_at,
     )
 
 
@@ -169,6 +171,7 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
         state="NEW",
     )
     db.add(card)
+    module.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(card)
     return _card_to_response(card)
@@ -189,6 +192,9 @@ def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(
         card.cloze_text = body.cloze_text
     if body.tags is not None:
         card.tags = json.dumps(body.tags)
+    module = db.query(Module).filter(Module.id == card.module_id).first()
+    if module:
+        module.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(card)
     return _card_to_response(card)
@@ -199,6 +205,9 @@ def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
     card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
+    module = db.query(Module).filter(Module.id == card.module_id).first()
+    if module:
+        module.updated_at = datetime.utcnow()
     db.delete(card)
     db.commit()
     return None
@@ -236,6 +245,9 @@ def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(ge
     card.lapses = result["lapses"]
     card.state = result["state"]
     card.last_review = result["last_review"]
+    module = db.query(Module).filter(Module.id == card.module_id).first()
+    if module:
+        module.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(card)

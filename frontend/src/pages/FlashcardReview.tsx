@@ -7,6 +7,7 @@ import { getFlashcards, reviewFlashcard, getElaborationPrompts, submitConfidence
 import type { Flashcard, Rating, ElaborationResponse } from '../types';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { formatDays } from '../utils/formatters';
 
 const RATINGS: { label: string; value: Rating; key: string; color: string; bg: string; hoverBg: string }[] = [
   { label: 'Again', value: 'AGAIN', key: '1', color: '#fff', bg: 'rgba(220,120,100,0.8)', hoverBg: 'rgba(220,120,100,1)' },
@@ -161,6 +162,10 @@ export default function FlashcardReview() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        navigate(-1);
+        return;
+      }
       if ((e.key === ' ' || e.key === 'Enter') && !flipped) {
         e.preventDefault();
         handleFlip();
@@ -408,9 +413,9 @@ export default function FlashcardReview() {
       {/* Card info */}
       <div className="mt-8 flex justify-center gap-6" style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
         <span>State: {card.state}</span>
-        <span>Stability: {card.stability.toFixed(1)}</span>
+        <span>Stability: {formatDays(card.stability)}</span>
         <span>Reviews: {card.reps}</span>
-        {card.scheduled_days > 0 && <span>Next: ~{card.scheduled_days}d</span>}
+        {card.scheduled_days > 0 && <span>Next: ~{formatDays(card.scheduled_days)}</span>}
       </div>
     </div>
   );

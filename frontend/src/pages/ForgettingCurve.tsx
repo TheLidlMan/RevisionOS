@@ -1,16 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   CaretRight,
   MagnifyingGlass,
-  SpinnerGap,
   TrendDown,
 } from '@phosphor-icons/react';
 import { getFlashcards, getForgettingCurve, getModules } from '../api/client';
+import Skeleton from '../components/Skeleton';
+import { usePersistentState } from '../hooks/usePersistentState';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import type { Flashcard, ForgettingCurveData, Module } from '../types';
-import { formatDays } from '../utils/formatters';
+import { formatDateTime, formatDays } from '../utils/formatters';
 
 const glass = {
   background: 'var(--surface)',
@@ -57,8 +59,9 @@ function CurveDetail({ cardId }: { cardId: string }) {
 
   if (query.isLoading) {
     return (
-      <div className="flex justify-center py-16">
-        <SpinnerGap size={28} className="animate-spin" style={{ color: 'var(--accent)' }} />
+      <div>
+        <Skeleton className="h-[280px] w-full mb-5" />
+        <Skeleton className="h-[96px] w-full" />
       </div>
     );
   }
@@ -86,6 +89,9 @@ function CurveDetail({ cardId }: { cardId: string }) {
       <div className="p-5" style={glass}>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 6 }}>Card stability</p>
         <p style={{ color: 'var(--text)', fontSize: '1.2rem' }}>{formatDays(query.data.stability)}</p>
+        <p style={{ color: 'var(--text-tertiary)', fontSize: '0.78rem', marginTop: 8 }}>
+          Data generated from the card&apos;s current review state.
+        </p>
       </div>
     </div>
   );
@@ -93,8 +99,10 @@ function CurveDetail({ cardId }: { cardId: string }) {
 
 function CardBrowser() {
   const navigate = useNavigate();
-  const [moduleId, setModuleId] = useState('');
-  const [search, setSearch] = useState('');
+  const [moduleId, setModuleId] = usePersistentState('forgetting-curve:module', '');
+  const [search, setSearch] = usePersistentState('forgetting-curve:search', '');
+  const searchRef = useRef<HTMLInputElement>(null);
+  useScrollRestoration('forgetting-curve:browser');
 
   const modulesQuery = useQuery<Module[]>({
     queryKey: ['modules'],
@@ -112,6 +120,19 @@ function CardBrowser() {
     return card.front.toLowerCase().includes(term) || card.back.toLowerCase().includes(term);
   });
 
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable;
+      if (event.key === '/' && !isInput) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   return (
     <div>
       <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-3 mb-6">
@@ -126,6 +147,7 @@ function CardBrowser() {
         <div className="relative">
           <MagnifyingGlass size={18} style={{ position: 'absolute', left: 12, top: 13, color: 'var(--text-secondary)' }} />
           <input
+            ref={searchRef}
             type="text"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -137,8 +159,10 @@ function CardBrowser() {
       </div>
 
       {cardsQuery.isLoading ? (
-        <div className="flex justify-center py-16">
-          <SpinnerGap size={28} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        <div className="space-y-3">
+          {[0, 1, 2].map((idx) => (
+            <Skeleton key={idx} className="h-24 w-full" />
+          ))}
         </div>
       ) : cards.length > 0 ? (
         <div className="space-y-3">
@@ -156,6 +180,7 @@ function CardBrowser() {
                   <span>{card.state}</span>
                   <span>Stability: {formatDays(card.stability)}</span>
                   <span>Reps: {card.reps}</span>
+                  <span title={formatDateTime(card.updated_at)}>Updated {new Date(card.updated_at).toLocaleDateString()}</span>
                 </div>
               </div>
               <CaretRight size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
@@ -164,8 +189,11 @@ function CardBrowser() {
         </div>
       ) : (
         <div className="p-10 text-center" style={glass}>
-          <p style={{ color: 'var(--text-secondary)' }}>
+          <p style={{ color: 'var(--text)', marginBottom: 8 }}>
             {cardsQuery.data?.length === 0 ? 'No flashcards found yet.' : 'No cards match your search.'}
+          </p>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            {cardsQuery.data?.length === 0 ? 'Once cards exist, you can inspect one module or your entire collection here.' : 'Try clearing the module filter or shortening the search term.'}
           </p>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle,
@@ -172,6 +172,19 @@ interface UploadDocumentsModalProps extends UploadPaneProps {
 }
 
 export default function UploadDocumentsModal({ open, onClose, ...paneProps }: UploadDocumentsModalProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose, open]);
+
   if (!open) {
     return null;
   }

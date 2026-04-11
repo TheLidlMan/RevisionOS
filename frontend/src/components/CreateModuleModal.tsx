@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, CheckCircle, FolderSimplePlus, X } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { createModule } from '../api/client';
 import type { Module } from '../types';
 import { UploadDocumentsPane } from './UploadDocumentsModal';
+import { useAutosaveDraft } from '../hooks/useAutosaveDraft';
+import { formatAutosaveStatus } from '../utils/formatters';
 
 interface Props {
   open: boolean;
@@ -24,31 +26,50 @@ const glass = {
 export default function CreateModuleModal({ open, onClose }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [color, setColor] = useState(PRESET_COLORS[0]);
-  const [examDate, setExamDate] = useState('');
   const [createdModule, setCreatedModule] = useState<Module | null>(null);
+  const { draft, setDraft, status, restored, clearDraft } = useAutosaveDraft(
+    'create-module:draft',
+    () => ({
+      name: '',
+      description: '',
+      color: PRESET_COLORS[0],
+      examDate: '',
+    }),
+    open && !createdModule,
+  );
 
   const mutation = useMutation({
     mutationFn: createModule,
     onSuccess: (module) => {
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
+      clearDraft();
       setCreatedModule(module);
     },
   });
 
   const reset = () => {
-    setName('');
-    setDescription('');
-    setColor(PRESET_COLORS[0]);
-    setExamDate('');
+    clearDraft();
     setCreatedModule(null);
     mutation.reset();
   };
 
-  const canSubmit = useMemo(() => name.trim().length > 0 && !mutation.isPending, [name, mutation.isPending]);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        reset();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose, open]);
+
+  const trimmedName = draft.name.trim();
+  const canSubmit = useMemo(() => trimmedName.length > 0 && !mutation.isPending, [trimmedName, mutation.isPending]);
 
   if (!open) {
     return null;
@@ -76,6 +97,11 @@ export default function CreateModuleModal({ open, onClose }: Props) {
                 ? 'Upload now and let the backend build the module automatically.'
                 : 'Set up the module first, then upload documents in the next step.'}
             </p>
+            {!createdModule ? (
+              <p style={{ color: status === 'error' ? 'var(--danger)' : 'var(--text-tertiary)', fontSize: '0.78rem', marginTop: 8 }}>
+                {formatAutosaveStatus(status, restored)}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -98,10 +124,10 @@ export default function CreateModuleModal({ open, onClose }: Props) {
                 return;
               }
               mutation.mutate({
-                name: name.trim(),
-                description: description.trim(),
-                color,
-                exam_date: examDate || undefined,
+                name: trimmedName,
+                description: draft.description.trim(),
+                color: draft.color,
+                exam_date: draft.examDate || undefined,
               });
             }}
             className="space-y-5"
@@ -112,13 +138,17 @@ export default function CreateModuleModal({ open, onClose }: Props) {
               </label>
               <input
                 type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
+                value={draft.name}
+                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
                 placeholder="e.g. Molecular Biology"
                 className="w-full px-3 py-3"
                 style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
                 autoFocus
+                aria-invalid={trimmedName.length === 0}
               />
+              {trimmedName.length === 0 ? (
+                <p style={{ color: 'var(--danger)', fontSize: '0.82rem', marginTop: 8 }}>Add a module name to continue.</p>
+              ) : null}
             </div>
 
             <div>
@@ -126,8 +156,8 @@ export default function CreateModuleModal({ open, onClose }: Props) {
                 Description
               </label>
               <textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
+                value={draft.description}
+                onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
                 placeholder="A short description of what this module covers."
                 className="w-full px-3 py-3"
                 rows={3}
@@ -142,8 +172,8 @@ export default function CreateModuleModal({ open, onClose }: Props) {
                 </label>
                 <input
                   type="date"
-                  value={examDate}
-                  onChange={(event) => setExamDate(event.target.value)}
+                  value={draft.examDate}
+                  onChange={(event) => setDraft((current) => ({ ...current, examDate: event.target.value }))}
                   className="w-full px-3 py-3"
                   style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
                 />
@@ -157,14 +187,14 @@ export default function CreateModuleModal({ open, onClose }: Props) {
                     <button
                       key={preset}
                       type="button"
-                      onClick={() => setColor(preset)}
+                      onClick={() => setDraft((current) => ({ ...current, color: preset }))}
                       aria-label={`Select ${preset}`}
                       style={{
                         width: 30,
                         height: 30,
                         borderRadius: 999,
                         background: preset,
-                        border: color === preset ? '2px solid #fff' : '2px solid transparent',
+                        border: draft.color === preset ? '2px solid #fff' : '2px solid transparent',
                         cursor: 'pointer',
                       }}
                     />

@@ -1,0 +1,16 @@
+.git
+.github
+.wrangler
+frontend
+supabase
+uploads
+
+backend/.venv
+backend/.wrangler
+backend/__pycache__
+backend/uploads
+backend/revisionos.db
+
+**/__pycache__
+**/*.pyc
+**/.DS_Store

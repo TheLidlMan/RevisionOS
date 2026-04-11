@@ -35,6 +35,7 @@ class Flashcard(Base):
     last_review = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     module = relationship("Module", back_populates="flashcards")
     concept = relationship("Concept", back_populates="flashcards")

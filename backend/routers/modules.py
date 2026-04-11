@@ -181,6 +181,7 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
             "word_count": d.word_count,
             "summary": d.summary,
             "created_at": d.created_at.isoformat() if d.created_at else None,
+            "updated_at": d.updated_at.isoformat() if d.updated_at else None,
         }
         for d in docs
     ]

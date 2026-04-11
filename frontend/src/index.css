@@ -74,6 +74,25 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(139, 115, 85, 0.25) transparent;
   }
+
+  button,
+  input,
+  textarea,
+  select,
+  summary,
+  [role="button"] {
+    outline: none;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  summary:focus-visible,
+  [role="button"]:focus-visible {
+    box-shadow: 0 0 0 3px rgba(196, 149, 106, 0.28);
+    border-color: rgba(196, 149, 106, 0.5) !important;
+  }
 }
 
 /* Scholar Glass utility: frosted card */
@@ -111,8 +130,30 @@
   opacity: 0.88;
   transform: translateY(-1px);
 }
+.scholar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
 .scholar-btn:active {
   transform: translateY(0);
+}
+
+.scholar-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.scholar-btn-secondary:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-focus);
 }
 
 /* Light theme overrides */

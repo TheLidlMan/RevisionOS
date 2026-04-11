@@ -27,6 +27,7 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['G', 'S'], description: 'Go to Settings', category: 'Navigation' },
   { keys: ['?'], description: 'Show keyboard shortcuts', category: 'Navigation' },
   { keys: ['Esc'], description: 'Close modal / go back', category: 'Navigation' },
+  { keys: ['/'], description: 'Focus current page search', category: 'Navigation' },
   // Flashcard Review
   { keys: ['Space'], description: 'Flip card', category: 'Flashcard Review' },
   { keys: ['1'], description: 'Rate: Again', category: 'Flashcard Review' },
@@ -34,6 +35,7 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['3'], description: 'Rate: Good', category: 'Flashcard Review' },
   { keys: ['4'], description: 'Rate: Easy', category: 'Flashcard Review' },
   { keys: ['D'], description: 'Go Deeper (elaboration)', category: 'Flashcard Review' },
+  { keys: ['←/→'], description: 'Move between cards in management grids', category: 'Flashcard Review' },
   // Quiz
   { keys: ['Enter'], description: 'Submit answer / Next question', category: 'Quiz' },
   { keys: ['N'], description: 'Next question', category: 'Quiz' },

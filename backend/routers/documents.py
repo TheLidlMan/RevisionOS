@@ -33,6 +33,7 @@ class DocumentResponse(BaseModel):
     word_count: int
     summary: Optional[str] = None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -129,6 +130,7 @@ async def upload_document(
     module.pipeline_completed = 0
     module.pipeline_total = 5
     module.pipeline_error = None
+    module.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(doc)
 
@@ -145,6 +147,7 @@ async def upload_document(
         word_count=doc.word_count,
         summary=doc.summary,
         created_at=doc.created_at,
+        updated_at=doc.updated_at,
     )
 
 
@@ -184,6 +187,7 @@ def get_document(document_id: str, db: Session = Depends(get_db), user: Optional
         word_count=doc.word_count,
         summary=doc.summary,
         created_at=doc.created_at,
+        updated_at=doc.updated_at,
     )
 
 
@@ -213,6 +217,9 @@ def delete_document(document_id: str, db: Session = Depends(get_db), user: Optio
     # Delete physical file
     if doc.file_path and os.path.exists(doc.file_path):
         os.remove(doc.file_path)
+    module = db.query(Module).filter(Module.id == doc.module_id).first()
+    if module:
+        module.updated_at = datetime.utcnow()
     db.delete(doc)
     db.commit()
     return None
