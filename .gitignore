@@ -111,7 +111,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # ── Docker ───────────────────────────────────────────────────────────────────
-data/
+/data/
+!marketing/src/data/
 
 # ── Cloudflare / Wrangler ─────────────────────────────────────────────────────
 .wrangler/
