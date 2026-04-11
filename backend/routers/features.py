@@ -34,6 +34,7 @@ from models.review_log import ReviewLog
 from models.user import User
 from services import ai_service
 from services.auth_service import get_current_user
+from services.quota_service import ai_quota_scope
 
 logger = logging.getLogger(__name__)
 
@@ -48,23 +49,25 @@ def _stream_ai_route(
     messages: list[dict[str, str]],
     *,
     kind: str,
+    user_id: OptionalType[str] = None,
     expected_payload_key: OptionalType[str],
     max_completion_tokens: int,
     final_mapper,
 ) -> StreamingResponse:
     async def event_stream():
         try:
-            async for event in ai_service.stream_groq_completion(
-                messages,
-                kind=kind,
-                max_completion_tokens=max_completion_tokens,
-                response_format=_json_response_format(),
-                expected_payload_key=expected_payload_key,
-            ):
-                if event.get("event") == "final":
-                    envelope = event.get("envelope", {})
-                    event["result"] = final_mapper(envelope)
-                yield ai_service.encode_sse_event(event)
+            with ai_quota_scope(user_id):
+                async for event in ai_service.stream_groq_completion(
+                    messages,
+                    kind=kind,
+                    max_completion_tokens=max_completion_tokens,
+                    response_format=_json_response_format(),
+                    expected_payload_key=expected_payload_key,
+                ):
+                    if event.get("event") == "final":
+                        envelope = event.get("envelope", {})
+                        event["result"] = final_mapper(envelope)
+                    yield ai_service.encode_sse_event(event)
         except Exception:
             return
 
@@ -810,6 +813,7 @@ async def detect_gaps_stream(
     return _stream_ai_route(
         _concept_gap_messages(existing_concepts, all_text),
         kind="concept_gaps",
+        user_id=module.user_id,
         expected_payload_key="gaps",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: {"gaps": envelope.get("data", {}).get("gaps", [])},
@@ -855,13 +859,14 @@ async def synthesis_cards(
 
     messages = _synthesis_card_messages(body.num_cards, concept_summary)
     try:
-        envelope = await ai_service._call_groq(
-            messages,
-            kind="synthesis_cards",
-            max_completion_tokens=4096,
-            response_format=_json_response_format(),
-            expected_payload_key="cards",
-        )
+        with ai_quota_scope(user.id if user else None):
+            envelope = await ai_service._call_groq(
+                messages,
+                kind="synthesis_cards",
+                max_completion_tokens=4096,
+                response_format=_json_response_format(),
+                expected_payload_key="cards",
+            )
         cards_data = envelope.get("data", {}).get("cards", [])
         if not isinstance(cards_data, list):
             cards_data = [cards_data]
@@ -933,13 +938,14 @@ async def elaborate(
 
     messages = _elaboration_messages(card)
     try:
-        envelope = await ai_service._call_groq(
-            messages,
-            kind="elaboration_questions",
-            max_completion_tokens=1024,
-            response_format=_json_response_format(),
-            expected_payload_key="questions",
-        )
+        with ai_quota_scope(card.user_id or (user.id if user else None)):
+            envelope = await ai_service._call_groq(
+                messages,
+                kind="elaboration_questions",
+                max_completion_tokens=1024,
+                response_format=_json_response_format(),
+                expected_payload_key="questions",
+            )
         parsed = envelope.get("data", {}).get("questions", [])
         if not isinstance(parsed, list):
             parsed = [parsed]
@@ -993,13 +999,14 @@ async def free_recall(
 
     messages = _free_recall_messages(body.topic, concept_list, source_material, body.user_text)
     try:
-        envelope = await ai_service._call_groq(
-            messages,
-            kind="free_recall",
-            max_completion_tokens=2048,
-            response_format=_json_response_format(),
-            expected_payload_key="score_pct",
-        )
+        with ai_quota_scope(module.user_id):
+            envelope = await ai_service._call_groq(
+                messages,
+                kind="free_recall",
+                max_completion_tokens=2048,
+                response_format=_json_response_format(),
+                expected_payload_key="score_pct",
+            )
         parsed = envelope.get("data", {})
         if not isinstance(parsed, dict):
             raise ValueError("Expected dict response")
@@ -1051,6 +1058,7 @@ async def free_recall_stream(
     return _stream_ai_route(
         _free_recall_messages(body.topic, concept_list, source_material, body.user_text),
         kind="free_recall",
+        user_id=module.user_id,
         expected_payload_key="score_pct",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: envelope.get("data", {}),
@@ -1249,9 +1257,10 @@ async def exam_submit(
             and settings.GROQ_API_KEY
         ):
             try:
-                grade = await ai_service.grade_answer(
-                    question.question_text, question.correct_answer, ans.user_answer
-                )
+                with ai_quota_scope(session.user_id or (user.id if user else None)):
+                    grade = await ai_service.grade_answer(
+                        question.question_text, question.correct_answer, ans.user_answer
+                    )
                 was_correct = grade.get("score", 0) >= 50
             except Exception:
                 pass
@@ -1476,13 +1485,14 @@ async def writing_prompt(
 
     messages = _writing_prompt_messages(module.name, material, doc_excerpt)
     try:
-        envelope = await ai_service._call_groq(
-            messages,
-            kind="writing_prompt",
-            max_completion_tokens=2048,
-            response_format=_json_response_format(),
-            expected_payload_key="question",
-        )
+        with ai_quota_scope(module.user_id):
+            envelope = await ai_service._call_groq(
+                messages,
+                kind="writing_prompt",
+                max_completion_tokens=2048,
+                response_format=_json_response_format(),
+                expected_payload_key="question",
+            )
         parsed = envelope.get("data", {})
         if not isinstance(parsed, dict):
             raise ValueError("Expected dict response")
@@ -1519,6 +1529,7 @@ async def writing_prompt_stream(
     return _stream_ai_route(
         _writing_prompt_messages(module.name, material, doc_excerpt),
         kind="writing_prompt",
+        user_id=module.user_id,
         expected_payload_key="question",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: envelope.get("data", {}),
@@ -1536,13 +1547,14 @@ async def writing_grade(
 
     messages = _writing_grade_messages(body.question, body.mark_scheme, body.user_response)
     try:
-        envelope = await ai_service._call_groq(
-            messages,
-            kind="writing_grade",
-            max_completion_tokens=2048,
-            response_format=_json_response_format(),
-            expected_payload_key="score",
-        )
+        with ai_quota_scope(user.id if user else None):
+            envelope = await ai_service._call_groq(
+                messages,
+                kind="writing_grade",
+                max_completion_tokens=2048,
+                response_format=_json_response_format(),
+                expected_payload_key="score",
+            )
         parsed = envelope.get("data", {})
         if not isinstance(parsed, dict):
             raise ValueError("Expected dict response")
@@ -1569,13 +1581,17 @@ async def writing_grade(
 
 
 @router.post("/writing/grade/stream")
-async def writing_grade_stream(body: WritingGradeRequest):
+async def writing_grade_stream(
+    body: WritingGradeRequest,
+    user: OptionalType[User] = Depends(get_current_user),
+):
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
     return _stream_ai_route(
         _writing_grade_messages(body.question, body.mark_scheme, body.user_response),
         kind="writing_grade",
+        user_id=user.id if user else None,
         expected_payload_key="score",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: envelope.get("data", {}),

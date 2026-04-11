@@ -121,8 +121,10 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
     [uploads],
   );
 
+  const showScrollableUploads = uploads.length > 6;
+
   return (
-    <div>
+    <div className="min-h-0 flex flex-col">
       <div className="mb-4">
         <h3 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.05rem' }}>
           Upload Documents{moduleName ? ` to ${moduleName}` : ''}
@@ -180,7 +182,10 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
       </div>
 
       {uploads.length > 0 && (
-        <div className="mt-4 space-y-2">
+        <div
+          className="mt-4 space-y-2 min-h-0"
+          style={showScrollableUploads ? { maxHeight: 'min(40vh, 24rem)', overflowY: 'auto', paddingRight: 4 } : undefined}
+        >
           {uploads.map((item, index) => (
             <div key={`${item.file.name}-${index}`} className="flex items-center gap-3 p-3" style={glass}>
               <FileText size={20} style={{ color: 'var(--text-secondary)' }} />
@@ -240,7 +245,7 @@ export default function UploadDocumentsModal({ open, onClose, ...paneProps }: Up
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 overflow-y-auto p-4"
       style={{ background: 'rgba(15, 15, 15, 0.75)' }}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
@@ -248,22 +253,26 @@ export default function UploadDocumentsModal({ open, onClose, ...paneProps }: Up
         }
       }}
     >
-      <div className="w-full max-w-3xl p-6" style={glass}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.35rem' }}>Upload Documents</h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Everything after upload happens automatically.</p>
+      <div className="min-h-full flex items-center justify-center">
+        <div className="w-full max-w-3xl p-6 my-6 max-h-[calc(100vh-3rem)] flex flex-col" style={glass}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.35rem' }}>Upload Documents</h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Everything after upload happens automatically.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
+              aria-label="Close upload modal"
+            >
+              <X size={20} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-            aria-label="Close upload modal"
-          >
-            <X size={20} />
-          </button>
+          <div className="min-h-0 overflow-y-auto">
+            <UploadDocumentsPane {...paneProps} />
+          </div>
         </div>
-        <UploadDocumentsPane {...paneProps} />
       </div>
     </div>
   );

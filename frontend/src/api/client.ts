@@ -252,6 +252,9 @@ export const updateModule = (id: string, data: ModuleUpdate) =>
 export const deleteModule = (id: string) =>
   client.delete(`/modules/${id}`).then((r) => r.data);
 
+export const cancelModuleProcessing = (id: string) =>
+  client.post<{ cancelled: number }>(`/modules/${id}/cancel-processing`).then((r) => r.data);
+
 export const getModuleStats = (id: string) =>
   client.get<ModuleStats>(`/modules/${id}/stats`).then((r) => r.data);
 
@@ -283,6 +286,9 @@ export const getDocument = (id: string) =>
 
 export const deleteDocument = (id: string) =>
   client.delete(`/documents/${id}`).then((r) => r.data);
+
+export const cancelDocumentProcessing = (id: string) =>
+  client.post<Document>(`/documents/${id}/cancel`).then((r) => r.data);
 
 // Flashcards
 export const getFlashcards = (params?: {

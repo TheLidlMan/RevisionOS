@@ -21,6 +21,7 @@ class Module(Base):
     pipeline_completed = Column(Integer, nullable=False, default=0)
     pipeline_total = Column(Integer, nullable=False, default=0)
     pipeline_error = Column(Text, nullable=True)
+    pipeline_updated_at = Column(DateTime, nullable=True)
     study_plan_json = Column(Text, nullable=True)
     study_plan_generated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

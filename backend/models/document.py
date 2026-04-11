@@ -16,14 +16,24 @@ class Document(Base):
     filename = Column(String, nullable=False)
     file_type = Column(String(10), nullable=False)  # PDF, TXT, PPTX, DOCX, MD, MP3, MP4, IMAGE
     file_path = Column(String, nullable=False)
+    file_size_bytes = Column(Integer, default=0)
+    file_sha256 = Column(String(64), nullable=True)
     raw_text = Column(Text, nullable=True, default="")
     processed = Column(Boolean, default=False)
     processing_status = Column(String(20), default="pending")  # pending, processing, done, failed
+    processing_stage = Column(String(50), default="uploaded")
+    processing_error = Column(Text, nullable=True)
+    processing_completed = Column(Integer, default=0)
+    processing_total = Column(Integer, default=0)
     word_count = Column(Integer, default=0)
     transcript = Column(Text, nullable=True)  # Whisper transcription output
     summary = Column(Text, nullable=True)  # AI-generated document summary
     slide_count = Column(Integer, nullable=True)  # For PPTX files
     embedding = Column(Text, nullable=True)  # Base64-encoded embedding vector
+    last_pipeline_updated_at = Column(DateTime, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    delete_requested_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

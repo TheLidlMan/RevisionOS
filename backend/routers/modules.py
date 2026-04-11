@@ -9,10 +9,11 @@ from database import get_db
 from models.document import Document
 from models.flashcard import Flashcard
 from models.module import Module
+from models.module_job import ModuleJob
 from models.quiz_question import QuizQuestion
 from models.user import User
 from services.auth_service import get_current_user
-from services.pipeline_service import rebuild_module_outputs
+from services.pipeline_service import ACTIVE_JOB_STATUSES, rebuild_module_outputs, sync_module_pipeline_state
 from typing import Optional as OptionalType
 
 router = APIRouter(prefix="/api/modules", tags=["modules"])
@@ -51,6 +52,7 @@ class ModuleResponse(BaseModel):
     pipeline_completed: int = 0
     pipeline_total: int = 0
     pipeline_error: Optional[str] = None
+    pipeline_updated_at: Optional[datetime] = None
     has_study_plan: bool = False
 
     model_config = {"from_attributes": True}
@@ -92,7 +94,10 @@ def _compute_module_stats(db: Session, module: Module) -> dict:
     review_cards = sum(1 for c in cards if c.state == "REVIEW")
     mastered = sum(1 for c in cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
     mastery_pct = (mastered / total_cards * 100) if total_cards > 0 else 0.0
-    total_documents = db.query(Document).filter(Document.module_id == module.id).count()
+    total_documents = db.query(Document).filter(
+        Document.module_id == module.id,
+        Document.delete_requested_at.is_(None),
+    ).count()
     auto_cards = db.query(Flashcard).filter(
         Flashcard.module_id == module.id,
         Flashcard.generation_source == "AUTO",
@@ -135,6 +140,7 @@ def _module_to_response(module: Module, stats: dict) -> ModuleResponse:
         pipeline_completed=module.pipeline_completed,
         pipeline_total=module.pipeline_total,
         pipeline_error=module.pipeline_error,
+        pipeline_updated_at=module.pipeline_updated_at,
         has_study_plan=bool(module.study_plan_json),
     )
 
@@ -167,7 +173,10 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
         raise HTTPException(status_code=404, detail="Module not found")
 
     stats = _compute_module_stats(db, module)
-    docs = db.query(Document).filter(Document.module_id == module_id).order_by(Document.created_at.desc()).all()
+    docs = db.query(Document).filter(
+        Document.module_id == module_id,
+        Document.delete_requested_at.is_(None),
+    ).order_by(Document.created_at.desc()).all()
     base = _module_to_response(module, stats).model_dump()
     base["documents"] = [
         {
@@ -178,8 +187,16 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
             "file_path": d.file_path,
             "processed": d.processed,
             "processing_status": d.processing_status,
+            "processing_stage": d.processing_stage,
+            "processing_error": d.processing_error,
+            "processing_completed": d.processing_completed,
+            "processing_total": d.processing_total,
             "word_count": d.word_count,
+            "file_size_bytes": d.file_size_bytes,
+            "file_sha256": d.file_sha256,
             "summary": d.summary,
+            "last_pipeline_updated_at": d.last_pipeline_updated_at.isoformat() if d.last_pipeline_updated_at else None,
+            "cancelled_at": d.cancelled_at.isoformat() if d.cancelled_at else None,
             "created_at": d.created_at.isoformat() if d.created_at else None,
             "updated_at": d.updated_at.isoformat() if d.updated_at else None,
         }
@@ -218,6 +235,41 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalT
     db.delete(module)
     db.commit()
     return None
+
+
+@router.post("/{module_id}/cancel-processing")
+def cancel_module_processing(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    jobs = db.query(ModuleJob).filter(
+        ModuleJob.module_id == module_id,
+        ModuleJob.status.in_(ACTIVE_JOB_STATUSES),
+    ).all()
+    if not jobs:
+        return {"cancelled": 0}
+
+    now = datetime.utcnow()
+    document_ids = [job.document_id for job in jobs if job.document_id]
+    if document_ids:
+        docs = db.query(Document).filter(Document.id.in_(document_ids)).all()
+        for doc in docs:
+            doc.cancel_requested_at = now
+            doc.processing_status = "cancelling"
+            doc.processing_stage = "cancelling"
+            doc.processing_error = "Cancellation requested"
+            doc.last_pipeline_updated_at = now
+
+    for job in jobs:
+        job.cancel_requested_at = now
+        job.status = "cancelling"
+        job.stage = "cancelling"
+        job.updated_at = now
+
+    sync_module_pipeline_state(db, module.id)
+    db.commit()
+    return {"cancelled": len(jobs)}
 
 
 @router.get("/{module_id}/stats", response_model=ModuleStatsResponse)

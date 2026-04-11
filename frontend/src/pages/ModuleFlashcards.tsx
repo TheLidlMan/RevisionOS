@@ -245,8 +245,8 @@ export default function ModuleFlashcards() {
   }
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
-      <button type="button" onClick={() => navigate(`/modules/${id}`)} className="inline-flex items-center gap-2 mb-6" style={{ color: 'var(--text-secondary)' }}>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto w-full">
+      <button type="button" onClick={() => navigate(`/modules/${id}`)} className="hidden md:inline-flex items-center gap-2 mb-6" style={{ color: 'var(--text-secondary)' }}>
         <ArrowLeft size={18} />
         Back to Module
       </button>
@@ -263,7 +263,7 @@ export default function ModuleFlashcards() {
         <div className="flex flex-wrap items-center gap-3" style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>
           <span>{filteredCards.length} visible</span>
           <span>{cardsQuery.data?.length || 0} total</span>
-          <span>Use `/` to search and arrow keys to move</span>
+          <span className="hidden md:inline">Use `/` to search and arrow keys to move</span>
         </div>
       </div>
 

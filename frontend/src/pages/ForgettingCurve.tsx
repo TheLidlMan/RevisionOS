@@ -79,7 +79,7 @@ function CurveDetail({ cardId }: { cardId: string }) {
 
   return (
     <div>
-      <button type="button" onClick={() => navigate('/forgetting-curve')} className="inline-flex items-center gap-2 mb-6" style={{ color: 'var(--text-secondary)' }}>
+      <button type="button" onClick={() => navigate('/forgetting-curve')} className="hidden md:inline-flex items-center gap-2 mb-6" style={{ color: 'var(--text-secondary)' }}>
         <ArrowLeft size={18} />
         Back to Cards
       </button>
@@ -205,8 +205,8 @@ export default function ForgettingCurve() {
   const { cardId } = useParams<{ cardId?: string }>();
 
   return (
-    <div className="p-6 lg:p-8 max-w-4xl mx-auto w-full">
-      <div className="flex items-center gap-3 mb-8">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto w-full">
+      <div className="flex items-center gap-3 mb-6 sm:mb-8">
         <TrendDown size={24} style={{ color: 'var(--accent)' }} />
         <div>
           <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.8rem' }}>Forgetting Curve</h1>

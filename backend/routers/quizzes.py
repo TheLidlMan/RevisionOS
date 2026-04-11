@@ -21,6 +21,7 @@ from models.document import Document
 from models.user import User
 from services import ai_service
 from services.auth_service import get_current_user
+from services.quota_service import ai_quota_scope
 
 router = APIRouter(tags=["quizzes"])
 logger = logging.getLogger(__name__)
@@ -290,7 +291,11 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
     docs = (
         db.query(Document)
-        .filter(Document.module_id == body.module_id, Document.processing_status == "done")
+        .filter(
+            Document.module_id == body.module_id,
+            Document.processing_status == "done",
+            Document.delete_requested_at.is_(None),
+        )
         .all()
     )
     if not docs:
@@ -307,13 +312,14 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         settings.MAX_QUESTIONS_PER_REQUEST,
     )
 
-    generated = await ai_service.generate_quiz_questions(
-        text=all_text,
-        num_questions=num_questions,
-        question_types=body.question_types,
-        difficulty=body.difficulty,
-        subject=module.name,
-    )
+    with ai_quota_scope(module.user_id):
+        generated = await ai_service.generate_quiz_questions(
+            text=all_text,
+            num_questions=num_questions,
+            question_types=body.question_types,
+            difficulty=body.difficulty,
+            subject=module.name,
+        )
 
     created_questions = []
     for qdata in generated:
@@ -357,7 +363,11 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
 
     docs = (
         db.query(Document)
-        .filter(Document.module_id == body.module_id, Document.processing_status == "done")
+        .filter(
+            Document.module_id == body.module_id,
+            Document.processing_status == "done",
+            Document.delete_requested_at.is_(None),
+        )
         .all()
     )
     if not docs:
@@ -383,44 +393,45 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
 
     async def event_stream():
         try:
-            async for event in ai_service.stream_groq_completion(
-                messages,
-                kind="quiz_questions",
-                max_completion_tokens=4096,
-                response_format=ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
-                expected_payload_key="questions",
-            ):
-                if event.get("event") == "final":
-                    parsed = event.get("envelope", {}).get("data", {}).get("questions", [])
-                    if not isinstance(parsed, list):
-                        parsed = [parsed]
-                    created_questions = []
-                    for qdata in parsed:
-                        q_type = _normalize_question_type(qdata.get("type", qdata.get("question_type")), default="MCQ")
-                        options = qdata.get("options")
-                        options_json = json.dumps(options) if options else None
-                        diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
-                        question = QuizQuestion(
-                            module_id=body.module_id,
-                            question_text=qdata.get("question_text", qdata.get("question", "")),
-                            question_type=q_type,
-                            options=options_json,
-                            correct_answer=qdata.get("correct_answer", ""),
-                            explanation=qdata.get("explanation", ""),
-                            difficulty=diff,
-                            source_document_id=docs[0].id if docs else None,
-                        )
-                        db.add(question)
-                        created_questions.append(question)
-                    db.commit()
-                    for question in created_questions:
-                        db.refresh(question)
-                    result = GenerateQuizResponse(
-                        generated=len(created_questions),
-                        questions=[_question_to_response(question) for question in created_questions],
-                    ).model_dump(mode="json")
-                    event["result"] = result
-                yield ai_service.encode_sse_event(event)
+            with ai_quota_scope(module.user_id):
+                async for event in ai_service.stream_groq_completion(
+                    messages,
+                    kind="quiz_questions",
+                    max_completion_tokens=4096,
+                    response_format=ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
+                    expected_payload_key="questions",
+                ):
+                    if event.get("event") == "final":
+                        parsed = event.get("envelope", {}).get("data", {}).get("questions", [])
+                        if not isinstance(parsed, list):
+                            parsed = [parsed]
+                        created_questions = []
+                        for qdata in parsed:
+                            q_type = _normalize_question_type(qdata.get("type", qdata.get("question_type")), default="MCQ")
+                            options = qdata.get("options")
+                            options_json = json.dumps(options) if options else None
+                            diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
+                            question = QuizQuestion(
+                                module_id=body.module_id,
+                                question_text=qdata.get("question_text", qdata.get("question", "")),
+                                question_type=q_type,
+                                options=options_json,
+                                correct_answer=qdata.get("correct_answer", ""),
+                                explanation=qdata.get("explanation", ""),
+                                difficulty=diff,
+                                source_document_id=docs[0].id if docs else None,
+                            )
+                            db.add(question)
+                            created_questions.append(question)
+                        db.commit()
+                        for question in created_questions:
+                            db.refresh(question)
+                        result = GenerateQuizResponse(
+                            generated=len(created_questions),
+                            questions=[_question_to_response(question) for question in created_questions],
+                        ).model_dump(mode="json")
+                        event["result"] = result
+                    yield ai_service.encode_sse_event(event)
         except Exception as exc:
             yield ai_service.encode_sse_event({"event": "error", "kind": "quiz_questions", "message": str(exc)})
 
@@ -501,11 +512,12 @@ async def submit_answer(
             is_correct = True
         elif settings.GROQ_API_KEY:
             try:
-                ai_feedback = await ai_service.grade_answer(
-                    question.question_text,
-                    question.correct_answer,
-                    body.user_answer,
-                )
+                with ai_quota_scope(session.user_id or (user.id if user else None)):
+                    ai_feedback = await ai_service.grade_answer(
+                        question.question_text,
+                        question.correct_answer,
+                        body.user_answer,
+                    )
                 score = ai_feedback.get("score", 0)
                 is_correct = score >= 60
             except Exception:

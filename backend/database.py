@@ -36,6 +36,16 @@ def _ensure_runtime_schema():
         "documents": {
             "embedding": "TEXT",
             "updated_at": "DATETIME",
+            "file_size_bytes": "INTEGER DEFAULT 0",
+            "file_sha256": "VARCHAR(64)",
+            "processing_stage": "VARCHAR(50) DEFAULT 'uploaded'",
+            "processing_error": "TEXT",
+            "processing_completed": "INTEGER DEFAULT 0 NOT NULL",
+            "processing_total": "INTEGER DEFAULT 0 NOT NULL",
+            "last_pipeline_updated_at": "DATETIME",
+            "cancel_requested_at": "DATETIME",
+            "cancelled_at": "DATETIME",
+            "delete_requested_at": "DATETIME",
         },
         "modules": {
             "exam_date": "DATETIME",
@@ -44,6 +54,7 @@ def _ensure_runtime_schema():
             "pipeline_completed": "INTEGER DEFAULT 0 NOT NULL",
             "pipeline_total": "INTEGER DEFAULT 0 NOT NULL",
             "pipeline_error": "TEXT",
+            "pipeline_updated_at": "DATETIME",
             "study_plan_json": "TEXT",
             "study_plan_generated_at": "DATETIME",
         },
@@ -81,10 +92,30 @@ def _ensure_runtime_schema():
         if "auth_sessions" not in inspector.get_table_names():
             Base.metadata.tables["auth_sessions"].create(bind=conn)
 
+        module_job_columns = {
+            "started_at": "DATETIME",
+            "finished_at": "DATETIME",
+            "cancel_requested_at": "DATETIME",
+            "cancelled_at": "DATETIME",
+        }
+        if "module_jobs" in inspector.get_table_names():
+            existing_job_columns = {column["name"] for column in inspector.get_columns("module_jobs")}
+            for column_name, column_sql in module_job_columns.items():
+                if column_name in existing_job_columns:
+                    continue
+                conn.execute(text(f"ALTER TABLE module_jobs ADD COLUMN {column_name} {column_sql}"))
+
+        if "ai_usage_events" not in inspector.get_table_names():
+            Base.metadata.tables["ai_usage_events"].create(bind=conn)
+
         conn.execute(text("UPDATE modules SET pipeline_status = 'idle' WHERE pipeline_status IS NULL"))
         conn.execute(text("UPDATE modules SET pipeline_stage = 'idle' WHERE pipeline_stage IS NULL"))
         conn.execute(text("UPDATE modules SET pipeline_completed = 0 WHERE pipeline_completed IS NULL"))
         conn.execute(text("UPDATE modules SET pipeline_total = 0 WHERE pipeline_total IS NULL"))
+        conn.execute(text("UPDATE documents SET file_size_bytes = COALESCE(file_size_bytes, 0)"))
+        conn.execute(text("UPDATE documents SET processing_stage = COALESCE(processing_stage, 'uploaded')"))
+        conn.execute(text("UPDATE documents SET processing_completed = COALESCE(processing_completed, 0)"))
+        conn.execute(text("UPDATE documents SET processing_total = COALESCE(processing_total, 0)"))
         conn.execute(text("UPDATE documents SET updated_at = COALESCE(updated_at, created_at)"))
         conn.execute(text("UPDATE concepts SET study_weight = COALESCE(study_weight, 1.0)"))
         conn.execute(text("UPDATE flashcards SET generation_source = 'MANUAL' WHERE generation_source IS NULL"))

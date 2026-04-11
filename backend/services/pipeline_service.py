@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -18,11 +19,14 @@ from models.module_job import ModuleJob
 from services import ai_service
 from services.content_indexer import index_document, summarize_document
 from services.file_processor import extract_image_text, extract_text, transcribe_audio
+from services.quota_service import ai_quota_scope
 from services.rag_service import build_rag_context
 
 logger = logging.getLogger(__name__)
 
 PIPELINE_TOTAL_STEPS = 5
+ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
+TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
 
 
 async def _emit_pipeline_event(
@@ -51,6 +55,73 @@ def create_module_job(db: Session, module_id: str, document_id: Optional[str] = 
     return job
 
 
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+def _set_document_state(
+    doc: Document,
+    *,
+    status: str,
+    stage: str,
+    completed: int,
+    total: int = PIPELINE_TOTAL_STEPS,
+    error: Optional[str] = None,
+) -> None:
+    doc.processing_status = status
+    doc.processing_stage = stage
+    doc.processing_completed = completed
+    doc.processing_total = total
+    doc.processing_error = error
+    doc.last_pipeline_updated_at = _now()
+
+
+def sync_module_pipeline_state(db: Session, module_id: str) -> None:
+    module = db.query(Module).filter(Module.id == module_id).first()
+    if not module:
+        return
+
+    jobs = (
+        db.query(ModuleJob)
+        .filter(ModuleJob.module_id == module_id)
+        .order_by(ModuleJob.updated_at.desc(), ModuleJob.created_at.desc())
+        .all()
+    )
+    active_jobs = [job for job in jobs if job.status in ACTIVE_JOB_STATUSES]
+
+    if active_jobs:
+        priority = {"cancelling": 3, "running": 2, "queued": 1}
+        active_jobs.sort(
+            key=lambda job: (priority.get(job.status, 0), job.updated_at or job.created_at),
+            reverse=True,
+        )
+        selected = active_jobs[0]
+        module.pipeline_status = selected.status
+        module.pipeline_stage = selected.stage
+        module.pipeline_completed = selected.completed
+        module.pipeline_total = selected.total
+        module.pipeline_error = selected.error
+        module.pipeline_updated_at = selected.updated_at or selected.created_at
+        return
+
+    if jobs:
+        selected = jobs[0]
+        module.pipeline_status = selected.status
+        module.pipeline_stage = selected.stage
+        module.pipeline_completed = selected.completed
+        module.pipeline_total = selected.total
+        module.pipeline_error = selected.error
+        module.pipeline_updated_at = selected.updated_at or selected.created_at
+        return
+
+    module.pipeline_status = "idle"
+    module.pipeline_stage = "idle"
+    module.pipeline_completed = 0
+    module.pipeline_total = 0
+    module.pipeline_error = None
+    module.pipeline_updated_at = None
+
+
 def _set_pipeline_state(
     module: Module,
     job: Optional[ModuleJob],
@@ -61,11 +132,13 @@ def _set_pipeline_state(
     total: int = PIPELINE_TOTAL_STEPS,
     error: Optional[str] = None,
 ) -> None:
+    now = _now()
     module.pipeline_status = status
     module.pipeline_stage = stage
     module.pipeline_completed = completed
     module.pipeline_total = total
     module.pipeline_error = error
+    module.pipeline_updated_at = now
 
     if job:
         job.status = status
@@ -73,7 +146,13 @@ def _set_pipeline_state(
         job.completed = completed
         job.total = total
         job.error = error
-        job.updated_at = datetime.utcnow()
+        job.updated_at = now
+        if status == "running" and job.started_at is None:
+            job.started_at = now
+        if status in TERMINAL_JOB_STATUSES:
+            job.finished_at = now
+        if status == "cancelled" and job.cancelled_at is None:
+            job.cancelled_at = now
 
 
 def _fallback_summary(raw_text: str, limit: int = 500) -> str:
@@ -133,9 +212,9 @@ def _target_cards_for_concept(concept: Concept) -> int:
     return max(1, min(5, ceil(weight * 1.5)))
 
 
-async def _generate_missing_flashcards(module: Module, db: Session) -> int:
+async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]:
     if not settings.GROQ_API_KEY:
-        return 0
+        return []
 
     concepts = (
         db.query(Concept)
@@ -144,7 +223,7 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> int:
         .all()
     )
     if not concepts:
-        return 0
+        return []
 
     existing_cards = db.query(Flashcard).filter(Flashcard.module_id == module.id).all()
     cards_by_concept: dict[str, list[Flashcard]] = defaultdict(list)
@@ -160,7 +239,7 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> int:
         .all()
     )
     default_doc_id = docs[0].id if docs else None
-    created = 0
+    created_ids: list[str] = []
 
     for concept in concepts:
         current_count = len(cards_by_concept.get(concept.id, []))
@@ -222,11 +301,140 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> int:
             db.add(card)
             cards_by_concept[concept.id].append(card)
             existing_pairs.add(pair)
-            created += 1
+            created_ids.append(card.id)
 
         db.flush()
 
-    return created
+    return created_ids
+
+
+def _remove_document_file(doc: Document) -> None:
+    if doc.file_path and os.path.exists(doc.file_path):
+        os.remove(doc.file_path)
+
+
+def _rollback_pipeline_run(
+    db: Session,
+    *,
+    module_id: str,
+    document_id: str,
+    created_concept_ids: list[str],
+    created_flashcard_ids: list[str],
+    clear_summary: bool,
+    clear_raw_text: bool,
+) -> None:
+    if created_flashcard_ids:
+        db.query(Flashcard).filter(Flashcard.id.in_(created_flashcard_ids)).delete(synchronize_session=False)
+
+    if created_concept_ids:
+        concepts = db.query(Concept).filter(Concept.id.in_(created_concept_ids)).all()
+        for concept in concepts:
+            if concept.flashcards or concept.quiz_questions:
+                continue
+            db.delete(concept)
+
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if doc:
+        if clear_summary:
+            doc.summary = None
+        if clear_raw_text:
+            doc.raw_text = ""
+            doc.word_count = 0
+            doc.processed = False
+
+    refresh_module_relationships(module_id, db)
+
+
+def _current_entities(
+    db: Session,
+    document_id: str,
+    module_id: str,
+    job_id: Optional[str],
+) -> tuple[Optional[Document], Optional[Module], Optional[ModuleJob]]:
+    db.expire_all()
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    module = db.query(Module).filter(Module.id == module_id).first()
+    job = db.query(ModuleJob).filter(ModuleJob.id == job_id).first() if job_id else None
+    return doc, module, job
+
+
+def _cancellation_requested(doc: Optional[Document], job: Optional[ModuleJob]) -> bool:
+    if job and job.cancel_requested_at:
+        return True
+    if doc and (doc.cancel_requested_at or doc.delete_requested_at):
+        return True
+    return False
+
+
+async def _finalize_cancellation(
+    db: Session,
+    *,
+    module_id: str,
+    document_id: str,
+    job_id: Optional[str],
+    event_handler: Optional[Callable[[dict], Awaitable[None] | None]],
+    created_concept_ids: list[str],
+    created_flashcard_ids: list[str],
+    clear_summary: bool,
+    clear_raw_text: bool,
+) -> None:
+    doc, module, job = _current_entities(db, document_id, module_id, job_id)
+
+    _rollback_pipeline_run(
+        db,
+        module_id=module_id,
+        document_id=document_id,
+        created_concept_ids=created_concept_ids,
+        created_flashcard_ids=created_flashcard_ids,
+        clear_summary=clear_summary,
+        clear_raw_text=clear_raw_text,
+    )
+
+    if doc and doc.delete_requested_at:
+        _remove_document_file(doc)
+        db.delete(doc)
+    elif doc:
+        _set_document_state(
+            doc,
+            status="cancelled",
+            stage="cancelled",
+            completed=doc.processing_completed,
+            total=doc.processing_total or PIPELINE_TOTAL_STEPS,
+            error="Processing cancelled",
+        )
+        doc.cancelled_at = _now()
+
+    if module:
+        if module.exam_date:
+            _build_study_plan(module, db)
+
+    if job:
+        if module:
+            _set_pipeline_state(
+                module,
+                job,
+                status="cancelled",
+                stage="cancelled",
+                completed=job.completed,
+                total=job.total or PIPELINE_TOTAL_STEPS,
+                error="Processing cancelled",
+            )
+        else:
+            job.status = "cancelled"
+            job.stage = "cancelled"
+            job.error = "Processing cancelled"
+            job.updated_at = _now()
+            job.finished_at = job.finished_at or _now()
+            job.cancelled_at = job.cancelled_at or _now()
+
+    if module:
+        sync_module_pipeline_state(db, module.id)
+
+    db.commit()
+    await _emit_pipeline_event(
+        event_handler,
+        {"event": "cancelled", "stage": "cancelled", "document_id": document_id, "module_id": module_id},
+    )
 
 
 def _build_study_plan(module: Module, db: Session) -> Optional[dict]:
@@ -326,87 +534,211 @@ async def process_document_pipeline(
     event_handler: Optional[Callable[[dict], Awaitable[None] | None]] = None,
 ) -> None:
     db = SessionLocal()
+    created_concept_ids: list[str] = []
+    created_flashcard_ids: list[str] = []
+    clear_summary_on_cancel = False
+    clear_raw_text_on_cancel = False
+
     try:
-        doc = db.query(Document).filter(Document.id == document_id).first()
-        module = db.query(Module).filter(Module.id == module_id).first()
-        job = db.query(ModuleJob).filter(ModuleJob.id == job_id).first() if job_id else None
-        if not doc or not module:
+        doc, module, job = _current_entities(db, document_id, module_id, job_id)
+        if not module:
             return
 
-        _set_pipeline_state(module, job, status="running", stage="extracting", completed=0)
-        doc.processing_status = "processing"
-        db.commit()
-        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "extracting", "completed": 0, "total": PIPELINE_TOTAL_STEPS})
+        if not doc:
+            if job:
+                _set_pipeline_state(module, job, status="cancelled", stage="deleted", completed=job.completed, error="Document removed before processing")
+                sync_module_pipeline_state(db, module.id)
+                db.commit()
+            return
 
-        try:
-            raw_text, word_count = _extract_document_content(doc)
-            doc.raw_text = raw_text
-            doc.word_count = word_count
-            doc.processed = True
-            doc.processing_status = "done"
+        with ai_quota_scope(module.user_id):
+            _set_pipeline_state(module, job, status="running", stage="extracting", completed=0)
+            _set_document_state(doc, status="processing", stage="extracting", completed=0, total=PIPELINE_TOTAL_STEPS)
+            sync_module_pipeline_state(db, module.id)
+            db.commit()
+            await _emit_pipeline_event(event_handler, {"event": "status", "stage": "extracting", "completed": 0, "total": PIPELINE_TOTAL_STEPS})
+
+            if _cancellation_requested(doc, job):
+                await _finalize_cancellation(
+                    db,
+                    module_id=module.id,
+                    document_id=document_id,
+                    job_id=job_id,
+                    event_handler=event_handler,
+                    created_concept_ids=created_concept_ids,
+                    created_flashcard_ids=created_flashcard_ids,
+                    clear_summary=clear_summary_on_cancel,
+                    clear_raw_text=clear_raw_text_on_cancel,
+                )
+                return
+
+            try:
+                raw_text, word_count = _extract_document_content(doc)
+                if not raw_text.strip() or word_count <= 0:
+                    raise ValueError("No readable text could be extracted from the uploaded file")
+
+                doc.raw_text = raw_text
+                doc.word_count = word_count
+                doc.processed = True
+                clear_raw_text_on_cancel = True
+                _set_document_state(doc, status="processing", stage="extracting", completed=1, total=PIPELINE_TOTAL_STEPS)
+                sync_module_pipeline_state(db, module.id)
+                db.commit()
+                await _emit_pipeline_event(
+                    event_handler,
+                    {"event": "partial", "stage": "extracting", "word_count": word_count, "document_id": doc.id},
+                )
+            except Exception as exc:
+                doc.processed = False
+                _set_document_state(doc, status="failed", stage="extracting", completed=0, total=PIPELINE_TOTAL_STEPS, error=str(exc))
+                _set_pipeline_state(module, job, status="failed", stage="extracting", completed=0, error=str(exc))
+                sync_module_pipeline_state(db, module.id)
+                db.commit()
+                await _emit_pipeline_event(event_handler, {"event": "error", "stage": "extracting", "message": str(exc)})
+                return
+
+            doc, module, job = _current_entities(db, document_id, module_id, job_id)
+            if _cancellation_requested(doc, job):
+                await _finalize_cancellation(
+                    db,
+                    module_id=module.id,
+                    document_id=document_id,
+                    job_id=job_id,
+                    event_handler=event_handler,
+                    created_concept_ids=created_concept_ids,
+                    created_flashcard_ids=created_flashcard_ids,
+                    clear_summary=clear_summary_on_cancel,
+                    clear_raw_text=clear_raw_text_on_cancel,
+                )
+                return
+
+            _set_pipeline_state(module, job, status="running", stage="summarizing", completed=1)
+            _set_document_state(doc, status="processing", stage="summarizing", completed=1, total=PIPELINE_TOTAL_STEPS)
+            sync_module_pipeline_state(db, module.id)
+            db.commit()
+            await _emit_pipeline_event(event_handler, {"event": "status", "stage": "summarizing", "completed": 1, "total": PIPELINE_TOTAL_STEPS})
+            if settings.GROQ_API_KEY:
+                summary = await summarize_document(document_id, db)
+                if summary is None and not doc.summary:
+                    doc.summary = _fallback_summary(doc.raw_text or "")
+                    db.commit()
+            elif not doc.summary:
+                doc.summary = _fallback_summary(doc.raw_text or "")
+                db.commit()
+            clear_summary_on_cancel = bool(doc.summary)
+            _set_document_state(doc, status="processing", stage="summarizing", completed=2, total=PIPELINE_TOTAL_STEPS)
+            sync_module_pipeline_state(db, module.id)
             db.commit()
             await _emit_pipeline_event(
                 event_handler,
-                {"event": "partial", "stage": "extracting", "word_count": word_count, "document_id": doc.id},
+                {"event": "partial", "stage": "summarizing", "summary": doc.summary or "", "document_id": doc.id},
             )
-        except Exception as exc:
-            doc.processing_status = "failed"
-            doc.raw_text = f"Processing error: {exc}"
-            _set_pipeline_state(module, job, status="failed", stage="extracting", completed=0, error=str(exc))
+
+            doc, module, job = _current_entities(db, document_id, module_id, job_id)
+            if _cancellation_requested(doc, job):
+                await _finalize_cancellation(
+                    db,
+                    module_id=module.id,
+                    document_id=document_id,
+                    job_id=job_id,
+                    event_handler=event_handler,
+                    created_concept_ids=created_concept_ids,
+                    created_flashcard_ids=created_flashcard_ids,
+                    clear_summary=clear_summary_on_cancel,
+                    clear_raw_text=clear_raw_text_on_cancel,
+                )
+                return
+
+            _set_pipeline_state(module, job, status="running", stage="indexing_topics", completed=2)
+            _set_document_state(doc, status="processing", stage="indexing_topics", completed=2, total=PIPELINE_TOTAL_STEPS)
+            sync_module_pipeline_state(db, module.id)
             db.commit()
-            await _emit_pipeline_event(event_handler, {"event": "error", "stage": "extracting", "message": str(exc)})
-            return
+            await _emit_pipeline_event(event_handler, {"event": "status", "stage": "indexing_topics", "completed": 2, "total": PIPELINE_TOTAL_STEPS})
+            created_concepts = await index_document(document_id, db, skip_summary=True)
+            created_concept_ids = [entry["id"] for entry in created_concepts if entry.get("is_new")]
 
-        _set_pipeline_state(module, job, status="running", stage="summarizing", completed=1)
-        db.commit()
-        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "summarizing", "completed": 1, "total": PIPELINE_TOTAL_STEPS})
-        if settings.GROQ_API_KEY:
-            summary = await summarize_document(document_id, db)
-            if summary is None and not doc.summary:
-                doc.summary = _fallback_summary(doc.raw_text or "")
-                db.commit()
-        elif not doc.summary:
-            doc.summary = _fallback_summary(doc.raw_text or "")
+            doc, module, job = _current_entities(db, document_id, module_id, job_id)
+            if _cancellation_requested(doc, job):
+                await _finalize_cancellation(
+                    db,
+                    module_id=module.id,
+                    document_id=document_id,
+                    job_id=job_id,
+                    event_handler=event_handler,
+                    created_concept_ids=created_concept_ids,
+                    created_flashcard_ids=created_flashcard_ids,
+                    clear_summary=clear_summary_on_cancel,
+                    clear_raw_text=clear_raw_text_on_cancel,
+                )
+                return
+
+            _set_pipeline_state(module, job, status="running", stage="refreshing_module", completed=3)
+            _set_document_state(doc, status="processing", stage="refreshing_module", completed=3, total=PIPELINE_TOTAL_STEPS)
+            refresh_module_relationships(module.id, db)
+            sync_module_pipeline_state(db, module.id)
             db.commit()
-        await _emit_pipeline_event(
-            event_handler,
-            {"event": "partial", "stage": "summarizing", "summary": doc.summary or "", "document_id": doc.id},
-        )
+            await _emit_pipeline_event(event_handler, {"event": "status", "stage": "refreshing_module", "completed": 3, "total": PIPELINE_TOTAL_STEPS})
 
-        _set_pipeline_state(module, job, status="running", stage="indexing_topics", completed=2)
-        db.commit()
-        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "indexing_topics", "completed": 2, "total": PIPELINE_TOTAL_STEPS})
-        await index_document(document_id, db, skip_summary=True)
+            doc, module, job = _current_entities(db, document_id, module_id, job_id)
+            if _cancellation_requested(doc, job):
+                await _finalize_cancellation(
+                    db,
+                    module_id=module.id,
+                    document_id=document_id,
+                    job_id=job_id,
+                    event_handler=event_handler,
+                    created_concept_ids=created_concept_ids,
+                    created_flashcard_ids=created_flashcard_ids,
+                    clear_summary=clear_summary_on_cancel,
+                    clear_raw_text=clear_raw_text_on_cancel,
+                )
+                return
 
-        _set_pipeline_state(module, job, status="running", stage="refreshing_module", completed=3)
-        refresh_module_relationships(module.id, db)
-        db.commit()
-        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "refreshing_module", "completed": 3, "total": PIPELINE_TOTAL_STEPS})
+            _set_pipeline_state(module, job, status="running", stage="generating_flashcards", completed=4)
+            _set_document_state(doc, status="processing", stage="generating_flashcards", completed=4, total=PIPELINE_TOTAL_STEPS)
+            sync_module_pipeline_state(db, module.id)
+            db.commit()
+            await _emit_pipeline_event(event_handler, {"event": "status", "stage": "generating_flashcards", "completed": 4, "total": PIPELINE_TOTAL_STEPS})
+            created_flashcard_ids = await _generate_missing_flashcards(module, db)
+            refresh_module_relationships(module.id, db)
+            sync_module_pipeline_state(db, module.id)
+            db.commit()
 
-        _set_pipeline_state(module, job, status="running", stage="generating_flashcards", completed=4)
-        db.commit()
-        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "generating_flashcards", "completed": 4, "total": PIPELINE_TOTAL_STEPS})
-        await _generate_missing_flashcards(module, db)
-        refresh_module_relationships(module.id, db)
-        db.commit()
+            doc, module, job = _current_entities(db, document_id, module_id, job_id)
+            if _cancellation_requested(doc, job):
+                await _finalize_cancellation(
+                    db,
+                    module_id=module.id,
+                    document_id=document_id,
+                    job_id=job_id,
+                    event_handler=event_handler,
+                    created_concept_ids=created_concept_ids,
+                    created_flashcard_ids=created_flashcard_ids,
+                    clear_summary=clear_summary_on_cancel,
+                    clear_raw_text=clear_raw_text_on_cancel,
+                )
+                return
 
-        _set_pipeline_state(module, job, status="running", stage="building_study_plan", completed=5)
-        _build_study_plan(module, db)
-        _set_pipeline_state(module, job, status="completed", stage="ready", completed=PIPELINE_TOTAL_STEPS)
-        db.commit()
-        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "building_study_plan", "completed": 5, "total": PIPELINE_TOTAL_STEPS})
-        await _emit_pipeline_event(
-            event_handler,
-            {
-                "event": "final",
-                "stage": "ready",
-                "document_id": doc.id,
-                "module_id": module.id,
-                "summary": doc.summary or "",
-                "completed": PIPELINE_TOTAL_STEPS,
-                "total": PIPELINE_TOTAL_STEPS,
-            },
-        )
+            _set_pipeline_state(module, job, status="running", stage="building_study_plan", completed=5)
+            _set_document_state(doc, status="processing", stage="building_study_plan", completed=5, total=PIPELINE_TOTAL_STEPS)
+            _build_study_plan(module, db)
+            _set_pipeline_state(module, job, status="completed", stage="ready", completed=PIPELINE_TOTAL_STEPS)
+            _set_document_state(doc, status="done", stage="ready", completed=PIPELINE_TOTAL_STEPS, total=PIPELINE_TOTAL_STEPS)
+            sync_module_pipeline_state(db, module.id)
+            db.commit()
+            await _emit_pipeline_event(event_handler, {"event": "status", "stage": "building_study_plan", "completed": 5, "total": PIPELINE_TOTAL_STEPS})
+            await _emit_pipeline_event(
+                event_handler,
+                {
+                    "event": "final",
+                    "stage": "ready",
+                    "document_id": doc.id,
+                    "module_id": module.id,
+                    "summary": doc.summary or "",
+                    "completed": PIPELINE_TOTAL_STEPS,
+                    "total": PIPELINE_TOTAL_STEPS,
+                },
+            )
     except Exception as exc:
         logger.exception("Module pipeline failed for document %s: %s", document_id, exc)
         try:
@@ -415,7 +747,9 @@ async def process_document_pipeline(
             if module:
                 _set_pipeline_state(module, job, status="failed", stage="failed", completed=0, error=str(exc))
             if doc := db.query(Document).filter(Document.id == document_id).first():
-                doc.processing_status = "failed"
+                _set_document_state(doc, status="failed", stage=doc.processing_stage or "failed", completed=doc.processing_completed, total=doc.processing_total or PIPELINE_TOTAL_STEPS, error=str(exc))
+            if module:
+                sync_module_pipeline_state(db, module.id)
             db.commit()
             await _emit_pipeline_event(event_handler, {"event": "error", "stage": "failed", "message": str(exc)})
         except Exception:

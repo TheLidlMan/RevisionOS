@@ -14,6 +14,7 @@ from models.module import Module
 from models.document import Document
 from services.fsrs_service import schedule_review
 from services import ai_service
+from services.quota_service import ai_quota_scope
 
 router = APIRouter(tags=["flashcards"])
 
@@ -262,7 +263,11 @@ async def generate_cards_for_module(
 
     docs = (
         db.query(Document)
-        .filter(Document.module_id == module_id, Document.processing_status == "done")
+        .filter(
+            Document.module_id == module_id,
+            Document.processing_status == "done",
+            Document.delete_requested_at.is_(None),
+        )
         .all()
     )
     if not docs:
@@ -276,7 +281,8 @@ async def generate_cards_for_module(
     if len(all_text) > max_chars:
         all_text = all_text[:max_chars]
 
-    generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
+    with ai_quota_scope(module.user_id):
+        generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
 
     created_cards = []
     for card_data in generated_cards_data:

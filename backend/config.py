@@ -7,9 +7,23 @@ from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 SETTINGS_FILE = Path(__file__).resolve().parent / "settings.json"
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "https://revisionos-frontend.pages.dev",
+    "https://reviseos.co.uk",
+    "https://login.reviseos.co.uk",
+    "https://app.reviseos.co.uk",
+    "https://api.reviseos.co.uk",
+]
+DEFAULT_CORS_ORIGIN_REGEX = r"https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)"
 PERSISTED_SETTINGS_MAP = {
     "groq_api_key": "GROQ_API_KEY",
+    "llm_model_fast": "LLM_MODEL_FAST",
     "llm_model": "LLM_MODEL",
+    "llm_model_quality": "LLM_MODEL_QUALITY",
     "llm_fallback_model": "LLM_FALLBACK_MODEL",
     "llm_temperature": "LLM_TEMPERATURE",
     "llm_top_p": "LLM_TOP_P",
@@ -28,19 +42,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     JWT_SECRET: str = ""
     DATABASE_URL: str = "sqlite:///./revisionos.db"
-    CORS_ORIGINS: str = (
-        "http://localhost:5173,"
-        "http://localhost:5174,"
-        "http://127.0.0.1:5173,"
-        "http://127.0.0.1:5174,"
-        "https://revisionos-frontend.pages.dev,"
-        "https://reviseos.co.uk,"
-        "https://login.reviseos.co.uk,"
-        "https://app.reviseos.co.uk,"
-        "https://api.reviseos.co.uk"
-    )
-    CORS_ORIGIN_REGEX: str = r"https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)"
+    CORS_ORIGINS: str = ",".join(DEFAULT_CORS_ORIGINS)
+    CORS_ORIGIN_REGEX: str = DEFAULT_CORS_ORIGIN_REGEX
+    LLM_MODEL_FAST: str = "llama-3.1-8b-instant"
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    LLM_MODEL_QUALITY: str = "meta-llama/llama-4-maverick-17b-128e-instruct"
     LLM_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
     LLM_TEMPERATURE: float = 0.1
     LLM_TOP_P: float = 1.0
@@ -57,6 +63,8 @@ class Settings(BaseSettings):
     MAX_QUESTIONS_PER_REQUEST: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
+    AI_REQUESTS_DAILY_LIMIT: int = 100
+    AI_REQUESTS_MONTHLY_LIMIT: int = 1000
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str = ""
@@ -85,12 +93,24 @@ settings = Settings()
 
 
 def get_cors_origins() -> list[str]:
-    return [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+    configured_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+    merged_origins = dict.fromkeys([*DEFAULT_CORS_ORIGINS, *configured_origins])
+    return list(merged_origins)
 
 
 def get_cors_origin_regex() -> str | None:
-    regex = settings.CORS_ORIGIN_REGEX.strip()
-    return regex or None
+    regexes = [DEFAULT_CORS_ORIGIN_REGEX]
+    configured_regex = settings.CORS_ORIGIN_REGEX.strip()
+    if configured_regex and configured_regex != DEFAULT_CORS_ORIGIN_REGEX:
+        regexes.append(configured_regex)
+
+    if not regexes:
+        return None
+
+    if len(regexes) == 1:
+        return regexes[0]
+
+    return "|".join(f"(?:{regex})" for regex in regexes)
 
 
 def _load_persisted_settings() -> dict:

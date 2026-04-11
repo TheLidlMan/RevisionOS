@@ -141,8 +141,8 @@ ReviseOS/
 |----------|---------|-------------|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
-| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,https://revisionos-frontend.pages.dev,https://reviseos.co.uk` | Comma-separated allowed frontend origins |
-| `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?revisionos-frontend\.pages\.dev` | Optional regex for Cloudflare Pages preview URLs |
+| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,https://revisionos-frontend.pages.dev,https://reviseos.co.uk,https://login.reviseos.co.uk,https://app.reviseos.co.uk,https://api.reviseos.co.uk` | Comma-separated allowed frontend origins |
+| `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)` | Optional regex for Cloudflare Pages previews and ReviseOS subdomains |
 | `LLM_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Primary LLM model |
 | `UPLOAD_DIR` | `./uploads` | File upload directory |
 | `DAILY_NEW_CARDS_LIMIT` | `20` | Max new cards per day |

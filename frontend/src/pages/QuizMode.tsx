@@ -168,8 +168,8 @@ export default function QuizMode() {
   // Config phase
   if (phase === 'config') {
     return (
-      <div className="p-6 lg:p-8 max-w-2xl mx-auto w-full">
-        <div className="flex items-center gap-3 mb-8">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto w-full">
+        <div className="flex items-center gap-3 mb-6">
           <Brain className="w-6 h-6" style={{ color: '#c4956a' }} />
           <h1
             style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 600 }}
@@ -210,7 +210,7 @@ export default function QuizMode() {
             <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Number of Questions
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {[5, 10, 20].map((n) => (
                 <button
                   key={n}
@@ -249,7 +249,7 @@ export default function QuizMode() {
             <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Difficulty
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {(['EASY', 'MIXED', 'HARD'] as const).map((d) => (
                 <button
                   key={d}
@@ -272,7 +272,7 @@ export default function QuizMode() {
             <label style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }} className="block mb-2">
               Mode
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {([
                 { value: 'random' as const, label: 'Random' },
                 { value: 'weakness_drill' as const, label: 'Weakness Drill' },
@@ -332,7 +332,7 @@ export default function QuizMode() {
     const offset = circumference - (pct / 100) * circumference;
 
     return (
-      <div className="p-6 lg:p-8 max-w-2xl mx-auto w-full">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto w-full">
         <div className="flex flex-col items-center text-center py-12">
           <Trophy className="w-16 h-16 mb-4" style={{ color: '#c4956a' }} />
           <h2
@@ -365,7 +365,7 @@ export default function QuizMode() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-6 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-8 w-full">
             <div style={glass} className="p-4">
               <p style={{ color: 'rgba(120,180,120,0.8)', fontWeight: 200, fontSize: '2rem' }}>
                 {results.correct}
@@ -386,7 +386,7 @@ export default function QuizMode() {
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <button
               onClick={() => navigate('/')}
               style={{ ...glass, color: '#f5f0e8', fontWeight: 300 }}
@@ -417,9 +417,9 @@ export default function QuizMode() {
   if (!question) return null;
 
   return (
-    <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
         <span style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>
           Question {questionIdx + 1} of {session.questions.length}
         </span>

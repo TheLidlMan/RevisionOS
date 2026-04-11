@@ -12,6 +12,19 @@
 }
 
 @layer base {
+  :root {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
     @apply bg-navy text-white min-h-screen;
     margin: 0;
@@ -21,6 +34,7 @@
     font-weight: 300;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -56,6 +70,7 @@
   }
 
   button,
+  a,
   input,
   textarea,
   select,
@@ -93,8 +108,10 @@
 .scholar-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   padding: 0.5rem 1.25rem;
+  min-height: 44px;
   font-family: var(--sans);
   font-size: 0.875rem;
   font-weight: 400;
@@ -122,8 +139,10 @@
 .scholar-btn-secondary {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
+  min-height: 44px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -162,20 +181,109 @@ body.theme-light .text-gray-500 { color: rgba(60, 36, 21, 0.4) !important; }
 body.theme-light .border-gray-800 { border-color: rgba(139, 115, 85, 0.18) !important; }
 body.theme-light .border-gray-700 { border-color: rgba(139, 115, 85, 0.12) !important; }
 
-/* Mobile responsive */
-@media (max-width: 768px) {
-  .flex.min-h-screen {
-    flex-direction: column;
+.app-shell {
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-shell-main {
+  min-height: 100dvh;
+  max-height: 100dvh;
+}
+
+.mobile-topbar,
+.mobile-bottom-nav,
+.mobile-nav-overlay,
+.mobile-nav-drawer {
+  display: none;
+}
+
+.mobile-chrome-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mobile-bottom-nav-item {
+  min-height: 56px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.67rem;
+  line-height: 1;
+}
+
+@media (max-width: 767px) {
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: calc(0.7rem + var(--safe-area-top)) calc(1rem + var(--safe-area-right)) 0.75rem calc(1rem + var(--safe-area-left));
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 84%, transparent);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
   }
-  aside {
-    position: fixed !important;
-    z-index: 50;
-    height: 100vh;
+
+  .mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.25rem;
+    padding: 0.55rem calc(0.75rem + var(--safe-area-right)) calc(0.55rem + var(--safe-area-bottom)) calc(0.75rem + var(--safe-area-left));
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-warm) 92%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .mobile-nav-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    border: 0;
+    background: rgba(12, 10, 8, 0.58);
+  }
+
+  .mobile-nav-drawer {
+    display: block;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 70;
     transform: translateX(-100%);
-    transition: transform 0.3s ease;
+    transition: transform 0.24s ease;
+    pointer-events: none;
   }
-  aside.mobile-open {
+
+  .mobile-nav-drawer.is-open {
     transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .mobile-nav-drawer > aside {
+    width: min(22rem, 88vw) !important;
+    height: 100dvh !important;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  }
+
+  .app-shell-content {
+    padding-bottom: 0;
+  }
+
+  .scholar-btn,
+  .scholar-btn-secondary {
+    width: 100%;
   }
 }
 

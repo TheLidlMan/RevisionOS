@@ -1,15 +1,56 @@
 {
   "name": "ReviseOS",
   "short_name": "ReviseOS",
+  "id": "/",
   "description": "AI-powered adaptive study platform. Upload your notes, generate flashcards and quizzes, and master any subject with spaced repetition.",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
   "background_color": "#1a1714",
   "theme_color": "#c4956a",
   "orientation": "portrait-primary",
   "scope": "/",
   "lang": "en-GB",
+  "prefer_related_applications": false,
   "categories": ["education", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Quiz Mode",
+      "short_name": "Quiz",
+      "url": "/quiz",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Study Plan",
+      "short_name": "Plan",
+      "url": "/curriculum",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
   "icons": [
     {
       "src": "/favicon.svg",

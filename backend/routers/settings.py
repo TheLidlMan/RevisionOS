@@ -15,7 +15,9 @@ SETTINGS_FILE = Path(__file__).resolve().parent.parent / "settings.json"
 
 DEFAULT_SETTINGS = {
     "groq_api_key": "",
+    "llm_model_fast": "llama-3.1-8b-instant",
     "llm_model": "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llm_model_quality": "meta-llama/llama-4-maverick-17b-128e-instruct",
     "llm_fallback_model": "llama-3.1-8b-instant",
     "llm_temperature": 0.1,
     "llm_top_p": 1.0,
@@ -35,7 +37,9 @@ DEFAULT_SETTINGS = {
 
 class SettingsResponse(BaseModel):
     groq_api_key: str = ""
+    llm_model_fast: str = "llama-3.1-8b-instant"
     llm_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    llm_model_quality: str = "meta-llama/llama-4-maverick-17b-128e-instruct"
     llm_fallback_model: str = "llama-3.1-8b-instant"
     llm_temperature: float = 0.1
     llm_top_p: float = 1.0
@@ -52,7 +56,9 @@ class SettingsResponse(BaseModel):
 
 class SettingsUpdate(BaseModel):
     groq_api_key: Optional[str] = None
+    llm_model_fast: Optional[str] = None
     llm_model: Optional[str] = None
+    llm_model_quality: Optional[str] = None
     llm_fallback_model: Optional[str] = None
     llm_temperature: Optional[float] = None
     llm_top_p: Optional[float] = None

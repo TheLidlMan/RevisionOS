@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import MobileBottomNav from './components/MobileBottomNav';
+import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
@@ -13,12 +15,14 @@ import KnowledgeGraph from './pages/KnowledgeGraph';
 import CurriculumPage from './pages/CurriculumPage';
 import LoginPage from './pages/LoginPage';
 import ForgettingCurve from './pages/ForgettingCurve';
+import { useAppStore } from './store';
 import { useAuthStore } from './store/auth';
 
 export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
   const { loadFromStorage, isAuthenticated, loading } = useAuthStore();
+  const { mobileNavOpen, openMobileNav, closeMobileNav } = useAppStore();
   const nextPath = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
@@ -35,6 +39,10 @@ export default function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  useEffect(() => {
+    closeMobileNav();
+  }, [closeMobileNav, location.hash, location.pathname, location.search]);
 
   if (loading) {
     return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} />;
@@ -53,22 +61,50 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/modules/:id" element={<ModuleView />} />
-          <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
-          <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
-          <Route path="/quiz" element={<QuizMode />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
-          <Route path="/curriculum" element={<CurriculumPage />} />
-          <Route path="/forgetting-curve" element={<ForgettingCurve />} />
-          <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
-        </Routes>
-      </main>
+    <div className="app-shell flex min-h-screen" style={{ background: 'var(--bg)' }}>
+      <div className="hidden md:block shrink-0">
+        <Sidebar onOpenSearch={() => setSearchOpen(true)} />
+      </div>
+
+      {mobileNavOpen ? (
+        <button
+          type="button"
+          className="mobile-nav-overlay md:hidden"
+          onClick={closeMobileNav}
+          aria-label="Close navigation"
+        />
+      ) : null}
+
+      <div className={`mobile-nav-drawer md:hidden ${mobileNavOpen ? 'is-open' : ''}`}>
+        <Sidebar
+          mode="mobile"
+          onNavigate={closeMobileNav}
+          onOpenSearch={() => {
+            closeMobileNav();
+            setSearchOpen(true);
+          }}
+        />
+      </div>
+
+      <div className="app-shell-main flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
+        <MobileTopBar onOpenNav={openMobileNav} onOpenSearch={() => setSearchOpen(true)} />
+        <main className="app-shell-content flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/modules/:id" element={<ModuleView />} />
+            <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
+            <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
+            <Route path="/quiz" element={<QuizMode />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
+            <Route path="/curriculum" element={<CurriculumPage />} />
+            <Route path="/forgetting-curve" element={<ForgettingCurve />} />
+            <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
+          </Routes>
+        </main>
+        <MobileBottomNav />
+      </div>
+
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <KeyboardShortcuts />
     </div>

@@ -17,6 +17,7 @@ export interface Module {
   pipeline_completed: number;
   pipeline_total: number;
   pipeline_error?: string;
+  pipeline_updated_at?: string;
   has_study_plan: boolean;
 }
 
@@ -61,9 +62,17 @@ export interface Document {
   file_type: string;
   file_path: string;
   processed: boolean;
-  processing_status: 'pending' | 'processing' | 'done' | 'failed';
+  processing_status: 'pending' | 'processing' | 'done' | 'failed' | 'cancelling' | 'cancelled';
+  processing_stage: string;
+  processing_error?: string;
+  processing_completed: number;
+  processing_total: number;
   word_count: number;
+  file_size_bytes: number;
+  file_sha256?: string;
   summary?: string;
+  last_pipeline_updated_at?: string;
+  cancelled_at?: string;
   created_at: string;
   updated_at: string;
 }

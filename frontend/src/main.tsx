@@ -6,6 +6,16 @@ import App from './App';
 import { ToastProvider } from './components/ToastProvider';
 import './index.css';
 
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !import.meta.env.PROD) {
+    return;
+  }
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+  });
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -14,6 +24,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+registerServiceWorker();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

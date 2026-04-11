@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy.orm import relationship
+
 from database import Base
 
 
@@ -22,3 +24,5 @@ class User(Base):
     avatar_url = Column(String, nullable=True)
     email_verified_at = Column(DateTime, nullable=True)
     last_login_at = Column(DateTime, nullable=True)
+
+    ai_usage_events = relationship("AiUsageEvent", back_populates="user", cascade="all, delete-orphan")

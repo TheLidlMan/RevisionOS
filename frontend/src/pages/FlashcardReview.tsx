@@ -254,12 +254,12 @@ export default function FlashcardReview() {
   const card: Flashcard = cards[currentIdx];
 
   return (
-    <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-1 text-sm transition-colors"
+          className="hidden md:flex items-center gap-1 text-sm transition-colors"
           style={{ color: 'var(--text-secondary)' }}
           onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
           onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}

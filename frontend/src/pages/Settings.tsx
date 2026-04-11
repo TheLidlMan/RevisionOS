@@ -85,7 +85,7 @@ export default function SettingsPage() {
 
   if (settingsQuery.isLoading) {
     return (
-      <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
         <div className="space-y-5">
           {[0, 1].map((idx) => (
             <section key={idx} className="p-5" style={glass}>
@@ -104,8 +104,8 @@ export default function SettingsPage() {
   const canValidateKey = draft.apiKey.trim().length > 0 && !validateAndSaveMutation.isPending;
 
   return (
-    <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
-      <div className="flex items-center gap-3 mb-8">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
+      <div className="flex items-center gap-3 mb-6 sm:mb-8">
         <GearSix size={24} style={{ color: 'var(--accent)' }} />
         <div>
           <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.8rem' }}>Settings</h1>

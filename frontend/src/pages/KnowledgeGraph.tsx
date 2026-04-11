@@ -177,8 +177,8 @@ export default function KnowledgeGraph() {
   }, [graph, gaps]);
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
-      <div className="flex items-center gap-3 mb-8">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto w-full">
+      <div className="flex items-center gap-3 mb-6 sm:mb-8">
         <Graph className="w-6 h-6" style={{ color: 'var(--accent)' }} />
         <h1
           style={{ fontFamily: "var(--heading)", color: 'var(--text)', fontWeight: 600 }}
@@ -189,7 +189,7 @@ export default function KnowledgeGraph() {
       </div>
 
       {/* Module selector */}
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-6 flex flex-col md:flex-row md:items-center gap-3">
         <select
           value={moduleId}
           onChange={(e) => {
@@ -207,7 +207,7 @@ export default function KnowledgeGraph() {
             fontWeight: 300,
             fontSize: '0.9rem',
           }}
-          className="px-3 py-2.5 focus:outline-none transition-colors"
+          className="w-full md:w-auto px-3 py-2.5 focus:outline-none transition-colors"
         >
           <option value="">Select a module...</option>
           {modules?.map((m) => (
@@ -215,7 +215,7 @@ export default function KnowledgeGraph() {
           ))}
         </select>
         {moduleId && (
-          <>
+          <div className="hidden md:flex md:flex-wrap md:items-center md:gap-3">
             <button
               onClick={() => gapMutation.mutate(moduleId)}
               disabled={gapMutation.isPending}
@@ -247,10 +247,21 @@ export default function KnowledgeGraph() {
                 {gapMutation.isPending && gapDelta ? ` · ${gapDelta}` : ''}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
 
+      <div className="md:hidden">
+        <div style={glass} className="text-center py-10 px-5">
+          <Graph className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+          <p style={{ color: 'var(--text)', fontSize: '1rem', marginBottom: 8 }}>Knowledge Graph is desktop-only for now.</p>
+          <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }}>
+            Open this view on a tablet or desktop to inspect concept relationships and run gap analysis without the graph becoming unreadable.
+          </p>
+        </div>
+      </div>
+
+      <div className="hidden md:block">
       {!moduleId ? (
         <div style={glass} className="text-center py-16">
           <Graph className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
@@ -539,6 +550,7 @@ export default function KnowledgeGraph() {
         )}
         </>
       )}
+      </div>
     </div>
   );
 }

@@ -5,11 +5,44 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from config import settings
+from services import quota_service
 
 logger = logging.getLogger(__name__)
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 JSON_RESPONSE_FORMAT = {"type": "json_object"}
+FAST_MODEL_KINDS = frozenset({
+    "document_summary",
+})
+QUALITY_MODEL_KINDS = frozenset({
+    "answer_grading",
+    "elaboration_questions",
+    "free_recall",
+    "writing_grade",
+    "writing_prompt",
+})
+
+
+def _resolve_primary_model(kind: str, override_model: Optional[str]) -> str:
+    if override_model:
+        return override_model
+    if kind in FAST_MODEL_KINDS:
+        return settings.LLM_MODEL_FAST
+    if kind in QUALITY_MODEL_KINDS:
+        return settings.LLM_MODEL_QUALITY
+    return settings.LLM_MODEL
+
+
+def _build_model_candidates(primary_model: str) -> list[str]:
+    models_to_try = [primary_model]
+
+    if primary_model == settings.LLM_MODEL_QUALITY and settings.LLM_MODEL not in models_to_try:
+        models_to_try.append(settings.LLM_MODEL)
+
+    if settings.LLM_FALLBACK_MODEL not in models_to_try:
+        models_to_try.append(settings.LLM_FALLBACK_MODEL)
+
+    return models_to_try
 
 
 def _default_temperature(value: Optional[float]) -> float:
@@ -151,6 +184,7 @@ def _should_disable_response_format(
 async def _request_groq_completion(
     messages: list[dict[str, Any]],
     *,
+    kind: str,
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     top_p: Optional[float] = None,
@@ -163,13 +197,12 @@ async def _request_groq_completion(
         "Authorization": f"Bearer {api_key or settings.GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
-    primary_model = model or settings.LLM_MODEL
-    models_to_try = [primary_model]
-    if primary_model != settings.LLM_FALLBACK_MODEL:
-        models_to_try.append(settings.LLM_FALLBACK_MODEL)
+    primary_model = _resolve_primary_model(kind, model)
+    models_to_try = _build_model_candidates(primary_model)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         errors: list[str] = []
+        quota_checked = False
 
         for candidate_model in models_to_try:
             token_fields = ["max_completion_tokens"]
@@ -188,8 +221,12 @@ async def _request_groq_completion(
                         stream=False,
                     )
                     try:
+                        if not quota_checked:
+                            quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
+                            quota_checked = True
                         response = await client.post(GROQ_API_URL, headers=headers, json=payload)
                         response.raise_for_status()
+                        quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
                         return _extract_message_content(response.json()), candidate_model
                     except httpx.HTTPStatusError as exc:
                         status = exc.response.status_code
@@ -255,8 +292,9 @@ async def stream_groq_completion(
         "Authorization": f"Bearer {settings.GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
+    resolved_model = _resolve_primary_model(kind, model)
     payload = _build_payload(
-        candidate_model=model or settings.LLM_MODEL,
+        candidate_model=resolved_model,
         messages=messages,
         temperature=temperature,
         top_p=top_p,
@@ -273,8 +311,10 @@ async def stream_groq_completion(
 
     async with httpx.AsyncClient(timeout=None) as client:
         try:
+            quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
             async with client.stream("POST", GROQ_API_URL, headers=headers, json=payload) as response:
                 response.raise_for_status()
+                quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
                 yield {"event": "status", "kind": kind, "message": "Streaming response"}
                 async for line in response.aiter_lines():
                     if not line or not line.startswith("data:"):
@@ -306,7 +346,7 @@ async def stream_groq_completion(
             raise
 
     parsed = _normalize_json_object(buffer, expected_payload_key)
-    envelope = _build_envelope(kind, parsed, model=model or settings.LLM_MODEL)
+    envelope = _build_envelope(kind, parsed, model=resolved_model)
     yield {"event": "final", "kind": kind, "envelope": envelope}
 
 
@@ -347,6 +387,7 @@ async def _call_groq(
 
     raw_text, resolved_model = await _request_groq_completion(
         messages,
+        kind=kind,
         model=model,
         temperature=temperature,
         top_p=top_p,
@@ -580,7 +621,7 @@ async def grade_answer(question: str, correct_answer: str, user_answer: str) -> 
 async def validate_api_key(api_key: str) -> bool:
     """Test if a Groq API key is valid."""
     payload = {
-        "model": settings.LLM_FALLBACK_MODEL,
+        "model": settings.LLM_MODEL_FAST,
         "messages": [{"role": "user", "content": "Say hello"}],
         "max_completion_tokens": 5,
         "temperature": settings.LLM_TEMPERATURE,
