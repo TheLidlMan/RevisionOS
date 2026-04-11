@@ -455,3 +455,194 @@ export interface ContentMapData {
   covered_topics: number;
   uncovered_topics: number;
 }
+
+// ---- Feature: Forgetting Curve ----
+export interface ForgettingCurvePoint {
+  day: number;
+  retention_pct: number;
+}
+
+export interface ForgettingCurveData {
+  card_id: string;
+  stability: number;
+  data_points: ForgettingCurvePoint[];
+}
+
+// ---- Feature: Session Estimator ----
+export interface SessionEstimate {
+  due_cards: number;
+  avg_seconds_per_card: number;
+  estimated_minutes: number;
+  new_cards: number;
+  review_cards: number;
+}
+
+// ---- Feature: Concept Gap Detection ----
+export interface ConceptGap {
+  name: string;
+  context_snippet: string;
+  mentioned_in_documents: number;
+  has_definition: boolean;
+}
+
+export interface ConceptGapResponse {
+  gaps: ConceptGap[];
+}
+
+// ---- Feature: Elaboration Prompts ----
+export interface ElaborationPrompt {
+  question: string;
+  hint: string;
+}
+
+export interface ElaborationResponse {
+  card_id: string;
+  follow_up_questions: ElaborationPrompt[];
+}
+
+// ---- Feature: Free Recall ----
+export interface FreeRecallResult {
+  score_pct: number;
+  total_concepts: number;
+  recalled_concepts: number;
+  missed_concepts: { name: string; definition: string }[];
+  feedback: string;
+}
+
+// ---- Feature: Timed Exam ----
+export interface ExamSession {
+  session_id: string;
+  module_id: string;
+  time_limit_minutes: number;
+  questions: QuestionForQuiz[];
+  total_questions: number;
+  started_at: string;
+}
+
+export interface ExamAnswer {
+  question_id: string;
+  user_answer: string;
+}
+
+export interface ExamSubmitResult {
+  session_id: string;
+  score_pct: number;
+  correct: number;
+  incorrect: number;
+  total: number;
+  time_taken_seconds: number;
+  review: {
+    question_id: string;
+    question_text: string;
+    user_answer: string;
+    correct_answer: string;
+    is_correct: boolean;
+    explanation: string;
+  }[];
+}
+
+// ---- Feature: Confidence Rating ----
+export interface CalibrationPoint {
+  confidence_level: number;
+  predicted_pct: number;
+  actual_pct: number;
+  count: number;
+}
+
+export interface CalibrationData {
+  calibration: CalibrationPoint[];
+  overall_accuracy: number;
+  overconfidence_score: number;
+}
+
+// ---- Feature: Writing Practice ----
+export interface WritingPrompt {
+  question: string;
+  mark_scheme: string;
+  time_limit_minutes: number;
+  max_marks: number;
+}
+
+export interface ParagraphFeedback {
+  paragraph_idx: number;
+  feedback: string;
+  marks: number;
+}
+
+export interface WritingGradeResult {
+  score: number;
+  max_marks: number;
+  overall_feedback: string;
+  paragraph_feedback: ParagraphFeedback[];
+}
+
+// ---- Feature: Retention Forecast ----
+export interface ModuleRetentionForecast {
+  module_id: string;
+  module_name: string;
+  total_cards: number;
+  forecasts: { days: number; retention_pct: number }[];
+}
+
+export interface RetentionForecastData {
+  modules: ModuleRetentionForecast[];
+}
+
+// ---- Feature: Exam Revision Timeline ----
+export interface DailyPlan {
+  date: string;
+  cards_to_review: number;
+  new_cards: number;
+  estimated_minutes: number;
+  focus_concepts: string[];
+}
+
+export interface ExamTimeline {
+  exam_date: string;
+  days_until: number;
+  daily_plan: DailyPlan[];
+}
+
+// ---- Feature: Session Replay ----
+export interface ReplayItem {
+  item_id: string;
+  item_type: string;
+  question_text: string;
+  correct_answer: string;
+  user_answer: string;
+  was_correct: boolean;
+  rating: string;
+  time_taken: number;
+}
+
+export interface SessionReplayData {
+  session: StudySession;
+  items: ReplayItem[];
+}
+
+// ---- Feature: Mastery Heatmap Calendar ----
+export interface HeatmapDay {
+  date: string;
+  mastery_gain: number;
+  sessions_count: number;
+  items_reviewed: number;
+}
+
+export interface MasteryHeatmapData {
+  days: HeatmapDay[];
+}
+
+// ---- Feature: Synthesis Cards ----
+export interface SynthesisCardsRequest {
+  module_ids: string[];
+  num_cards: number;
+}
+
+// ---- Feature: Image Occlusion ----
+export interface OcclusionRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+}

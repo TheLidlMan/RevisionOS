@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Share2, Loader2 } from 'lucide-react';
-import { getModules, getKnowledgeGraph } from '../api/client';
-import type { GraphNode } from '../types';
+import { Share2, Loader2, AlertTriangle } from 'lucide-react';
+import { getModules, getKnowledgeGraph, detectConceptGaps } from '../api/client';
+import type { GraphNode, ConceptGap } from '../types';
 
 const glass = {
   background: 'rgba(255,248,240,0.04)',
@@ -29,8 +29,14 @@ export default function KnowledgeGraph() {
   const preModule = searchParams.get('module') ?? '';
   const [moduleId, setModuleId] = useState(preModule);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const [gaps, setGaps] = useState<ConceptGap[]>([]);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+
+  const gapMutation = useMutation({
+    mutationFn: (modId: string) => detectConceptGaps(modId),
+    onSuccess: (data) => setGaps(data.gaps),
+  });
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -130,11 +136,28 @@ export default function KnowledgeGraph() {
     });
 
     const totalUnits = Math.max(1, fallbackCursor, cursor);
-    const width = Math.max(900, marginX * 2 + totalUnits * unitWidth);
-    const height = Math.max(700, marginY * 2 + (maxDepth + 2) * levelHeight);
+    let width = Math.max(900, marginX * 2 + totalUnits * unitWidth);
+    let height = Math.max(700, marginY * 2 + (maxDepth + 2) * levelHeight);
+
+    if (gaps.length > 0) {
+      const gapSpacing = 72;
+      const gapColumnX = width + 110;
+      const totalGapHeight = Math.max(0, (gaps.length - 1) * gapSpacing);
+      const startY = Math.max(marginY, height / 2 - totalGapHeight / 2);
+
+      gaps.forEach((gap, index) => {
+        positions.set(`gap-${gap.name}`, {
+          x: gapColumnX,
+          y: startY + index * gapSpacing,
+        });
+      });
+
+      width += 220;
+      height = Math.max(height, startY + totalGapHeight + marginY);
+    }
 
     return { positions, width, height };
-  }, [graph]);
+  }, [graph, gaps]);
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
@@ -149,10 +172,16 @@ export default function KnowledgeGraph() {
       </div>
 
       {/* Module selector */}
-      <div className="mb-6">
+      <div className="mb-6 flex items-center gap-3">
         <select
           value={moduleId}
-          onChange={(e) => { setModuleId(e.target.value); setSelectedNode(null); }}
+          onChange={(e) => {
+            setModuleId(e.target.value);
+            setGaps([]);
+            setSelectedNode(null);
+            setFocusedNodeId(null);
+            setHoveredNode(null);
+          }}
           style={{
             background: 'var(--surface)',
             border: '1px solid var(--border)',
@@ -168,6 +197,33 @@ export default function KnowledgeGraph() {
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>
+        {moduleId && (
+          <button
+            onClick={() => gapMutation.mutate(moduleId)}
+            disabled={gapMutation.isPending}
+            style={{
+              background: 'rgba(255,165,0,0.12)',
+              border: '1px solid rgba(255,165,0,0.3)',
+              borderRadius: '8px',
+              color: 'rgba(255,165,0,0.85)',
+              fontWeight: 400,
+              fontSize: '0.85rem',
+              cursor: gapMutation.isPending ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: gapMutation.isPending ? 0.6 : 1,
+            }}
+            className="px-3 py-2.5 transition-colors"
+          >
+            {gapMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <AlertTriangle className="w-4 h-4" />
+            )}
+            Detect Gaps
+          </button>
+        )}
       </div>
 
       {!moduleId ? (
@@ -184,7 +240,13 @@ export default function KnowledgeGraph() {
           <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }}>No concepts found for this module.</p>
         </div>
       ) : (
+        <>
         <div style={glass} className="p-4 overflow-hidden">
+          {graph.module_name && (
+            <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.85rem' }} className="mb-2">
+              Module: {graph.module_name}
+            </p>
+          )}
           <svg
             viewBox={`0 0 ${layout.width} ${layout.height}`}
             className="w-full"
@@ -300,6 +362,45 @@ export default function KnowledgeGraph() {
                 </g>
               );
             })}
+
+            {/* Gap Nodes */}
+            {gaps.map((gap) => {
+              const pos = layout.positions.get(`gap-${gap.name}`);
+              if (!pos) return null;
+              const r = 20;
+              return (
+                <g key={`gap-${gap.name}`}>
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={r}
+                    fill="rgba(255,165,0,0.15)"
+                    stroke="rgba(255,165,0,0.85)"
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                    opacity={0.85}
+                  />
+                  <text
+                    x={pos.x}
+                    y={pos.y + 4}
+                    textAnchor="middle"
+                    fill="rgba(255,165,0,0.85)"
+                    style={{ fontSize: '11px', fontWeight: 500 }}
+                  >
+                    ?
+                  </text>
+                  <text
+                    x={pos.x}
+                    y={pos.y + r + 14}
+                    textAnchor="middle"
+                    fill="rgba(255,165,0,0.7)"
+                    style={{ fontSize: '10px' }}
+                  >
+                    {gap.name.length > 16 ? gap.name.slice(0, 14) + '…' : gap.name}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
 
           {/* Detail panel */}
@@ -323,7 +424,7 @@ export default function KnowledgeGraph() {
           )}
 
           {/* Legend */}
-          <div className="flex items-center gap-4 mt-4" style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+          <div className="flex items-center gap-4 mt-4 flex-wrap" style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(220,120,100,0.85)' }} />
               <span>&lt; 40% mastery</span>
@@ -336,6 +437,10 @@ export default function KnowledgeGraph() {
               <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(120,180,120,0.85)' }} />
               <span>&gt; 70%</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full" style={{ background: 'rgba(255,165,0,0.85)', border: '1px dashed rgba(255,165,0,0.5)' }} />
+              <span>Concept Gap</span>
+            </div>
             <span style={{ marginLeft: 'auto' }}>
               <span style={{ display: 'inline-block', width: 20, height: 2, background: 'rgba(196,149,106,0.4)', verticalAlign: 'middle', marginRight: 4 }} />
               parent-child
@@ -346,6 +451,68 @@ export default function KnowledgeGraph() {
             </span>
           </div>
         </div>
+
+        {/* Concept Gap List */}
+        {gaps.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <h3
+              style={{
+                fontFamily: 'var(--heading)',
+                color: 'var(--text)',
+                fontWeight: 400,
+                fontSize: '1rem',
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <AlertTriangle className="w-4 h-4" style={{ color: 'rgba(255,165,0,0.85)' }} />
+              Detected Concept Gaps ({gaps.length})
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {gaps.map((gap) => (
+                <div
+                  key={gap.name}
+                  style={{
+                    ...glass,
+                    padding: '12px 16px',
+                    borderLeft: '3px solid rgba(255,165,0,0.85)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <span style={{ color: 'rgba(255,165,0,0.85)', fontWeight: 500, fontSize: '0.9rem' }}>{gap.name}</span>
+                    {!gap.has_definition && (
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          background: 'rgba(255,165,0,0.1)',
+                          color: 'rgba(255,165,0,0.7)',
+                          padding: '2px 6px',
+                          borderRadius: 999,
+                          fontWeight: 400,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                        }}
+                      >
+                        No definition
+                      </span>
+                    )}
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', fontWeight: 300, marginLeft: 'auto' }}>
+                      Mentioned in {gap.mentioned_in_documents} doc{gap.mentioned_in_documents !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  {gap.context_snippet && (
+                    <p style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.8rem', margin: 0, lineHeight: 1.5 }}>
+                      {gap.context_snippet}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

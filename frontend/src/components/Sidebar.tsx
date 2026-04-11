@@ -17,6 +17,11 @@ import {
   LogIn,
   LogOut,
   User,
+  Brain,
+  PenTool,
+  Clock,
+  History,
+  TrendingUp,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { useAuthStore } from '../store/auth';
@@ -40,6 +45,11 @@ export default function Sidebar() {
     { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/knowledge-graph', icon: Share2, label: 'Knowledge Graph' },
     { to: '/curriculum', icon: Calendar, label: 'Study Plan' },
+    { to: '/free-recall', icon: Brain, label: 'Free Recall' },
+    { to: '/timed-exam', icon: Clock, label: 'Timed Exam' },
+    { to: '/writing-practice', icon: PenTool, label: 'Writing Practice' },
+    { to: '/session-replay', icon: History, label: 'Session Replay' },
+    { to: '/forgetting-curve', icon: TrendingUp, label: 'Forgetting Curve' },
     { to: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
     { to: '/collaboration', icon: Users, label: 'Study Rooms' },
     { to: '/integrations', icon: Link2, label: 'Integrations' },

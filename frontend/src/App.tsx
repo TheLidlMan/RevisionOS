@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
+import KeyboardShortcuts from './components/KeyboardShortcuts';
 import Dashboard from './pages/Dashboard';
 import ModuleView from './pages/ModuleView';
 import UploadCenter from './pages/UploadCenter';
@@ -16,6 +17,11 @@ import LoginPage from './pages/LoginPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import CollaborationPage from './pages/CollaborationPage';
 import IntegrationsPage from './pages/IntegrationsPage';
+import FreeRecall from './pages/FreeRecall';
+import TimedExam from './pages/TimedExam';
+import WritingPractice from './pages/WritingPractice';
+import SessionReplay from './pages/SessionReplay';
+import ForgettingCurve from './pages/ForgettingCurve';
 import { useAuthStore } from './store/auth';
 
 export default function App() {
@@ -61,9 +67,17 @@ export default function App() {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/collaboration" element={<CollaborationPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/free-recall" element={<FreeRecall />} />
+          <Route path="/timed-exam" element={<TimedExam />} />
+          <Route path="/writing-practice" element={<WritingPractice />} />
+          <Route path="/session-replay" element={<SessionReplay />} />
+          <Route path="/session-replay/:sessionId" element={<SessionReplay />} />
+          <Route path="/forgetting-curve" element={<ForgettingCurve />} />
+          <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
         </Routes>
       </main>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <KeyboardShortcuts />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Clock, Flame, TrendingUp, Loader2, AlertTriangle } from 'lucide-react';
-import { getModules, getAnalyticsOverview, getWeaknessMap } from '../api/client';
+import { Plus, Clock, Flame, TrendingUp, Loader2, AlertTriangle, Timer } from 'lucide-react';
+import { getModules, getAnalyticsOverview, getWeaknessMap, getSessionEstimate, getRetentionForecast } from '../api/client';
 import CreateModuleModal from '../components/CreateModuleModal';
 
 function MasteryRing({ pct, size = 36 }: { pct: number; size?: number }) {
@@ -72,6 +72,16 @@ export default function Dashboard() {
   const { data: weaknessData } = useQuery({
     queryKey: ['weakness-map-spotlight'],
     queryFn: () => getWeaknessMap(),
+  });
+
+  const { data: sessionEstimate } = useQuery({
+    queryKey: ['session-estimate'],
+    queryFn: () => getSessionEstimate(),
+  });
+
+  const { data: retentionForecast } = useQuery({
+    queryKey: ['retention-forecast'],
+    queryFn: getRetentionForecast,
   });
 
   const kpiCardStyle: React.CSSProperties = {
@@ -216,6 +226,80 @@ export default function Dashboard() {
           </div>
         </div>
       ) : null}
+
+      {/* Session Estimator */}
+      {sessionEstimate && (
+        <div
+          style={{
+            background: 'rgba(255,248,240,0.04)',
+            border: '1px solid rgba(139,115,85,0.15)',
+            borderRadius: '12px',
+            backdropFilter: 'blur(20px)',
+            padding: '20px 24px',
+            marginBottom: 40,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+          }}
+        >
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 8,
+              background: 'rgba(196,149,106,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Timer style={{ width: 20, height: 20, color: '#c4956a' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <p
+              style={{
+                fontFamily: 'var(--sans)',
+                fontSize: 14,
+                fontWeight: 300,
+                color: 'var(--text)',
+                margin: 0,
+                lineHeight: 1.6,
+              }}
+            >
+              You have <strong style={{ fontWeight: 500 }}>{sessionEstimate.due_cards} due cards</strong>, estimated{' '}
+              <strong style={{ fontWeight: 500 }}>{sessionEstimate.estimated_minutes} minutes</strong> at your average pace of{' '}
+              {sessionEstimate.avg_seconds_per_card}s/card
+            </p>
+            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 400,
+                  color: 'var(--accent)',
+                  fontFamily: 'var(--sans)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {sessionEstimate.new_cards} new
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 300,
+                  color: 'var(--text-tertiary)',
+                  fontFamily: 'var(--sans)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {sessionEstimate.review_cards} review
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Module Grid heading */}
       <div style={{ marginBottom: 16 }}>
@@ -488,6 +572,118 @@ export default function Dashboard() {
           </div>
         );
       })()}
+
+      {/* Retention Forecast */}
+      {retentionForecast && retentionForecast.modules.length > 0 && (
+        <div style={{ marginTop: 40 }}>
+          <h2
+            style={{
+              fontFamily: 'var(--serif)',
+              fontSize: 20,
+              fontWeight: 400,
+              color: 'var(--text)',
+              margin: 0,
+              marginBottom: 16,
+            }}
+          >
+            Retention Forecast
+          </h2>
+          <div
+            style={{
+              background: 'rgba(255,248,240,0.04)',
+              border: '1px solid rgba(139,115,85,0.15)',
+              borderRadius: '12px',
+              backdropFilter: 'blur(20px)',
+              overflow: 'hidden',
+            }}
+          >
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(139,115,85,0.15)' }}>
+                  <th
+                    style={{
+                      textAlign: 'left',
+                      padding: '12px 16px',
+                      fontWeight: 300,
+                      color: 'var(--text-tertiary)',
+                      fontFamily: 'var(--sans)',
+                      fontSize: 11,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                    }}
+                  >
+                    Module
+                  </th>
+                  {[1, 3, 7, 14].map((d) => (
+                    <th
+                      key={d}
+                      style={{
+                        textAlign: 'center',
+                        padding: '12px 16px',
+                        fontWeight: 300,
+                        color: 'var(--text-tertiary)',
+                        fontFamily: 'var(--sans)',
+                        fontSize: 11,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                      }}
+                    >
+                      {d}d
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {retentionForecast.modules.map((mod) => (
+                  <tr key={mod.module_id} style={{ borderBottom: '1px solid rgba(139,115,85,0.08)' }}>
+                    <td
+                      style={{
+                        padding: '10px 16px',
+                        fontWeight: 400,
+                        color: 'var(--text)',
+                        fontFamily: 'var(--sans)',
+                      }}
+                    >
+                      {mod.module_name}
+                    </td>
+                    {[1, 3, 7, 14].map((d) => {
+                      const forecast = mod.forecasts.find((f) => f.days === d);
+                      const pct = forecast?.retention_pct ?? 0;
+                      const cellColor =
+                        pct >= 80
+                          ? 'rgba(120,180,120,0.85)'
+                          : pct >= 50
+                            ? '#c4956a'
+                            : 'rgba(220,120,100,0.8)';
+                      const cellBg =
+                        pct >= 80
+                          ? 'rgba(120,180,120,0.08)'
+                          : pct >= 50
+                            ? 'rgba(196,149,106,0.08)'
+                            : 'rgba(220,120,100,0.08)';
+                      return (
+                        <td
+                          key={d}
+                          style={{
+                            textAlign: 'center',
+                            padding: '10px 16px',
+                            fontWeight: 500,
+                            color: cellColor,
+                            background: cellBg,
+                            fontFamily: 'var(--sans)',
+                          }}
+                        >
+                          {Math.round(pct)}%
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <CreateModuleModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
