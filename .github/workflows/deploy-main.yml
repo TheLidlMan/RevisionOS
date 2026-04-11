@@ -63,6 +63,7 @@ jobs:
 
       - name: Validate required secrets (Railway)
         env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_ACCESS_TOKEN: ${{ secrets.RAILWAY_ACCESS_TOKEN }}
           RAILWAY_REFRESH_TOKEN: ${{ secrets.RAILWAY_REFRESH_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
@@ -70,8 +71,10 @@ jobs:
           RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME }}
         run: |
           test -n "$RAILWAY_PROJECT_ID" || (echo "Missing GitHub secret: RAILWAY_PROJECT_ID" && exit 1)
-          test -n "$RAILWAY_ACCESS_TOKEN" || (echo "Missing GitHub secret: RAILWAY_ACCESS_TOKEN" && exit 1)
-          test -n "$RAILWAY_REFRESH_TOKEN" || (echo "Missing GitHub secret: RAILWAY_REFRESH_TOKEN" && exit 1)
+          if [ -z "$RAILWAY_TOKEN" ] && { [ -z "$RAILWAY_ACCESS_TOKEN" ] || [ -z "$RAILWAY_REFRESH_TOKEN" ]; }; then
+            echo "Missing Railway auth. Set RAILWAY_TOKEN, or provide both RAILWAY_ACCESS_TOKEN and RAILWAY_REFRESH_TOKEN"
+            exit 1
+          fi
           if [ -z "$RAILWAY_SERVICE_ID" ] && [ -z "$RAILWAY_SERVICE_NAME" ]; then
             echo "Missing one of: RAILWAY_SERVICE_ID or RAILWAY_SERVICE_NAME"
             exit 1
@@ -82,9 +85,14 @@ jobs:
 
       - name: Configure Railway auth fallback
         env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_ACCESS_TOKEN: ${{ secrets.RAILWAY_ACCESS_TOKEN }}
           RAILWAY_REFRESH_TOKEN: ${{ secrets.RAILWAY_REFRESH_TOKEN }}
         run: |
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN provided; skipping config.json fallback"
+            exit 0
+          fi
           mkdir -p ~/.railway
           cat > ~/.railway/config.json <<EOF
           {
@@ -100,6 +108,7 @@ jobs:
 
       - name: Link Railway service
         env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME }}
@@ -111,6 +120,8 @@ jobs:
           railway link --project "$RAILWAY_PROJECT_ID" --environment production --service "$SERVICE_REF"
 
       - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: railway up --detach
 
   deploy_frontend:

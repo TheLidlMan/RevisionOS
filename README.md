@@ -164,7 +164,9 @@ Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repos
 | Secret | Description |
 |---|---|
 | `DATABASE_URL` | Production Postgres URL used for Alembic migrations |
-| `RAILWAY_TOKEN` | Railway API token |
+| `RAILWAY_TOKEN` | Railway API token used by the CLI in GitHub Actions. Recommended and preferred. |
+| `RAILWAY_ACCESS_TOKEN` | Optional fallback access token if you cannot use `RAILWAY_TOKEN` |
+| `RAILWAY_REFRESH_TOKEN` | Optional fallback refresh token paired with `RAILWAY_ACCESS_TOKEN` |
 | `RAILWAY_PROJECT_ID` | Railway project id |
 | `RAILWAY_SERVICE_ID` | Railway backend service id (recommended, avoids name ambiguity) |
 | `RAILWAY_SERVICE_NAME` | Railway backend service name (fallback if service id is not provided) |
