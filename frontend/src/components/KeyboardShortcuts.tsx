@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Keyboard, X } from 'lucide-react';
@@ -47,7 +47,7 @@ export default function KeyboardShortcuts() {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const [gPressed, setGPressed] = useState(false);
-  const gTimeoutRef = { current: null as ReturnType<typeof setTimeout> | null };
+  const gTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleClose = useCallback(() => setIsOpen(false), []);
 

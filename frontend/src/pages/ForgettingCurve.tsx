@@ -220,8 +220,8 @@ function CardBrowser() {
 
   const { data: cards, isLoading: cardsLoading } = useQuery<Flashcard[]>({
     queryKey: ['flashcards', moduleId],
-    queryFn: () => getFlashcards(moduleId ? { module_id: moduleId } : undefined),
-    enabled: true,
+    queryFn: () => getFlashcards({ module_id: moduleId }),
+    enabled: Boolean(moduleId),
   });
 
   const filteredCards = (cards || []).filter((c) => {

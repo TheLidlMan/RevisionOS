@@ -186,7 +186,7 @@ class ExamStartResponse(BaseModel):
     session_id: str
     module_id: str
     time_limit_minutes: int
-    num_questions: int
+    total_questions: int
     questions: list[ExamQuestionOut]
     started_at: datetime
 
@@ -205,17 +205,18 @@ class ExamResultItem(BaseModel):
     question_text: str
     correct_answer: str
     user_answer: str
-    was_correct: bool
+    is_correct: bool
     explanation: str = ""
 
 
 class ExamSubmitResponse(BaseModel):
     session_id: str
-    total_questions: int
+    total: int
     correct: int
     incorrect: int
     score_pct: float
-    results: list[ExamResultItem]
+    time_taken_seconds: int = 0
+    review: list[ExamResultItem]
 
 
 # ── Confidence Rating ────────────────────────────────────────────
@@ -239,6 +240,8 @@ class CalibrationPoint(BaseModel):
 
 class CalibrationResponse(BaseModel):
     calibration: list[CalibrationPoint]
+    overall_accuracy: float = 0.0
+    overconfidence_score: float = 0.0
 
 
 # ── Spaced Writing Practice ──────────────────────────────────────
@@ -319,12 +322,22 @@ class ReplayItem(BaseModel):
     time_taken: float
 
 
-class SessionReplayResponse(BaseModel):
-    session_id: str
+class ReplaySession(BaseModel):
+    id: str
     module_id: OptionalType[str] = None
+    module_name: OptionalType[str] = None
     session_type: str
     started_at: datetime
     ended_at: OptionalType[datetime] = None
+    total_items: int
+    correct: int
+    incorrect: int
+    skipped: int
+    score_pct: float
+
+
+class SessionReplayResponse(BaseModel):
+    session: ReplaySession
     items: list[ReplayItem]
 
 
@@ -433,10 +446,24 @@ def _validate_external_url(url: str) -> str:
 
     for _family, _type, _proto, _canonname, sockaddr in addr_infos:
         ip = ipaddress.ip_address(sockaddr[0])
-        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+        if not ip.is_global:
             raise HTTPException(status_code=400, detail="Requests to internal addresses are not allowed")
 
     return url
+
+
+def _scope_module_query(db: Session, module_id: str, user: OptionalType[User]):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        return query.filter(Module.user_id == user.id)
+    return query.filter(Module.user_id.is_(None))
+
+
+def _scope_session_query(db: Session, session_id: str, user: OptionalType[User]):
+    query = db.query(StudySession).filter(StudySession.id == session_id)
+    if user:
+        return query.filter(StudySession.user_id == user.id)
+    return query.filter(StudySession.user_id.is_(None))
 
 
 def _parse_tags_json(tags_str: OptionalType[str]) -> list[str]:
@@ -545,7 +572,7 @@ async def detect_gaps(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = _scope_module_query(db, module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     if not settings.GROQ_API_KEY:
@@ -879,7 +906,7 @@ def youtube_ingest(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    module = _scope_module_query(db, body.module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -921,11 +948,13 @@ async def clip_url(
     validated_url = _validate_external_url(body.url)
 
     try:
+        from urllib.parse import urljoin
+
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             resp = await client.get(validated_url)
             # If we get a redirect, validate the target too
             if resp.is_redirect and resp.has_redirect_location:
-                redirect_url = str(resp.headers.get("location", ""))
+                redirect_url = urljoin(validated_url, str(resp.headers.get("location", "")))
                 _validate_external_url(redirect_url)
                 resp = await client.get(redirect_url)
             resp.raise_for_status()
@@ -964,7 +993,7 @@ def exam_start(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    module = _scope_module_query(db, body.module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -1013,7 +1042,7 @@ def exam_start(
         session_id=session.id,
         module_id=body.module_id,
         time_limit_minutes=body.time_limit_minutes,
-        num_questions=len(questions),
+        total_questions=len(questions),
         questions=question_items,
         started_at=session.started_at,
     )
@@ -1026,7 +1055,7 @@ async def exam_submit(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
+    session = _scope_session_query(db, session_id, user).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.session_type != "TIMED_EXAM":
@@ -1036,7 +1065,14 @@ async def exam_submit(
     correct_count = 0
 
     for ans in body.answers:
-        question = db.query(QuizQuestion).filter(QuizQuestion.id == ans.question_id).first()
+        question = (
+            db.query(QuizQuestion)
+            .filter(
+                QuizQuestion.id == ans.question_id,
+                QuizQuestion.module_id == session.module_id,
+            )
+            .first()
+        )
         if not question:
             continue
 
@@ -1087,7 +1123,7 @@ async def exam_submit(
                 question_text=question.question_text,
                 correct_answer=question.correct_answer,
                 user_answer=ans.user_answer,
-                was_correct=was_correct,
+                is_correct=was_correct,
                 explanation=question.explanation or "",
             )
         )
@@ -1099,17 +1135,21 @@ async def exam_submit(
     session.ended_at = datetime.utcnow()
     session.correct = correct_count
     session.incorrect = incorrect_count
+    session.total_items = total
     session.score_pct = score_pct
 
     db.commit()
 
+    time_taken_seconds = max(int((session.ended_at - session.started_at).total_seconds()), 0)
+
     return ExamSubmitResponse(
         session_id=session.id,
-        total_questions=total,
+        total=total,
         correct=correct_count,
         incorrect=incorrect_count,
         score_pct=score_pct,
-        results=results,
+        time_taken_seconds=time_taken_seconds,
+        review=results,
     )
 
 
@@ -1223,7 +1263,23 @@ def calibration(
             )
         )
 
-    return CalibrationResponse(calibration=calibration_data)
+    total_count = sum(point.count for point in calibration_data)
+    overall_accuracy = (
+        sum(point.actual_pct * point.count for point in calibration_data) / total_count
+        if total_count
+        else 0.0
+    )
+    overconfidence_score = (
+        sum((point.predicted_pct - point.actual_pct) * point.count for point in calibration_data) / total_count
+        if total_count
+        else 0.0
+    )
+
+    return CalibrationResponse(
+        calibration=calibration_data,
+        overall_accuracy=round(overall_accuracy, 1),
+        overconfidence_score=round(overconfidence_score, 1),
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1473,7 +1529,7 @@ def session_replay(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
+    session = _scope_session_query(db, session_id, user).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -1517,12 +1573,31 @@ def session_replay(
             )
         )
 
+    module_name = None
+    if session.module_id:
+        module_query = db.query(Module).filter(Module.id == session.module_id)
+        if user:
+            module_query = module_query.filter(Module.user_id == user.id)
+        else:
+            module_query = module_query.filter(Module.user_id.is_(None))
+        module = module_query.first()
+        if module:
+            module_name = module.name
+
     return SessionReplayResponse(
-        session_id=session.id,
-        module_id=session.module_id,
-        session_type=session.session_type,
-        started_at=session.started_at,
-        ended_at=session.ended_at,
+        session=ReplaySession(
+            id=session.id,
+            module_id=session.module_id,
+            module_name=module_name,
+            session_type=session.session_type,
+            started_at=session.started_at,
+            ended_at=session.ended_at,
+            total_items=session.total_items,
+            correct=session.correct,
+            incorrect=session.incorrect,
+            skipped=session.skipped,
+            score_pct=session.score_pct,
+        ),
         items=items,
     )
 
@@ -1542,6 +1617,7 @@ def mastery_heatmap(
 
     log_query = db.query(ReviewLog).filter(
         ReviewLog.answered_at >= datetime.combine(start_date, datetime.min.time()),
+        ~ReviewLog.rating.like("CONFIDENCE:%"),
     )
     if user:
         log_query = log_query.filter(ReviewLog.user_id == user.id)
