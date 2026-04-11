@@ -114,7 +114,7 @@ jobs:
           if [ -n "$RAILWAY_TOKEN" ]; then
             if railway whoami --json >/dev/null 2>&1; then
               echo "Using RAILWAY_TOKEN for Railway auth"
-              echo "RAILWAY_TOKEN=$RAILWAY_TOKEN" >> "$GITHUB_ENV"
+              echo "RAILWAY_AUTH_MODE=token" >> "$GITHUB_ENV"
               exit 0
             fi
             echo "RAILWAY_TOKEN auth failed; trying access/refresh fallback if configured"
@@ -127,7 +127,7 @@ jobs:
               exit 1
             }
             echo "Using Railway access/refresh fallback auth"
-            echo "RAILWAY_TOKEN=" >> "$GITHUB_ENV"
+            echo "RAILWAY_AUTH_MODE=fallback" >> "$GITHUB_ENV"
             exit 0
           fi
 
@@ -136,10 +136,16 @@ jobs:
 
       - name: Deploy to Railway
         env:
+          RAILWAY_TOKEN_SECRET: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_SERVICE_NAME: ${{ secrets.RAILWAY_SERVICE_NAME }}
         run: |
+          if [ "$RAILWAY_AUTH_MODE" = "token" ]; then
+            export RAILWAY_TOKEN="$RAILWAY_TOKEN_SECRET"
+          else
+            unset RAILWAY_TOKEN
+          fi
           SERVICE_REF="$RAILWAY_SERVICE_ID"
           if [ -z "$SERVICE_REF" ]; then
             SERVICE_REF="$RAILWAY_SERVICE_NAME"
