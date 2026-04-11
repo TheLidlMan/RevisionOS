@@ -133,7 +133,7 @@ def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
 
     anki_model = genanki.Model(
         model_id,
-        f"RevisionOS - {module.name}",
+        f"Revise OS - {module.name}",
         fields=[
             {"name": "Front"},
             {"name": "Back"},
@@ -147,7 +147,7 @@ def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
         ],
     )
 
-    deck = genanki.Deck(deck_id, f"RevisionOS::{module.name}")
+    deck = genanki.Deck(deck_id, f"Revise OS::{module.name}")
 
     for card in flashcards:
         note = genanki.Note(

@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Moon, Sun } from '@phosphor-icons/react';
 
+const THEME_KEY = 'reviseos_theme';
+const LEGACY_THEME_KEY = 'revisionos_theme';
+
 export default function ThemeToggle() {
   const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem('revisionos_theme');
+    const saved = localStorage.getItem(THEME_KEY) || localStorage.getItem(LEGACY_THEME_KEY);
     return saved ? saved === 'dark' : true;
   });
 
   useEffect(() => {
     document.body.classList.toggle('theme-light', !dark);
-    localStorage.setItem('revisionos_theme', dark ? 'dark' : 'light');
+    localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
   }, [dark]);
 
   return (

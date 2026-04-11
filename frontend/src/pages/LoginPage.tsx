@@ -76,7 +76,7 @@ export default function LoginPage() {
             className="text-3xl"
             style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 700 }}
           >
-            RevisionOS
+            Revise OS
           </h1>
           <p className="mt-1" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>
             AI-Powered Adaptive Study Platform

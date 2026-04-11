@@ -5,11 +5,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 interface Props { open: boolean; onClose: () => void; }
 
 const glass = { background: 'rgba(255,248,240,0.06)', border: '1px solid rgba(139,115,85,0.2)', borderRadius: '16px', backdropFilter: 'blur(24px)' } as const;
+const NOTES_KEY = 'reviseos_notes';
+const LEGACY_NOTES_KEY = 'revisionos_notes';
 
 export default function QuickNotes({ open, onClose }: Props) {
-  const [text, setText] = useState(() => localStorage.getItem('revisionos_notes') || '');
+  const [text, setText] = useState(() => localStorage.getItem(NOTES_KEY) || localStorage.getItem(LEGACY_NOTES_KEY) || '');
 
-  useEffect(() => { localStorage.setItem('revisionos_notes', text); }, [text]);
+  useEffect(() => { localStorage.setItem(NOTES_KEY, text); }, [text]);
 
   return (
     <AnimatePresence>

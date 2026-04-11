@@ -1,5 +1,5 @@
 # Product Requirements Document
-# RevisionOS — AI-Powered Adaptive Study Platform
+# Revise OS — AI-Powered Adaptive Study Platform
 **Version:** 1.0  
 **Author:** Sam (via Perplexity)  
 **Date:** April 2026  
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary
 
-RevisionOS is a locally-runnable, full-stack web application that transforms folders of lecture transcripts, PDFs, and slides into an intelligent, adaptive revision engine. It ingests study materials organised by module, generates flashcards and quizzes using AI, tracks per-question mastery with the FSRS spaced repetition algorithm, and only surfaces material the user has not yet mastered. All AI features run through the Groq API (Llama 4 Scout by default — 10M token context window), enabling entire modules to be processed in a single prompt without chunking loss.
+Revise OS is a locally-runnable, full-stack web application that transforms folders of lecture transcripts, PDFs, and slides into an intelligent, adaptive revision engine. It ingests study materials organised by module, generates flashcards and quizzes using AI, tracks per-question mastery with the FSRS spaced repetition algorithm, and only surfaces material the user has not yet mastered. All AI features run through the Groq API (Llama 4 Scout by default — 10M token context window), enabling entire modules to be processed in a single prompt without chunking loss.
 
 ---
 
@@ -738,4 +738,4 @@ The build is complete when Sam can:
 
 ---
 
-*End of PRD — RevisionOS v1.0*
+*End of PRD — Revise OS v1.0*

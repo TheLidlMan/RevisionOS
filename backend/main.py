@@ -13,7 +13,7 @@ from routers import weakness_map, knowledge_graph, search as search_router, curr
 from routers import social, integrations, collaboration, features
 
 app = FastAPI(
-    title="RevisionOS API",
+    title="Revise OS API",
     description="AI-Powered Adaptive Study Platform Backend",
     version="1.0.0",
 )
@@ -56,7 +56,7 @@ def on_startup():
 
 @app.get("/")
 def root():
-    return {"name": "RevisionOS API", "version": "1.0.0", "status": "running"}
+    return {"name": "Revise OS API", "version": "1.0.0", "status": "running"}
 
 
 @app.get("/api/health")

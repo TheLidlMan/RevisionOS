@@ -1,5 +1,5 @@
 """
-Advanced feature endpoints for RevisionOS.
+Advanced feature endpoints for Revise OS.
 
 Covers: forgetting-curve visualisation, session estimation, concept gap detection,
 cross-module synthesis cards, elaboration prompts, free recall, YouTube ingest,

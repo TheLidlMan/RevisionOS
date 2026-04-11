@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = (
         "http://localhost:5173,"
         "http://127.0.0.1:5173,"
-        "https://revisionos-frontend.pages.dev"
+        "https://revisionos-frontend.pages.dev,"
+        "https://reviseos.co.uk"
     )
     CORS_ORIGIN_REGEX: str = r"https://([A-Za-z0-9-]+\.)?revisionos-frontend\.pages\.dev"
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"

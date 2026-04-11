@@ -1,6 +1,6 @@
-# RevisionOS — AI-Powered Adaptive Study Platform
+# Revise OS — AI-Powered Adaptive Study Platform
 
-RevisionOS transforms folders of lecture transcripts, PDFs, and slides into an intelligent, adaptive revision engine. It ingests study materials organised by module, generates flashcards and quizzes using AI, tracks per-question mastery with the FSRS spaced repetition algorithm, and only surfaces material you haven't yet mastered.
+Revise OS transforms folders of lecture transcripts, PDFs, and slides into an intelligent, adaptive revision engine. It ingests study materials organised by module, generates flashcards and quizzes using AI, tracks per-question mastery with the FSRS spaced repetition algorithm, and only surfaces material you haven't yet mastered.
 
 ## Features
 
@@ -111,7 +111,7 @@ Once the backend is running, visit **http://localhost:8000/docs** for the intera
 ## Project Structure
 
 ```
-RevisionOS/
+ReviseOS/
 ├── backend/
 │   ├── main.py              # FastAPI app entry
 │   ├── config.py            # Settings & env vars
@@ -141,7 +141,7 @@ RevisionOS/
 |----------|---------|-------------|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
-| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,https://revisionos-frontend.pages.dev` | Comma-separated allowed frontend origins |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,https://revisionos-frontend.pages.dev,https://reviseos.co.uk` | Comma-separated allowed frontend origins |
 | `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?revisionos-frontend\.pages\.dev` | Optional regex for Cloudflare Pages preview URLs |
 | `LLM_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Primary LLM model |
 | `UPLOAD_DIR` | `./uploads` | File upload directory |
@@ -156,9 +156,10 @@ This repository includes a GitHub Actions workflow at `.github/workflows/deploy-
 
 On every push to `main`, it will:
 1. Run Alembic migrations against your production Supabase/Postgres database.
-2. Build and deploy the frontend to Cloudflare Pages.
 
 Backend deploys are handled directly by Railway from the connected GitHub repository, so the GitHub Action no longer deploys the backend service.
+
+Frontend deploys should also be handled directly by Cloudflare Pages via GitHub integration (build on push), so the GitHub Action no longer deploys the frontend.
 
 For Railway direct GitHub deploys, the repository root includes a production Dockerfile that builds the backend from `backend/`, so the Railway service can continue watching `main` without needing a separate GitHub Action deploy step.
 
@@ -169,12 +170,17 @@ Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repos
 | Secret | Description |
 |---|---|
 | `DATABASE_URL` | Production Postgres URL used for Alembic migrations |
-| `VITE_API_BASE_URL` | Public backend API base URL for frontend builds (e.g. `https://revisionos-api-production.up.railway.app/api`) |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Pages deploy permissions |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
-| `CLOUDFLARE_PAGES_PROJECT` | Cloudflare Pages project name (e.g. `revisionos-frontend`) |
 
-After these secrets are set, every push to `main` will automatically update production.
+### Cloudflare Pages Direct GitHub Deploy
+
+Connect your frontend repo to Cloudflare Pages and set:
+1. Production branch: `main`
+2. Root directory: `frontend`
+3. Build command: `npm run build`
+4. Build output directory: `dist`
+5. Environment variable: `VITE_API_BASE_URL` = your Railway backend URL (for example `https://revisionos-api-production.up.railway.app/api`)
+
+After `DATABASE_URL` is set in GitHub Actions and Cloudflare Pages is connected to this repo, pushes to `main` will run DB migrations and trigger frontend deploys automatically.
 
 ## License
 

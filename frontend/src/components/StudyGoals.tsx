@@ -5,14 +5,17 @@ const glass = { background: 'rgba(255,248,240,0.04)', border: '1px solid rgba(13
 
 interface GoalData { target: number; completed: number; }
 
+const GOALS_KEY = 'reviseos_goals';
+const LEGACY_GOALS_KEY = 'revisionos_goals';
+
 export default function StudyGoals() {
   const [goal, setGoal] = useState<GoalData>(() => {
-    try { const s = localStorage.getItem('revisionos_goals'); return s ? JSON.parse(s) : { target: 20, completed: 0 }; } catch { return { target: 20, completed: 0 }; }
+    try { const s = localStorage.getItem(GOALS_KEY) || localStorage.getItem(LEGACY_GOALS_KEY); return s ? JSON.parse(s) : { target: 20, completed: 0 }; } catch { return { target: 20, completed: 0 }; }
   });
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(goal.target);
 
-  useEffect(() => { localStorage.setItem('revisionos_goals', JSON.stringify(goal)); }, [goal]);
+  useEffect(() => { localStorage.setItem(GOALS_KEY, JSON.stringify(goal)); }, [goal]);
 
   const pct = Math.min(100, Math.round((goal.completed / goal.target) * 100));
   const r = 28, c = 2 * Math.PI * r;

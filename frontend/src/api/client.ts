@@ -48,6 +48,9 @@ import type {
   MasteryHeatmapData,
 } from '../types';
 
+const AUTH_TOKEN_KEY = 'reviseos_token';
+const LEGACY_AUTH_TOKEN_KEY = 'revisionos_token';
+
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
   headers: { 'Content-Type': 'application/json' },
@@ -67,7 +70,7 @@ const runSearch = (
 
 // Auth interceptor
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('revisionos_token');
+  const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

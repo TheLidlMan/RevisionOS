@@ -149,7 +149,7 @@ export default function Dashboard() {
         <div className="p-10 text-center" style={glass}>
           <p style={{ color: 'var(--text)', fontSize: '1rem', marginBottom: 8 }}>No modules yet.</p>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 20 }}>
-            Start with one module, add the source material, and RevisionOS will build the study flow from there.
+            Start with one module, add the source material, and Revise OS will build the study flow from there.
           </p>
           <button type="button" className="scholar-btn" onClick={() => setShowCreate(true)}>
             <FolderSimplePlus size={18} />

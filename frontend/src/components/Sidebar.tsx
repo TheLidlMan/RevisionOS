@@ -53,7 +53,7 @@ export default function Sidebar() {
           <GraduationCap size={28} weight="duotone" style={{ color: 'var(--accent)', flexShrink: 0 }} />
           {sidebarOpen && (
             <div className="min-w-0">
-              <p style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem' }}>RevisionOS</p>
+              <p style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem' }}>Revise OS</p>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Module-first revision</p>
             </div>
           )}
