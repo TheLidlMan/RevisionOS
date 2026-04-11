@@ -51,7 +51,35 @@ import type {
 
 const AUTH_TOKEN_KEY = 'reviseos_token';
 const LEGACY_AUTH_TOKEN_KEY = 'revisionos_token';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+
+const normalizeApiBaseUrl = (rawBaseUrl?: string) => {
+  const fallbackBaseUrl = '/api';
+  const baseUrl = rawBaseUrl?.trim();
+
+  if (!baseUrl) {
+    return fallbackBaseUrl;
+  }
+
+  if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
+    const url = new URL(baseUrl);
+    const pathname = url.pathname.replace(/\/+$/, '');
+
+    if (!pathname || pathname === '/') {
+      url.pathname = '/api';
+    } else if (!pathname.endsWith('/api')) {
+      url.pathname = `${pathname}/api`.replace(/\/+/g, '/');
+    } else {
+      url.pathname = pathname;
+    }
+
+    return url.toString().replace(/\/$/, '');
+  }
+
+  const normalizedBaseUrl = baseUrl.startsWith('/') ? baseUrl : `/${baseUrl}`;
+  return normalizedBaseUrl.replace(/\/$/, '');
+};
+
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 
 const client = axios.create({
   baseURL: API_BASE_URL,
@@ -154,6 +182,7 @@ const streamJson = async <T>(
   const token = getAuthToken();
   const response = await fetch(getApiUrl(path), {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -171,6 +200,7 @@ const streamFormData = async <T>(
   const token = getAuthToken();
   const response = await fetch(getApiUrl(path), {
     method: 'POST',
+    credentials: 'include',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: form,
   });
