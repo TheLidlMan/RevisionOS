@@ -1,16 +1,22 @@
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+
 from config import settings
 from database import get_db
 from models.user import User
+from models.auth_session import AuthSession
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+SESSION_COOKIE_NAME = "reviseos_session"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -42,8 +48,95 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)
 
 
-def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Optional[User]:
-    """Get current user from JWT token. Returns None only when no token is provided."""
+# --------------- Session helpers ---------------
+
+def _hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def create_session(db: Session, user: User, request: Optional[Request] = None) -> str:
+    """Create a new auth session and return the raw session token."""
+    raw_token = secrets.token_urlsafe(48)
+    session = AuthSession(
+        user_id=user.id,
+        token_hash=_hash_token(raw_token),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.SESSION_MAX_AGE_DAYS),
+        ip_address=request.client.host if request and request.client else None,
+        user_agent=(request.headers.get("user-agent", "")[:512]) if request else None,
+    )
+    db.add(session)
+
+    # Update last_login_at
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+    return raw_token
+
+
+def revoke_session(db: Session, raw_token: str) -> bool:
+    """Revoke a session by its raw token. Returns True if found."""
+    session = db.query(AuthSession).filter(
+        AuthSession.token_hash == _hash_token(raw_token),
+        AuthSession.revoked.is_(False),
+    ).first()
+    if session:
+        session.revoked = True
+        db.commit()
+        return True
+    return False
+
+
+def get_user_from_session_token(db: Session, raw_token: str) -> Optional[User]:
+    """Look up a valid (non-revoked, non-expired) session and return its user."""
+    session = db.query(AuthSession).filter(
+        AuthSession.token_hash == _hash_token(raw_token),
+        AuthSession.revoked.is_(False),
+        AuthSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if not session:
+        return None
+    return db.query(User).filter(User.id == session.user_id, User.is_active.is_(True)).first()
+
+
+# --------------- Allowed redirect origins ---------------
+
+ALLOWED_REDIRECT_PREFIXES = [
+    settings.PUBLIC_APP_URL,
+    settings.PUBLIC_LOGIN_URL,
+    settings.PUBLIC_MARKETING_URL,
+]
+
+
+def validate_return_to(url: Optional[str]) -> Optional[str]:
+    """Return *url* only if it starts with one of the approved prefixes."""
+    if not url:
+        return None
+    for prefix in ALLOWED_REDIRECT_PREFIXES:
+        if url.startswith(prefix):
+            return url
+    return None
+
+
+# --------------- FastAPI dependencies ---------------
+
+def get_current_user(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Resolve the current user.
+
+    Priority:
+    1. Session cookie (``reviseos_session``)
+    2. Bearer token (backward-compatible fallback)
+    """
+    # 1. Try session cookie
+    session_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_token:
+        user = get_user_from_session_token(db, session_token)
+        if user:
+            return user
+
+    # 2. Fallback to Bearer JWT
     if not token:
         return None
     try:

@@ -261,6 +261,11 @@ export interface Settings {
   groq_api_key: string;
   llm_model: string;
   llm_fallback_model: string;
+  llm_temperature: number;
+  llm_top_p: number;
+  llm_max_completion_tokens: number;
+  llm_json_mode_enabled: boolean;
+  llm_streaming_enabled: boolean;
   daily_new_cards_limit: number;
   cards_per_document: number;
   questions_per_document: number;
@@ -273,12 +278,30 @@ export interface SettingsUpdate {
   groq_api_key?: string;
   llm_model?: string;
   llm_fallback_model?: string;
+  llm_temperature?: number;
+  llm_top_p?: number;
+  llm_max_completion_tokens?: number;
+  llm_json_mode_enabled?: boolean;
+  llm_streaming_enabled?: boolean;
   daily_new_cards_limit?: number;
   cards_per_document?: number;
   questions_per_document?: number;
   weakness_threshold?: number;
   desired_retention?: number;
   theme?: string;
+}
+
+export interface AIStreamEvent<T = unknown> {
+  event: 'status' | 'delta' | 'partial' | 'final' | 'error';
+  kind?: string;
+  message?: string;
+  stage?: string;
+  delta?: string;
+  data?: unknown;
+  result?: T;
+  completed?: number;
+  total?: number;
+  document?: Partial<Document>;
 }
 
 // ---- Phase 2: Weakness Map & Analytics ----
@@ -416,6 +439,8 @@ export interface AuthUser {
   id: string;
   email: string;
   display_name: string;
+  avatar_url?: string;
+  auth_provider?: string;
   created_at: string;
 }
 
@@ -423,9 +448,11 @@ export interface AuthState {
   token: string | null;
   user: AuthUser | null;
   isAuthenticated: boolean;
+  loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  checkSession: () => Promise<void>;
   loadFromStorage: () => void;
 }
 

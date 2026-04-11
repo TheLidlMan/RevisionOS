@@ -8,7 +8,7 @@ import {
   WarningCircle,
   X,
 } from '@phosphor-icons/react';
-import { uploadDocument } from '../api/client';
+import { uploadDocument, uploadDocumentStream } from '../api/client';
 import type { Document } from '../types';
 
 const glass = {
@@ -21,9 +21,11 @@ const glass = {
 
 export interface UploadItem {
   file: File;
-  status: 'pending' | 'uploading' | 'queued' | 'error';
+  status: 'pending' | 'uploading' | 'processing' | 'done' | 'error';
   result?: Document;
   error?: string;
+  stage?: string;
+  progressText?: string;
 }
 
 interface UploadPaneProps {
@@ -41,11 +43,47 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
   const uploadMutation = useMutation({
     mutationFn: ({ file, idx }: { file: File; idx: number }) => {
       setUploads((current) => current.map((item, itemIdx) => (itemIdx === idx ? { ...item, status: 'uploading' } : item)));
-      return uploadDocument(moduleId, file);
+      return uploadDocumentStream(moduleId, file, (event) => {
+        setUploads((current) =>
+          current.map((item, itemIdx) => {
+            if (itemIdx !== idx) {
+              return item;
+            }
+            if (event.event === 'status') {
+              const nextStatus = event.stage === 'uploaded' ? 'uploading' : 'processing';
+              return {
+                ...item,
+                status: nextStatus,
+                stage: event.stage,
+                progressText: event.message || event.stage || 'Processing',
+              };
+            }
+            if (event.event === 'partial') {
+              return {
+                ...item,
+                status: 'processing',
+                stage: event.stage,
+                progressText: event.stage === 'summarizing' ? 'Summary ready' : event.stage || 'Processing',
+              };
+            }
+            return item;
+          }),
+        );
+      }).catch(async () => uploadDocument(moduleId, file));
     },
     onSuccess: (result, { idx }) => {
       setUploads((current) =>
-        current.map((item, itemIdx) => (itemIdx === idx ? { ...item, status: 'queued', result } : item)),
+        current.map((item, itemIdx) => (
+          itemIdx === idx
+            ? {
+                ...item,
+                status: result.processing_status === 'done' ? 'done' : 'processing',
+                stage: result.processing_status === 'done' ? 'ready' : 'queued',
+                progressText: result.processing_status === 'done' ? 'Ready' : 'Queued for backend processing',
+                result,
+              }
+            : item
+        )),
       );
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       queryClient.invalidateQueries({ queryKey: ['module', moduleId] });
@@ -76,8 +114,9 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
 
   const counts = useMemo(
     () => ({
-      queued: uploads.filter((item) => item.status === 'queued').length,
+      done: uploads.filter((item) => item.status === 'done').length,
       uploading: uploads.filter((item) => item.status === 'uploading').length,
+      processing: uploads.filter((item) => item.status === 'processing').length,
     }),
     [uploads],
   );
@@ -136,7 +175,8 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
 
       <div className="mt-4 flex items-center gap-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
         <span>{counts.uploading} uploading</span>
-        <span>{counts.queued} queued for backend processing</span>
+        <span>{counts.processing} processing</span>
+        <span>{counts.done} ready</span>
       </div>
 
       {uploads.length > 0 && (
@@ -153,10 +193,19 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
                 </p>
               </div>
               {item.status === 'uploading' && <SpinnerGap size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />}
-              {item.status === 'queued' && <CheckCircle size={18} weight="fill" style={{ color: 'var(--success)' }} />}
+              {item.status === 'done' && <CheckCircle size={18} weight="fill" style={{ color: 'var(--success)' }} />}
+              {item.status === 'processing' && <SpinnerGap size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />}
               {item.status === 'error' && <WarningCircle size={18} weight="fill" style={{ color: 'var(--danger)' }} />}
               <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-                {item.status === 'queued' ? 'Queued' : item.status === 'uploading' ? 'Uploading' : item.status === 'error' ? 'Failed' : 'Pending'}
+                {item.status === 'done'
+                  ? 'Ready'
+                  : item.status === 'processing'
+                    ? item.progressText || 'Processing'
+                    : item.status === 'uploading'
+                      ? 'Uploading'
+                      : item.status === 'error'
+                        ? 'Failed'
+                        : 'Pending'}
               </span>
             </div>
           ))}

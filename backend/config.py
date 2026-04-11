@@ -11,6 +11,11 @@ PERSISTED_SETTINGS_MAP = {
     "groq_api_key": "GROQ_API_KEY",
     "llm_model": "LLM_MODEL",
     "llm_fallback_model": "LLM_FALLBACK_MODEL",
+    "llm_temperature": "LLM_TEMPERATURE",
+    "llm_top_p": "LLM_TOP_P",
+    "llm_max_completion_tokens": "LLM_MAX_COMPLETION_TOKENS",
+    "llm_json_mode_enabled": "LLM_JSON_MODE_ENABLED",
+    "llm_streaming_enabled": "LLM_STREAMING_ENABLED",
     "daily_new_cards_limit": "DAILY_NEW_CARDS_LIMIT",
     "cards_per_document": "CARDS_PER_DOCUMENT",
     "questions_per_document": "QUESTIONS_PER_DOCUMENT",
@@ -25,13 +30,23 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./revisionos.db"
     CORS_ORIGINS: str = (
         "http://localhost:5173,"
+        "http://localhost:5174,"
         "http://127.0.0.1:5173,"
+        "http://127.0.0.1:5174,"
         "https://revisionos-frontend.pages.dev,"
-        "https://reviseos.co.uk"
+        "https://reviseos.co.uk,"
+        "https://login.reviseos.co.uk,"
+        "https://app.reviseos.co.uk,"
+        "https://api.reviseos.co.uk"
     )
-    CORS_ORIGIN_REGEX: str = r"https://([A-Za-z0-9-]+\.)?revisionos-frontend\.pages\.dev"
+    CORS_ORIGIN_REGEX: str = r"https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)"
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
+    LLM_TEMPERATURE: float = 0.1
+    LLM_TOP_P: float = 1.0
+    LLM_MAX_COMPLETION_TOKENS: int = 4096
+    LLM_JSON_MODE_ENABLED: bool = True
+    LLM_STREAMING_ENABLED: bool = True
     MAX_CONTEXT_TOKENS: int = 800000
     MAX_PROMPT_CHARS: int = 120000
     UPLOAD_DIR: str = "./uploads"
@@ -42,6 +57,22 @@ class Settings(BaseSettings):
     MAX_QUESTIONS_PER_REQUEST: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
+
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "https://api.reviseos.co.uk/api/auth/google/callback"
+
+    # Public URLs
+    PUBLIC_APP_URL: str = "https://app.reviseos.co.uk"
+    PUBLIC_LOGIN_URL: str = "https://login.reviseos.co.uk"
+    PUBLIC_MARKETING_URL: str = "https://reviseos.co.uk"
+    PUBLIC_API_URL: str = "https://api.reviseos.co.uk"
+
+    # Session cookies
+    SESSION_COOKIE_DOMAIN: str = ".reviseos.co.uk"
+    SESSION_COOKIE_SECURE: bool = True
+    SESSION_MAX_AGE_DAYS: int = 7
 
     model_config = {
         "env_file": ".env",
@@ -97,6 +128,26 @@ def reload_runtime_settings() -> None:
             except (TypeError, ValueError):
                 logger.warning("Ignoring invalid persisted questions_per_document value: %r", value)
                 continue
+
+        if attr_name == "LLM_MAX_COMPLETION_TOKENS":
+            try:
+                value = max(1, int(value))
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid persisted llm_max_completion_tokens value: %r", value)
+                continue
+
+        if attr_name in {"LLM_TEMPERATURE", "LLM_TOP_P"}:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid persisted %s value: %r", attr_name, value)
+                continue
+
+        if attr_name in {"LLM_JSON_MODE_ENABLED", "LLM_STREAMING_ENABLED"}:
+            if isinstance(value, str):
+                value = value.strip().lower() in {"1", "true", "yes", "on"}
+            else:
+                value = bool(value)
 
         setattr(settings, attr_name, value)
 

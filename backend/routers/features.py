@@ -17,6 +17,7 @@ from typing import Optional as OptionalType
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -37,6 +38,37 @@ from services.auth_service import get_current_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["features"])
+
+
+def _json_response_format() -> OptionalType[dict[str, str]]:
+    return ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None
+
+
+def _stream_ai_route(
+    messages: list[dict[str, str]],
+    *,
+    kind: str,
+    expected_payload_key: OptionalType[str],
+    max_completion_tokens: int,
+    final_mapper,
+) -> StreamingResponse:
+    async def event_stream():
+        try:
+            async for event in ai_service.stream_groq_completion(
+                messages,
+                kind=kind,
+                max_completion_tokens=max_completion_tokens,
+                response_format=_json_response_format(),
+                expected_payload_key=expected_payload_key,
+            ):
+                if event.get("event") == "final":
+                    envelope = event.get("envelope", {})
+                    event["result"] = final_mapper(envelope)
+                yield ai_service.encode_sse_event(event)
+        except Exception:
+            return
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -391,6 +423,133 @@ class ImageOcclusionResponse(BaseModel):
 # ║                         HELPERS                                ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
+def _concept_gap_messages(existing_concepts: list[str], all_text: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert educational analyst. Identify concepts that are "
+                "mentioned in the source text but never fully defined or explained."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Existing concepts already tracked: {json.dumps(existing_concepts)}\n\n"
+                "Analyze the text and find concept gaps: terms, theories, or ideas that are referenced "
+                "but lack a clear definition in the material.\n\n"
+                "Return a JSON object with a `gaps` array.\n"
+                "Each gap must include `name`, `context_snippet`, `mentioned_in_documents`, and `has_definition`.\n\n"
+                f"Text:\n{all_text}"
+            ),
+        },
+    ]
+
+
+def _synthesis_card_messages(num_cards: int, concept_summary: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You create cross-disciplinary study flashcards that connect concepts from different modules."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Create {num_cards} synthesis flashcards connecting concepts across these modules:\n\n"
+                f"{concept_summary}\n\n"
+                "Return a JSON object with a `cards` array. Each card must include `front`, `back`, and `tags`, "
+                "and every card should require understanding from at least two modules."
+            ),
+        },
+    ]
+
+
+def _elaboration_messages(card: Flashcard) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You generate follow-up elaboration questions that force the learner to apply a concept in new contexts."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Flashcard front: {card.front}\n"
+                f"Flashcard back: {card.back}\n\n"
+                "Generate 2-3 follow-up questions that test deeper understanding or application of this concept.\n"
+                "Return a JSON object with a `questions` array.\n"
+                "Each question item must include `question` and `hint`."
+            ),
+        },
+    ]
+
+
+def _free_recall_messages(topic: str, concept_list: str, source_material: str, user_text: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You evaluate a student's free-recall attempt against source material and return fair, actionable scoring."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Topic: {topic}\n\n"
+                f"Key concepts in the module:\n{concept_list}\n\n"
+                f"Source material (excerpt):\n{source_material[:8000]}\n\n"
+                f"Student's recall attempt:\n{user_text}\n\n"
+                "Return a JSON object with `score_pct`, `total_concepts`, `recalled_concepts`, `missed_concepts`, and `feedback`.\n"
+                "`missed_concepts` must be an array of objects containing `name` and `definition`."
+            ),
+        },
+    ]
+
+
+def _writing_prompt_messages(module_name: str, material: str, doc_excerpt: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are an academic examiner generating one strong essay question and a clear mark scheme."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Module: {module_name}\n\n"
+                f"Key concepts:\n{material}\n\n"
+                f"Source text excerpt:\n{doc_excerpt}\n\n"
+                "Return a JSON object with `question`, `mark_scheme`, `time_limit_minutes`, and `max_marks`."
+            ),
+        },
+    ]
+
+
+def _writing_grade_messages(question: str, mark_scheme: str, user_response: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are an academic examiner grading an essay with paragraph-level feedback and an overall score."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Question: {question}\n\n"
+                f"Mark Scheme:\n{mark_scheme}\n\n"
+                f"Student Response:\n{user_response}\n\n"
+                "Return a JSON object with `score`, `max_marks`, `overall_feedback`, and `paragraph_feedback`.\n"
+                "Each `paragraph_feedback` item must include `paragraph_idx`, `feedback`, and `marks`."
+            ),
+        },
+    ]
+
+
 def _fsrs_retention(stability: float, days: float) -> float:
     """FSRS power-decay formula: R(t) = (1 + t/(9*S))^(-1)."""
     if stability <= 0:
@@ -596,32 +755,16 @@ async def detect_gaps(
         for c in db.query(Concept).filter(Concept.module_id == module_id).all()
     ]
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an expert educational analyst. Identify concepts that are "
-                "mentioned in the source text but never fully defined or explained. "
-                "Return ONLY valid JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Existing concepts already tracked: {json.dumps(existing_concepts)}\n\n"
-                "Analyze the following text and find concept gaps — terms, theories, "
-                "or ideas that are referenced but lack a clear definition in the material.\n\n"
-                "Return JSON: {\"gaps\": [{\"name\": \"...\", \"context_snippet\": \"...\", "
-                "\"mentioned_in_documents\": <int>, \"has_definition\": false}]}\n\n"
-                f"Text:\n{all_text}"
-            ),
-        },
-    ]
-
-    response_text = await ai_service._call_groq(messages, max_tokens=2048)
+    messages = _concept_gap_messages(existing_concepts, all_text)
     try:
-        parsed = ai_service._parse_json_response(response_text)
-        gaps_raw = parsed.get("gaps", []) if isinstance(parsed, dict) else parsed
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="concept_gaps",
+            max_completion_tokens=2048,
+            response_format=_json_response_format(),
+            expected_payload_key="gaps",
+        )
+        gaps_raw = envelope.get("data", {}).get("gaps", [])
         gaps = [
             ConceptGap(
                 name=g.get("name", ""),
@@ -637,6 +780,40 @@ async def detect_gaps(
         gaps = []
 
     return ConceptGapResponse(gaps=gaps)
+
+
+@router.post("/modules/{module_id}/detect-gaps/stream")
+async def detect_gaps_stream(
+    module_id: str,
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    module = _scope_module_query(db, module_id, user).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    docs = (
+        db.query(Document)
+        .filter(Document.module_id == module_id, Document.processing_status == "done")
+        .all()
+    )
+    if not docs:
+        raise HTTPException(status_code=400, detail="No processed documents in this module")
+
+    all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
+    if len(all_text) > settings.MAX_PROMPT_CHARS:
+        all_text = all_text[: settings.MAX_PROMPT_CHARS]
+    existing_concepts = [c.name for c in db.query(Concept).filter(Concept.module_id == module_id).all()]
+
+    return _stream_ai_route(
+        _concept_gap_messages(existing_concepts, all_text),
+        kind="concept_gaps",
+        expected_payload_key="gaps",
+        max_completion_tokens=2048,
+        final_mapper=lambda envelope: {"gaps": envelope.get("data", {}).get("gaps", [])},
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -676,32 +853,16 @@ async def synthesis_cards(
         if concepts
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You create cross-disciplinary study flashcards that link concepts "
-                "from different modules. Each card should require understanding "
-                "from at least two modules. Return ONLY valid JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Create {body.num_cards} synthesis flashcards connecting concepts "
-                "across these modules:\n\n"
-                f"{concept_summary}\n\n"
-                "Return JSON array: [{\"front\": \"...\", \"back\": \"...\", "
-                "\"tags\": [\"synthesis\", ...]}]"
-            ),
-        },
-    ]
-
-    response_text = await ai_service._call_groq(messages, max_tokens=4096)
+    messages = _synthesis_card_messages(body.num_cards, concept_summary)
     try:
-        cards_data = ai_service._parse_json_response(response_text)
-        if isinstance(cards_data, dict) and "cards" in cards_data:
-            cards_data = cards_data["cards"]
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="synthesis_cards",
+            max_completion_tokens=4096,
+            response_format=_json_response_format(),
+            expected_payload_key="cards",
+        )
+        cards_data = envelope.get("data", {}).get("cards", [])
         if not isinstance(cards_data, list):
             cards_data = [cards_data]
     except (json.JSONDecodeError, ValueError):
@@ -770,30 +931,16 @@ async def elaborate(
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You generate follow-up elaboration questions that force the "
-                "learner to apply a concept in new contexts. Return ONLY valid JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Flashcard front: {card.front}\nFlashcard back: {card.back}\n\n"
-                "Generate 2-3 follow-up questions that test deeper understanding "
-                "or application of this concept. For each, include a hint.\n\n"
-                "Return JSON: [{\"question\": \"...\", \"hint\": \"...\"}]"
-            ),
-        },
-    ]
-
-    response_text = await ai_service._call_groq(messages, max_tokens=1024)
+    messages = _elaboration_messages(card)
     try:
-        parsed = ai_service._parse_json_response(response_text)
-        if isinstance(parsed, dict) and "questions" in parsed:
-            parsed = parsed["questions"]
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="elaboration_questions",
+            max_completion_tokens=1024,
+            response_format=_json_response_format(),
+            expected_payload_key="questions",
+        )
+        parsed = envelope.get("data", {}).get("questions", [])
         if not isinstance(parsed, list):
             parsed = [parsed]
         follow_ups = [
@@ -844,33 +991,16 @@ async def free_recall(
     if len(source_material) > max_chars:
         source_material = source_material[:max_chars]
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You evaluate a student's free-recall attempt against source material. "
-                "Be thorough but fair. Return ONLY valid JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Topic: {body.topic}\n\n"
-                f"Key concepts in the module:\n{concept_list}\n\n"
-                f"Source material (excerpt):\n{source_material[:8000]}\n\n"
-                f"Student's recall attempt:\n{body.user_text}\n\n"
-                "Score the recall. Return JSON:\n"
-                "{\"score_pct\": <float 0-100>, \"total_concepts\": <int>, "
-                "\"recalled_concepts\": <int>, "
-                "\"missed_concepts\": [{\"name\": \"...\", \"definition\": \"...\"}], "
-                "\"feedback\": \"...\"}"
-            ),
-        },
-    ]
-
-    response_text = await ai_service._call_groq(messages, max_tokens=2048)
+    messages = _free_recall_messages(body.topic, concept_list, source_material, body.user_text)
     try:
-        parsed = ai_service._parse_json_response(response_text)
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="free_recall",
+            max_completion_tokens=2048,
+            response_format=_json_response_format(),
+            expected_payload_key="score_pct",
+        )
+        parsed = envelope.get("data", {})
         if not isinstance(parsed, dict):
             raise ValueError("Expected dict response")
         missed = [
@@ -894,6 +1024,37 @@ async def free_recall(
             missed_concepts=[],
             feedback="Unable to evaluate recall at this time.",
         )
+
+
+@router.post("/modules/{module_id}/free-recall/stream")
+async def free_recall_stream(
+    module_id: str,
+    body: FreeRecallRequest,
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    module = db.query(Module).filter(Module.id == module_id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    docs = db.query(Document).filter(
+        Document.module_id == module_id, Document.processing_status == "done"
+    ).all()
+    concepts = db.query(Concept).filter(Concept.module_id == module_id).all()
+    source_material = "\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
+    concept_list = "\n".join(f"- {c.name}: {c.definition or 'No definition'}" for c in concepts)
+    if len(source_material) > settings.MAX_PROMPT_CHARS:
+        source_material = source_material[: settings.MAX_PROMPT_CHARS]
+
+    return _stream_ai_route(
+        _free_recall_messages(body.topic, concept_list, source_material, body.user_text),
+        kind="free_recall",
+        expected_payload_key="score_pct",
+        max_completion_tokens=2048,
+        final_mapper=lambda envelope: envelope.get("data", {}),
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1313,29 +1474,16 @@ async def writing_prompt(
         (d.raw_text or "")[:2000] for d in docs if d.raw_text
     )[:6000]
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an academic examiner. Generate one essay question with a "
-                "detailed mark scheme. Return ONLY valid JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Module: {module.name}\n\nKey concepts:\n{material}\n\n"
-                f"Source text excerpt:\n{doc_excerpt}\n\n"
-                "Generate an essay question and mark scheme.\n"
-                "Return JSON: {\"question\": \"...\", \"mark_scheme\": \"...\", "
-                "\"time_limit_minutes\": <int>, \"max_marks\": <int>}"
-            ),
-        },
-    ]
-
-    response_text = await ai_service._call_groq(messages, max_tokens=2048)
+    messages = _writing_prompt_messages(module.name, material, doc_excerpt)
     try:
-        parsed = ai_service._parse_json_response(response_text)
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="writing_prompt",
+            max_completion_tokens=2048,
+            response_format=_json_response_format(),
+            expected_payload_key="question",
+        )
+        parsed = envelope.get("data", {})
         if not isinstance(parsed, dict):
             raise ValueError("Expected dict response")
         return WritingPromptResponse(
@@ -1349,6 +1497,34 @@ async def writing_prompt(
         raise HTTPException(status_code=502, detail="Failed to generate writing prompt")
 
 
+@router.post("/modules/{module_id}/writing-prompt/stream")
+async def writing_prompt_stream(
+    module_id: str,
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    module = db.query(Module).filter(Module.id == module_id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    concepts = db.query(Concept).filter(Concept.module_id == module_id).all()
+    docs = db.query(Document).filter(
+        Document.module_id == module_id, Document.processing_status == "done"
+    ).all()
+    material = "\n".join(f"- {c.name}: {c.definition or ''}" for c in concepts)
+    doc_excerpt = "\n\n".join((d.raw_text or "")[:2000] for d in docs if d.raw_text)[:6000]
+
+    return _stream_ai_route(
+        _writing_prompt_messages(module.name, material, doc_excerpt),
+        kind="writing_prompt",
+        expected_payload_key="question",
+        max_completion_tokens=2048,
+        final_mapper=lambda envelope: envelope.get("data", {}),
+    )
+
+
 @router.post("/writing/grade", response_model=WritingGradeResponse)
 async def writing_grade(
     body: WritingGradeRequest,
@@ -1358,32 +1534,16 @@ async def writing_grade(
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an academic examiner grading an essay. Provide paragraph-level "
-                "feedback and an overall score. Return ONLY valid JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Question: {body.question}\n\n"
-                f"Mark Scheme:\n{body.mark_scheme}\n\n"
-                f"Student Response:\n{body.user_response}\n\n"
-                "Grade the response. Return JSON:\n"
-                "{\"score\": <float>, \"max_marks\": <int>, "
-                "\"overall_feedback\": \"...\", "
-                "\"paragraph_feedback\": [{\"paragraph_idx\": <int>, "
-                "\"feedback\": \"...\", \"marks\": <float>}]}"
-            ),
-        },
-    ]
-
-    response_text = await ai_service._call_groq(messages, max_tokens=2048)
+    messages = _writing_grade_messages(body.question, body.mark_scheme, body.user_response)
     try:
-        parsed = ai_service._parse_json_response(response_text)
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="writing_grade",
+            max_completion_tokens=2048,
+            response_format=_json_response_format(),
+            expected_payload_key="score",
+        )
+        parsed = envelope.get("data", {})
         if not isinstance(parsed, dict):
             raise ValueError("Expected dict response")
 
@@ -1406,6 +1566,20 @@ async def writing_grade(
     except (json.JSONDecodeError, ValueError) as exc:
         logger.error("Failed to parse writing-grade response: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to grade writing")
+
+
+@router.post("/writing/grade/stream")
+async def writing_grade_stream(body: WritingGradeRequest):
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    return _stream_ai_route(
+        _writing_grade_messages(body.question, body.mark_scheme, body.user_response),
+        kind="writing_grade",
+        expected_payload_key="score",
+        max_completion_tokens=2048,
+        final_mapper=lambda envelope: envelope.get("data", {}),
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

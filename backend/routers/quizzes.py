@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -218,6 +219,46 @@ def _quiz_generation_lock(module_id: str) -> asyncio.Lock:
     return lock
 
 
+def _quiz_generation_messages(
+    *,
+    text: str,
+    num_questions: int,
+    question_types: list[str],
+    difficulty: str,
+    subject: str,
+) -> list[dict[str, str]]:
+    type_instructions = []
+    for qt in question_types:
+        if qt == "MCQ":
+            type_instructions.append("multiple choice questions with 4 options and exactly 1 correct answer")
+        elif qt == "SHORT_ANSWER":
+            type_instructions.append("short answer questions with concise model answers")
+        elif qt == "TRUE_FALSE":
+            type_instructions.append("true/false questions")
+        elif qt == "FILL_BLANK":
+            type_instructions.append("fill in the blank questions")
+        elif qt == "EXAM_STYLE":
+            type_instructions.append("exam-style questions worth 8-12 marks")
+
+    return [
+        {
+            "role": "system",
+            "content": f"You are an experienced {subject} examiner writing rigorous questions.",
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Generate {num_questions} questions from the material below.\n"
+                f"Question types to include: {', '.join(type_instructions) if type_instructions else 'a balanced mix'}.\n"
+                f"Target difficulty: {difficulty}.\n\n"
+                "Return a JSON object with a `questions` array.\n"
+                "Each question object must include `question_text`, `type`, `options`, `correct_answer`, `explanation`, and `difficulty`.\n\n"
+                f"Material:\n{text}"
+            ),
+        },
+    ]
+
+
 # ---------- Endpoints ----------
 
 @router.get("/api/questions", response_model=list[QuestionResponse])
@@ -304,6 +345,86 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         generated=len(created_questions),
         questions=[_question_to_response(q) for q in created_questions],
     )
+
+
+@router.post("/api/quizzes/generate/stream")
+async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(get_db)):
+    module = db.query(Module).filter(Module.id == body.module_id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    docs = (
+        db.query(Document)
+        .filter(Document.module_id == body.module_id, Document.processing_status == "done")
+        .all()
+    )
+    if not docs:
+        raise HTTPException(status_code=400, detail="No processed documents found in this module")
+
+    all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
+    max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
+    if len(all_text) > max_chars:
+        all_text = all_text[:max_chars]
+
+    num_questions = min(
+        max(1, body.num_questions),
+        settings.QUESTIONS_PER_DOCUMENT,
+        settings.MAX_QUESTIONS_PER_REQUEST,
+    )
+    messages = _quiz_generation_messages(
+        text=all_text,
+        num_questions=num_questions,
+        question_types=body.question_types,
+        difficulty=body.difficulty,
+        subject=module.name,
+    )
+
+    async def event_stream():
+        try:
+            async for event in ai_service.stream_groq_completion(
+                messages,
+                kind="quiz_questions",
+                max_completion_tokens=4096,
+                response_format=ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
+                expected_payload_key="questions",
+            ):
+                if event.get("event") == "final":
+                    parsed = event.get("envelope", {}).get("data", {}).get("questions", [])
+                    if not isinstance(parsed, list):
+                        parsed = [parsed]
+                    created_questions = []
+                    for qdata in parsed:
+                        q_type = _normalize_question_type(qdata.get("type", qdata.get("question_type")), default="MCQ")
+                        options = qdata.get("options")
+                        options_json = json.dumps(options) if options else None
+                        diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
+                        question = QuizQuestion(
+                            module_id=body.module_id,
+                            question_text=qdata.get("question_text", qdata.get("question", "")),
+                            question_type=q_type,
+                            options=options_json,
+                            correct_answer=qdata.get("correct_answer", ""),
+                            explanation=qdata.get("explanation", ""),
+                            difficulty=diff,
+                            source_document_id=docs[0].id if docs else None,
+                        )
+                        db.add(question)
+                        created_questions.append(question)
+                    db.commit()
+                    for question in created_questions:
+                        db.refresh(question)
+                    result = GenerateQuizResponse(
+                        generated=len(created_questions),
+                        questions=[_question_to_response(question) for question in created_questions],
+                    ).model_dump(mode="json")
+                    event["result"] = result
+                yield ai_service.encode_sse_event(event)
+        except Exception as exc:
+            yield ai_service.encode_sse_event({"event": "error", "kind": "quiz_questions", "message": str(exc)})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/api/quizzes/sessions", response_model=SessionResponse)

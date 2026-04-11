@@ -54,6 +54,13 @@ def _ensure_runtime_schema():
             "generation_source": "VARCHAR(10) DEFAULT 'MANUAL' NOT NULL",
             "updated_at": "DATETIME",
         },
+        "users": {
+            "auth_provider": "VARCHAR(20) DEFAULT 'local'",
+            "google_subject": "VARCHAR",
+            "avatar_url": "VARCHAR",
+            "email_verified_at": "DATETIME",
+            "last_login_at": "DATETIME",
+        },
     }
 
     with engine.begin() as conn:
@@ -70,6 +77,9 @@ def _ensure_runtime_schema():
 
         if "module_jobs" not in inspector.get_table_names():
             Base.metadata.tables["module_jobs"].create(bind=conn)
+
+        if "auth_sessions" not in inspector.get_table_names():
+            Base.metadata.tables["auth_sessions"].create(bind=conn)
 
         conn.execute(text("UPDATE modules SET pipeline_status = 'idle' WHERE pipeline_status IS NULL"))
         conn.execute(text("UPDATE modules SET pipeline_stage = 'idle' WHERE pipeline_stage IS NULL"))

@@ -10,7 +10,7 @@ import {
   Trophy,
   XCircle,
 } from '@phosphor-icons/react';
-import { getModules, startQuizSession, submitAnswer, completeSession } from '../api/client';
+import { getModules, generateQuizStream, startQuizSession, submitAnswer, completeSession } from '../api/client';
 import type {
   Difficulty,
   SessionResponse,
@@ -55,6 +55,8 @@ export default function QuizMode() {
   const [answerResult, setAnswerResult] = useState<AnswerResponse | null>(null);
   const [score, setScore] = useState(0);
   const [results, setResults] = useState<SessionResults | null>(null);
+  const [generationStatus, setGenerationStatus] = useState('');
+  const [generationDelta, setGenerationDelta] = useState('');
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -68,6 +70,38 @@ export default function QuizMode() {
       setQuestionIdx(0);
       setScore(0);
       setPhase('quiz');
+    },
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: async () => generateQuizStream(
+      {
+        module_id: moduleId,
+        question_types: ['MCQ'],
+        difficulty: difficulty === 'MIXED' ? 'MEDIUM' : difficulty,
+        num_questions: numQuestions,
+        mode,
+      },
+      (event) => {
+        if (event.event === 'status') {
+          setGenerationStatus(event.message || event.kind || 'Generating questions');
+        }
+        if (event.event === 'delta') {
+          setGenerationDelta((current) => `${current}${event.delta || ''}`.slice(-200));
+        }
+      },
+    ),
+    onMutate: () => {
+      setGenerationStatus('Preparing quiz generation');
+      setGenerationDelta('');
+    },
+    onSuccess: (data) => {
+      setGenerationStatus(`Generated ${data.generated} question${data.generated === 1 ? '' : 's'}`);
+      startMutation.mutate({
+        module_id: moduleId,
+        session_type: 'QUIZ',
+        question_ids: data.questions.map((question) => question.id),
+      });
     },
   });
 
@@ -90,10 +124,7 @@ export default function QuizMode() {
 
   const handleStart = () => {
     if (!moduleId) return;
-    startMutation.mutate({
-      module_id: moduleId,
-      session_type: 'QUIZ',
-    });
+    generateMutation.mutate();
   };
 
   const handleSubmitAnswer = () => {
@@ -263,25 +294,31 @@ export default function QuizMode() {
             </div>
           </div>
 
-          {startMutation.isError && (
+          {(startMutation.isError || generateMutation.isError) && (
             <p style={{ color: 'rgba(220,120,100,0.8)', fontSize: '0.9rem', fontWeight: 300 }}>
-              Failed to start quiz. Make sure you have questions generated for this module.
+              Failed to generate or start the quiz. Check that this module has processed content.
             </p>
           )}
 
           <button
             onClick={handleStart}
-            disabled={!moduleId || startMutation.isPending}
+            disabled={!moduleId || startMutation.isPending || generateMutation.isPending}
             style={accentBtn}
             className="w-full px-4 py-3 transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {startMutation.isPending ? (
+            {startMutation.isPending || generateMutation.isPending ? (
               <SpinnerGap className="w-4 h-4 animate-spin" />
             ) : (
               <Brain className="w-4 h-4" />
             )}
-            Start Quiz
+            {startMutation.isPending ? 'Starting Quiz' : generateMutation.isPending ? 'Generating Quiz' : 'Generate & Start Quiz'}
           </button>
+          {(generateMutation.isPending || generationStatus) && (
+            <p style={{ color: 'rgba(245,240,232,0.6)', fontSize: '0.82rem', fontWeight: 300 }}>
+              {generationStatus}
+              {generateMutation.isPending && generationDelta ? ` · ${generationDelta}` : ''}
+            </p>
+          )}
         </div>
       </div>
     );

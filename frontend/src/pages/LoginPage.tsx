@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, SignIn, SpinnerGap, UserCirclePlus, WarningCircle } from '@phosphor-icons/react';
+import { SignIn, SpinnerGap, UserCirclePlus, WarningCircle } from '@phosphor-icons/react';
 import { useAuthStore } from '../store/auth';
 
 const glass = {
@@ -71,12 +71,12 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: '#0f0f0f' }}>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <BookOpen className="w-12 h-12 mx-auto mb-3" style={{ color: '#c4956a' }} />
+          <img src="/logo.svg" alt="Revise OS" style={{ width: 52, height: 52, objectFit: 'contain', margin: '0 auto 0.75rem' }} />
           <h1
             className="text-3xl"
             style={{ fontFamily: "'Clash Display', sans-serif", color: '#f5f0e8', fontWeight: 700 }}
           >
-            Revise OS
+            ReviseOS
           </h1>
           <p className="mt-1" style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300 }}>
             AI-Powered Adaptive Study Platform

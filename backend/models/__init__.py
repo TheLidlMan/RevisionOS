@@ -1,4 +1,5 @@
 from models.user import User
+from models.auth_session import AuthSession
 from models.module import Module
 from models.document import Document
 from models.concept import Concept
@@ -10,6 +11,7 @@ from models.module_job import ModuleJob
 
 __all__ = [
     "User",
+    "AuthSession",
     "Module",
     "Document",
     "Concept",

@@ -5,6 +5,7 @@ import os
 import httpx
 
 from config import settings
+from services import ai_service
 
 logger = logging.getLogger(__name__)
 
@@ -162,14 +163,24 @@ def extract_image_text(file_path: str) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe and extract all text from this image. Return the extracted text verbatim."},
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract all visible text from this image. "
+                            "Return a JSON object with an `extracted_text` field containing the text verbatim."
+                        ),
+                    },
                     {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}},
                 ],
             }
         ],
-        "max_tokens": 4096,
-        "temperature": 0.1,
+        "max_completion_tokens": settings.LLM_MAX_COMPLETION_TOKENS,
+        "temperature": settings.LLM_TEMPERATURE,
+        "top_p": settings.LLM_TOP_P,
+        "response_format": ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
     }
+    if payload["response_format"] is None:
+        payload.pop("response_format")
 
     with httpx.Client(timeout=60.0) as client:
         response = client.post(
@@ -179,7 +190,14 @@ def extract_image_text(file_path: str) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        try:
+            parsed = ai_service._parse_json_response(content)
+            if isinstance(parsed, dict):
+                return str(parsed.get("extracted_text", "")).strip()
+        except (ValueError, KeyError):
+            logger.warning("Failed to parse OCR JSON response, falling back to raw text")
+        return content
 
 
 def transcribe_audio(file_path: str) -> str:

@@ -49,25 +49,28 @@ async def summarize_document(document_id: str, db: Session) -> Optional[str]:
             {
                 "role": "system",
                 "content": (
-                    "You are a study material summarizer. Create a concise but comprehensive "
-                    "summary of the following study material. Include the key topics covered, "
-                    "main concepts, and important details. The summary should help a student "
-                    "quickly understand what this document covers."
+                    "You summarize study material clearly and concisely while staying grounded in the source."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    "Summarize this study material in 200-300 words. "
-                    "Focus on: main topics, key concepts, important definitions, "
-                    "and what a student should learn from it.\n\n"
+                    "Return a JSON object with a `summary` field.\n"
+                    "Write a 200-300 word summary focusing on main topics, key concepts, "
+                    "important definitions, and what a student should learn from the material.\n\n"
                     f"Document: {doc.filename}\n\n"
                     f"Content:\n{text}"
                 ),
             },
         ]
-        summary = await ai_service._call_groq(messages, max_tokens=1024)
-        doc.summary = summary.strip()
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="document_summary",
+            max_completion_tokens=1024,
+            response_format=ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
+            expected_payload_key="summary",
+        )
+        doc.summary = str(envelope.get("data", {}).get("summary", "")).strip()
 
         emb = vector_service.embed_text(f"{doc.filename}: {doc.summary}")
         if emb:
@@ -242,6 +245,7 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
             "role": "user",
             "content": (
                 "Extract ALL distinct topics and subtopics from this content and organize them hierarchically.\n\n"
+                "Return a JSON object with a `topics` array.\n\n"
                 "For each topic provide:\n"
                 "- name: Short specific name\n"
                 "- definition: 1-2 sentence definition\n"
@@ -255,19 +259,20 @@ async def extract_topics_hierarchical(text: str, module_id: str = "") -> list[di
                 "- Include 15-50 topics depending on content length\n"
                 "- Main topics should have subtopics where appropriate\n"
                 "- Order from prerequisite/foundational to advanced\n\n"
-                "Return ONLY valid JSON array:\n"
-                '[{"name": "...", "definition": "...", "explanation": "...", '
-                '"importance_score": 0.0-1.0, "study_weight": 1.0-5.0, "parent": null or "Parent Name", "order_index": 0}]\n\n'
                 f"Content:\n{text}"
             ),
         },
     ]
 
-    response_text = await ai_service._call_groq(messages, max_tokens=8192)
     try:
-        topics = ai_service._parse_json_response(response_text)
-        if isinstance(topics, dict) and "topics" in topics:
-            topics = topics["topics"]
+        envelope = await ai_service._call_groq(
+            messages,
+            kind="topic_extraction",
+            max_completion_tokens=8192,
+            response_format=ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
+            expected_payload_key="topics",
+        )
+        topics = envelope.get("data", {}).get("topics", [])
         if not isinstance(topics, list):
             topics = [topics]
 

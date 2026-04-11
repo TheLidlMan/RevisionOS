@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from collections import defaultdict
 from datetime import datetime, timedelta
 from math import ceil
@@ -22,6 +23,17 @@ from services.rag_service import build_rag_context
 logger = logging.getLogger(__name__)
 
 PIPELINE_TOTAL_STEPS = 5
+
+
+async def _emit_pipeline_event(
+    event_handler: Optional[Callable[[dict], Awaitable[None] | None]],
+    event: dict,
+) -> None:
+    if not event_handler:
+        return
+    result = event_handler(event)
+    if result is not None:
+        await result
 
 
 def create_module_job(db: Session, module_id: str, document_id: Optional[str] = None) -> ModuleJob:
@@ -307,7 +319,12 @@ def _build_study_plan(module: Module, db: Session) -> Optional[dict]:
     return study_plan
 
 
-async def process_document_pipeline(document_id: str, module_id: str, job_id: Optional[str] = None) -> None:
+async def process_document_pipeline(
+    document_id: str,
+    module_id: str,
+    job_id: Optional[str] = None,
+    event_handler: Optional[Callable[[dict], Awaitable[None] | None]] = None,
+) -> None:
     db = SessionLocal()
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
@@ -319,6 +336,7 @@ async def process_document_pipeline(document_id: str, module_id: str, job_id: Op
         _set_pipeline_state(module, job, status="running", stage="extracting", completed=0)
         doc.processing_status = "processing"
         db.commit()
+        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "extracting", "completed": 0, "total": PIPELINE_TOTAL_STEPS})
 
         try:
             raw_text, word_count = _extract_document_content(doc)
@@ -327,15 +345,21 @@ async def process_document_pipeline(document_id: str, module_id: str, job_id: Op
             doc.processed = True
             doc.processing_status = "done"
             db.commit()
+            await _emit_pipeline_event(
+                event_handler,
+                {"event": "partial", "stage": "extracting", "word_count": word_count, "document_id": doc.id},
+            )
         except Exception as exc:
             doc.processing_status = "failed"
             doc.raw_text = f"Processing error: {exc}"
             _set_pipeline_state(module, job, status="failed", stage="extracting", completed=0, error=str(exc))
             db.commit()
+            await _emit_pipeline_event(event_handler, {"event": "error", "stage": "extracting", "message": str(exc)})
             return
 
         _set_pipeline_state(module, job, status="running", stage="summarizing", completed=1)
         db.commit()
+        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "summarizing", "completed": 1, "total": PIPELINE_TOTAL_STEPS})
         if settings.GROQ_API_KEY:
             summary = await summarize_document(document_id, db)
             if summary is None and not doc.summary:
@@ -344,17 +368,24 @@ async def process_document_pipeline(document_id: str, module_id: str, job_id: Op
         elif not doc.summary:
             doc.summary = _fallback_summary(doc.raw_text or "")
             db.commit()
+        await _emit_pipeline_event(
+            event_handler,
+            {"event": "partial", "stage": "summarizing", "summary": doc.summary or "", "document_id": doc.id},
+        )
 
         _set_pipeline_state(module, job, status="running", stage="indexing_topics", completed=2)
         db.commit()
+        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "indexing_topics", "completed": 2, "total": PIPELINE_TOTAL_STEPS})
         await index_document(document_id, db, skip_summary=True)
 
         _set_pipeline_state(module, job, status="running", stage="refreshing_module", completed=3)
         refresh_module_relationships(module.id, db)
         db.commit()
+        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "refreshing_module", "completed": 3, "total": PIPELINE_TOTAL_STEPS})
 
         _set_pipeline_state(module, job, status="running", stage="generating_flashcards", completed=4)
         db.commit()
+        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "generating_flashcards", "completed": 4, "total": PIPELINE_TOTAL_STEPS})
         await _generate_missing_flashcards(module, db)
         refresh_module_relationships(module.id, db)
         db.commit()
@@ -363,6 +394,19 @@ async def process_document_pipeline(document_id: str, module_id: str, job_id: Op
         _build_study_plan(module, db)
         _set_pipeline_state(module, job, status="completed", stage="ready", completed=PIPELINE_TOTAL_STEPS)
         db.commit()
+        await _emit_pipeline_event(event_handler, {"event": "status", "stage": "building_study_plan", "completed": 5, "total": PIPELINE_TOTAL_STEPS})
+        await _emit_pipeline_event(
+            event_handler,
+            {
+                "event": "final",
+                "stage": "ready",
+                "document_id": doc.id,
+                "module_id": module.id,
+                "summary": doc.summary or "",
+                "completed": PIPELINE_TOTAL_STEPS,
+                "total": PIPELINE_TOTAL_STEPS,
+            },
+        )
     except Exception as exc:
         logger.exception("Module pipeline failed for document %s: %s", document_id, exc)
         try:
@@ -373,6 +417,7 @@ async def process_document_pipeline(document_id: str, module_id: str, job_id: Op
             if doc := db.query(Document).filter(Document.id == document_id).first():
                 doc.processing_status = "failed"
             db.commit()
+            await _emit_pipeline_event(event_handler, {"event": "error", "stage": "failed", "message": str(exc)})
         except Exception:
             db.rollback()
     finally:

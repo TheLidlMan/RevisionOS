@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import uuid
@@ -5,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,7 @@ from database import get_db
 from models.document import Document
 from models.module import Module
 from services.pipeline_service import create_module_job, process_document_pipeline
+from services import ai_service
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
 from models.user import User
@@ -65,6 +68,31 @@ def _get_file_type(filename: str) -> str:
     return SUPPORTED_EXTENSIONS.get(ext, "TXT")
 
 
+def _save_uploaded_file(module: Module, file: UploadFile) -> tuple[str, str, str]:
+    base_upload = os.path.realpath(settings.UPLOAD_DIR)
+    upload_dir = os.path.join(base_upload, module.id)
+    os.makedirs(upload_dir, exist_ok=True)
+
+    file_id = str(uuid.uuid4())
+    file_type = _get_file_type(file.filename or "unknown.txt")
+    allowed_extensions = {".pdf", ".txt", ".md", ".pptx", ".docx", ".mp3", ".mp4", ".png", ".jpg", ".jpeg"}
+    safe_basename = os.path.basename(file.filename or "unknown.txt")
+    ext = os.path.splitext(safe_basename)[1].lower()
+    if ext not in allowed_extensions:
+        ext = ".bin"
+
+    saved_filename = f"{file_id}{ext}"
+    file_path = os.path.join(upload_dir, saved_filename)
+    if not os.path.realpath(file_path).startswith(base_upload):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    with open(file_path, "wb") as f:
+        content = file.file.read()
+        f.write(content)
+
+    return file_id, file_type, file_path
+
+
 # ---------- Endpoints ----------
 
 @router.post("/upload", response_model=DocumentResponse, status_code=201)
@@ -83,33 +111,7 @@ async def upload_document(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    # Save file to uploads dir — sanitize filename to prevent path traversal
-    base_upload = os.path.realpath(settings.UPLOAD_DIR)
-
-    # Use only the UUID module_id (already validated from DB lookup above)
-    upload_dir = os.path.join(base_upload, module.id)
-    os.makedirs(upload_dir, exist_ok=True)
-
-    file_id = str(uuid.uuid4())
-    file_type = _get_file_type(file.filename or "unknown.txt")
-
-    # Only allow known safe extensions
-    ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".pptx", ".docx", ".mp3", ".mp4", ".png", ".jpg", ".jpeg"}
-    safe_basename = os.path.basename(file.filename or "unknown.txt")
-    ext = os.path.splitext(safe_basename)[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        ext = ".bin"
-
-    saved_filename = f"{file_id}{ext}"
-    file_path = os.path.join(upload_dir, saved_filename)
-
-    # Verify resolved path is inside uploads dir
-    if not os.path.realpath(file_path).startswith(base_upload):
-        raise HTTPException(status_code=400, detail="Invalid file path")
-
-    with open(file_path, "wb") as f:
-        content = file.file.read()
-        f.write(content)
+    file_id, file_type, file_path = _save_uploaded_file(module, file)
 
     # Create document record
     doc = Document(
@@ -149,6 +151,99 @@ async def upload_document(
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
+
+
+@router.post("/upload-stream")
+async def upload_document_stream(
+    module_id: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    module_query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        module_query = module_query.filter(Module.user_id == user.id)
+    module = module_query.first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    file_id, file_type, file_path = _save_uploaded_file(module, file)
+
+    doc = Document(
+        id=file_id,
+        module_id=module_id,
+        filename=file.filename or "unknown",
+        file_type=file_type,
+        file_path=file_path,
+        processing_status="pending",
+        user_id=user.id if user else None,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    job = create_module_job(db, module_id=module.id, document_id=doc.id)
+    module.pipeline_status = "queued"
+    module.pipeline_stage = "queued"
+    module.pipeline_completed = 0
+    module.pipeline_total = 5
+    module.pipeline_error = None
+    module.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(doc)
+
+    async def event_stream():
+        queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        yield ai_service.encode_sse_event(
+            {
+                "event": "status",
+                "stage": "uploaded",
+                "document": {
+                    "id": doc.id,
+                    "module_id": doc.module_id,
+                    "filename": doc.filename,
+                    "processing_status": doc.processing_status,
+                },
+            }
+        )
+
+        async def emit(event: dict):
+            if event.get("event") == "final":
+                db.expire_all()
+                final_doc = db.query(Document).filter(Document.id == doc.id).first()
+                result = DocumentResponse(
+                    id=final_doc.id,
+                    module_id=final_doc.module_id,
+                    filename=final_doc.filename,
+                    file_type=final_doc.file_type,
+                    file_path=final_doc.file_path,
+                    processed=final_doc.processed,
+                    processing_status=final_doc.processing_status,
+                    word_count=final_doc.word_count,
+                    summary=final_doc.summary,
+                    created_at=final_doc.created_at,
+                    updated_at=final_doc.updated_at,
+                ).model_dump(mode="json")
+                event["result"] = result
+            await queue.put(ai_service.encode_sse_event(event))
+
+        async def run_pipeline():
+            try:
+                await process_document_pipeline(doc.id, module.id, job.id, event_handler=emit)
+            finally:
+                await queue.put(None)
+
+        try:
+            pipeline_task = asyncio.create_task(run_pipeline())
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+            await pipeline_task
+        except Exception as exc:
+            yield ai_service.encode_sse_event({"event": "error", "stage": "failed", "message": str(exc)})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/{document_id}/index")

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,7 @@ from config import settings
 from database import get_db
 from models.flashcard import Flashcard
 from models.module import Module
+from services import ai_service
 from services.fsrs_service import schedule_review
 from services.pipeline_service import _generate_missing_flashcards
 
@@ -289,3 +291,37 @@ async def generate_cards_for_module(
     ]
 
     return GenerateCardsResponse(generated=len(created_cards), cards=[_card_to_response(card) for card in created_cards])
+
+
+@router.post("/api/modules/{module_id}/generate-cards/stream")
+async def generate_cards_for_module_stream(
+    module_id: str,
+    body: Optional[GenerateCardsRequest] = None,
+    db: Session = Depends(get_db),
+):
+    module = db.query(Module).filter(Module.id == module_id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    if not settings.GROQ_API_KEY:
+        raise HTTPException(status_code=400, detail="Groq API key not configured")
+
+    async def event_stream():
+        try:
+            yield ai_service.encode_sse_event({"event": "status", "kind": "flashcard_generation", "message": "Generating flashcards"})
+            before_ids = {card.id for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()}
+            await _generate_missing_flashcards(module, db)
+            db.commit()
+            created_cards = [
+                card
+                for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
+                if card.id not in before_ids
+            ]
+            result = GenerateCardsResponse(
+                generated=len(created_cards),
+                cards=[_card_to_response(card) for card in created_cards],
+            ).model_dump(mode="json")
+            yield ai_service.encode_sse_event({"event": "final", "kind": "flashcard_generation", "result": result})
+        except Exception as exc:
+            yield ai_service.encode_sse_event({"event": "error", "kind": "flashcard_generation", "message": str(exc)})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

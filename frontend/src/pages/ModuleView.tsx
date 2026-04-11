@@ -22,6 +22,7 @@ import {
   deleteModule,
   exportAnki,
   exportJson,
+  generateCardsStream,
   getContentMap,
   getCurriculum,
   getKnowledgeGraph,
@@ -56,6 +57,7 @@ export default function ModuleView() {
   const [examDateInput, setExamDateInput] = useState('');
   const [documentSort, setDocumentSort] = usePersistentState<DocumentSort>(`module:${id}:document-sort`, 'UPDATED');
   const [pendingDocumentDeletes, setPendingDocumentDeletes] = useState<string[]>([]);
+  const [flashcardStatus, setFlashcardStatus] = useState('');
   const deleteTimeoutsRef = useRef<Map<string, number>>(new Map());
   const moduleDeleteTimeoutRef = useRef<number | null>(null);
   const lastServerExamDateRef = useRef('');
@@ -124,6 +126,22 @@ export default function ModuleView() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       navigate('/');
+    },
+  });
+
+  const generateCardsMutation = useMutation({
+    mutationFn: () => generateCardsStream(id!, undefined, (event) => {
+      if (event.event === 'status') {
+        setFlashcardStatus(event.message || 'Generating flashcards');
+      }
+      if (event.event === 'final' && event.result) {
+        setFlashcardStatus(`Generated ${event.result.generated} card${event.result.generated === 1 ? '' : 's'}`);
+      }
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['module', id] });
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
     },
   });
 
@@ -293,6 +311,16 @@ export default function ModuleView() {
             <button
               type="button"
               className="scholar-btn"
+              style={{ background: 'rgba(196,149,106,0.22)', color: 'var(--text)' }}
+              onClick={() => generateCardsMutation.mutate()}
+              disabled={generateCardsMutation.isPending}
+            >
+              {generateCardsMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <CardsThree size={18} />}
+              {generateCardsMutation.isPending ? 'Generating Cards' : 'Generate Cards'}
+            </button>
+            <button
+              type="button"
+              className="scholar-btn"
               style={{ background: 'rgba(196,149,106,0.18)', color: 'var(--text)' }}
               onClick={() => navigate(`/quiz?module=${mod.id}`)}
             >
@@ -353,6 +381,9 @@ export default function ModuleView() {
             </button>
           </div>
         </div>
+        {flashcardStatus && (
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>{flashcardStatus}</p>
+        )}
       </div>
 
       {pipelineActive && (

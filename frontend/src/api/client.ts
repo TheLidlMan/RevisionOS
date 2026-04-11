@@ -5,6 +5,7 @@ import type {
   ModuleCreate,
   ModuleUpdate,
   ModuleStats,
+  AIStreamEvent,
   Document,
   Flashcard,
   FlashcardCreate,
@@ -50,10 +51,12 @@ import type {
 
 const AUTH_TOKEN_KEY = 'reviseos_token';
 const LEGACY_AUTH_TOKEN_KEY = 'revisionos_token';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
 const runSearch = (
@@ -68,7 +71,7 @@ const runSearch = (
     })
     .then((r) => r.data);
 
-// Auth interceptor
+// Auth interceptor — bearer token as fallback for non-cookie clients
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
   if (token) {
@@ -77,9 +80,121 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
+const getAuthToken = () =>
+  localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
+
+const getApiUrl = (path: string) => {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const normalizedBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
+};
+
+const consumeEventStream = async <T>(
+  response: Response,
+  onEvent?: (event: AIStreamEvent<T>) => void,
+): Promise<T> => {
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Streaming request failed with status ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error('Streaming response did not include a body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: T | undefined;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+
+    for (const chunk of parts) {
+      const dataLine = chunk
+        .split('\n')
+        .find((line) => line.startsWith('data:'));
+      if (!dataLine) {
+        continue;
+      }
+      const payload = dataLine.slice(5).trim();
+      if (!payload) {
+        continue;
+      }
+      const event = JSON.parse(payload) as AIStreamEvent<T>;
+      onEvent?.(event);
+      if (event.event === 'error') {
+        throw new Error(event.message || 'Streaming request failed');
+      }
+      if (event.event === 'final') {
+        finalResult = event.result as T;
+      }
+    }
+  }
+
+  if (finalResult === undefined) {
+    throw new Error('Streaming response completed without a final payload');
+  }
+  return finalResult;
+};
+
+const streamJson = async <T>(
+  path: string,
+  body: unknown,
+  onEvent?: (event: AIStreamEvent<T>) => void,
+) => {
+  const token = getAuthToken();
+  const response = await fetch(getApiUrl(path), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  return consumeEventStream<T>(response, onEvent);
+};
+
+const streamFormData = async <T>(
+  path: string,
+  form: FormData,
+  onEvent?: (event: AIStreamEvent<T>) => void,
+) => {
+  const token = getAuthToken();
+  const response = await fetch(getApiUrl(path), {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  return consumeEventStream<T>(response, onEvent);
+};
+
 // Modules
 export const getModules = () =>
-  client.get<Module[]>('/modules').then((r) => r.data);
+  client.get<Module[] | { modules?: Module[]; items?: Module[]; data?: Module[] }>('/modules').then((r) => {
+    const payload = r.data;
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+    if (Array.isArray(payload?.modules)) {
+      return payload.modules;
+    }
+    if (Array.isArray(payload?.items)) {
+      return payload.items;
+    }
+    if (Array.isArray(payload?.data)) {
+      return payload.data;
+    }
+    return [];
+  });
 
 export const createModule = (data: ModuleCreate) =>
   client.post<Module>('/modules', data).then((r) => r.data);
@@ -106,6 +221,17 @@ export const uploadDocument = (moduleId: string, file: File) => {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     .then((r) => r.data);
+};
+
+export const uploadDocumentStream = (
+  moduleId: string,
+  file: File,
+  onEvent?: (event: AIStreamEvent<Document>) => void,
+) => {
+  const form = new FormData();
+  form.append('module_id', moduleId);
+  form.append('file', file);
+  return streamFormData<Document>('/documents/upload-stream', form, onEvent);
 };
 
 export const getDocument = (id: string) =>
@@ -147,6 +273,17 @@ export const generateCards = (
     )
     .then((r) => r.data);
 
+export const generateCardsStream = (
+  moduleId: string,
+  numCards: number | undefined,
+  onEvent?: (event: AIStreamEvent<{ generated: number; cards: Flashcard[] }>) => void,
+) =>
+  streamJson<{ generated: number; cards: Flashcard[] }>(
+    `/modules/${moduleId}/generate-cards/stream`,
+    numCards ? { num_cards: numCards } : {},
+    onEvent,
+  );
+
 // Quizzes
 export const getQuestions = (params?: {
   module_id?: string;
@@ -161,6 +298,11 @@ export const generateQuiz = (config: GenerateQuizConfig) =>
       config
     )
     .then((r) => r.data);
+
+export const generateQuizStream = (
+  config: GenerateQuizConfig,
+  onEvent?: (event: AIStreamEvent<{ generated: number; questions: QuizQuestion[] }>) => void,
+) => streamJson<{ generated: number; questions: QuizQuestion[] }>('/quizzes/generate/stream', config, onEvent);
 
 export const startQuizSession = (config: StartSessionConfig) =>
   client.post<SessionResponse>('/quizzes/sessions', config).then((r) => r.data);
@@ -283,6 +425,15 @@ export const authMe = () =>
 export const updateProfile = (data: { display_name?: string; password?: string }) =>
   client.patch('/auth/me', data).then((r) => r.data);
 
+export const authSession = () =>
+  client.get('/auth/session').then((r) => r.data);
+
+export const authLogout = () =>
+  client.post('/auth/logout').then((r) => r.data);
+
+export const authGoogleStart = (returnTo?: string) =>
+  client.get('/auth/google/start', { params: returnTo ? { return_to: returnTo } : {} }).then((r) => r.data);
+
 // ---- Social / Leaderboard ----
 export const getLeaderboard = (timeframe?: string) =>
   client.get('/social/leaderboard', { params: { timeframe } }).then((r) => r.data);
@@ -332,6 +483,11 @@ export const getSessionEstimate = (moduleId?: string) =>
 export const detectConceptGaps = (moduleId: string) =>
   client.post<ConceptGapResponse>(`/modules/${moduleId}/detect-gaps`).then((r) => r.data);
 
+export const detectConceptGapsStream = (
+  moduleId: string,
+  onEvent?: (event: AIStreamEvent<ConceptGapResponse>) => void,
+) => streamJson<ConceptGapResponse>(`/modules/${moduleId}/detect-gaps/stream`, {}, onEvent);
+
 // ---- Feature: Cross-Module Synthesis Cards ----
 export const generateSynthesisCards = (moduleIds: string[], numCards: number = 5) =>
   client.post<{ generated: number; cards: Flashcard[] }>('/synthesis-cards', { module_ids: moduleIds, num_cards: numCards }).then((r) => r.data);
@@ -343,6 +499,13 @@ export const getElaborationPrompts = (cardId: string) =>
 // ---- Feature: Free Recall ----
 export const submitFreeRecall = (moduleId: string, topic: string, userText: string) =>
   client.post<FreeRecallResult>(`/modules/${moduleId}/free-recall`, { topic, user_text: userText }).then((r) => r.data);
+
+export const submitFreeRecallStream = (
+  moduleId: string,
+  topic: string,
+  userText: string,
+  onEvent?: (event: AIStreamEvent<FreeRecallResult>) => void,
+) => streamJson<FreeRecallResult>(`/modules/${moduleId}/free-recall/stream`, { topic, user_text: userText }, onEvent);
 
 // ---- Feature: YouTube Ingest ----
 export const ingestYouTube = (moduleId: string, youtubeUrl: string) =>
@@ -374,8 +537,20 @@ export const createImageOcclusionCards = (moduleId: string, imageUrl: string, oc
 export const getWritingPrompt = (moduleId: string) =>
   client.post<WritingPrompt>(`/modules/${moduleId}/writing-prompt`).then((r) => r.data);
 
+export const getWritingPromptStream = (
+  moduleId: string,
+  onEvent?: (event: AIStreamEvent<WritingPrompt>) => void,
+) => streamJson<WritingPrompt>(`/modules/${moduleId}/writing-prompt/stream`, {}, onEvent);
+
 export const gradeWriting = (question: string, markScheme: string, userResponse: string) =>
   client.post<WritingGradeResult>('/writing/grade', { question, mark_scheme: markScheme, user_response: userResponse }).then((r) => r.data);
+
+export const gradeWritingStream = (
+  question: string,
+  markScheme: string,
+  userResponse: string,
+  onEvent?: (event: AIStreamEvent<WritingGradeResult>) => void,
+) => streamJson<WritingGradeResult>('/writing/grade/stream', { question, mark_scheme: markScheme, user_response: userResponse }, onEvent);
 
 // ---- Feature: Retention Forecast ----
 export const getRetentionForecast = () =>

@@ -4,7 +4,6 @@ import {
   CalendarDots,
   CardsThree,
   GearSix,
-  GraduationCap,
   Graph,
   MagnifyingGlass,
   SquaresFour,
@@ -50,10 +49,14 @@ export default function Sidebar() {
     >
       <div className="flex items-center justify-between gap-3 px-2">
         <div className="flex items-center gap-3 min-w-0">
-          <GraduationCap size={28} weight="duotone" style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <img
+            src="/logo.svg"
+            alt="Revise OS"
+            style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }}
+          />
           {sidebarOpen && (
             <div className="min-w-0">
-              <p style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem' }}>Revise OS</p>
+              <p style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem' }}>ReviseOS</p>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Module-first revision</p>
             </div>
           )}

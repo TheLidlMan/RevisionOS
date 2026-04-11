@@ -1,0 +1,94 @@
+@import "../../shared/tokens.css";
+
+/* Reset & base */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--heading);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(139, 115, 85, 0.25); border-radius: 3px; }
+* { scrollbar-width: thin; scrollbar-color: rgba(139, 115, 85, 0.25) transparent; }
+
+/* Scholar Glass utility classes */
+.glass-card {
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: background 0.2s, border-color 0.2s;
+}
+.glass-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-focus);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.75rem;
+  font-family: var(--sans);
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+}
+.btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  font-size: 1rem;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.btn-secondary:hover { background: var(--surface-hover); border-color: var(--border-focus); }
+
+/* Container */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+.container-narrow { max-width: 800px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* Section spacing */
+.section { padding: 5rem 0; }
+.section-lg { padding: 7rem 0; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .section { padding: 3rem 0; }
+  .section-lg { padding: 4rem 0; }
+  h1 { font-size: 2rem !important; }
+  h2 { font-size: 1.5rem !important; }
+}

@@ -40,6 +40,12 @@ export default function SettingsPage() {
           ? current.form
           : {
               llm_model: settingsQuery.data.llm_model,
+              llm_fallback_model: settingsQuery.data.llm_fallback_model,
+              llm_temperature: settingsQuery.data.llm_temperature,
+              llm_top_p: settingsQuery.data.llm_top_p,
+              llm_max_completion_tokens: settingsQuery.data.llm_max_completion_tokens,
+              llm_json_mode_enabled: settingsQuery.data.llm_json_mode_enabled,
+              llm_streaming_enabled: settingsQuery.data.llm_streaming_enabled,
               questions_per_document: settingsQuery.data.questions_per_document,
               daily_new_cards_limit: settingsQuery.data.daily_new_cards_limit,
               desired_retention: settingsQuery.data.desired_retention,
@@ -142,7 +148,7 @@ export default function SettingsPage() {
 
         <section className="p-5" style={glass}>
           <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem', marginBottom: 12 }}>
-            Study Controls
+            Groq Request Controls
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
@@ -155,6 +161,54 @@ export default function SettingsPage() {
               </select>
             </label>
 
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Fallback model</span>
+              <select value={form.llm_fallback_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_fallback_model: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+                <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B</option>
+                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+                <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
+                <option value="gemma2-9b-it">Gemma 2 9B</option>
+              </select>
+            </label>
+
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Temperature</span>
+              <input type="number" min={0} max={2} step={0.1} value={form.llm_temperature ?? 0.1} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_temperature: Number(event.target.value) || 0 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+            </label>
+
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Top P</span>
+              <input type="number" min={0} max={1} step={0.05} value={form.llm_top_p ?? 1} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_top_p: Number(event.target.value) || 0 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+            </label>
+
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Max completion tokens</span>
+              <input type="number" min={1} max={16384} value={form.llm_max_completion_tokens ?? 4096} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_max_completion_tokens: Number(event.target.value) || 4096 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+            </label>
+
+            <label className="flex items-center justify-between gap-3 px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <span>
+                <span className="block mb-1" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>JSON mode</span>
+                <span style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>Request structured Groq JSON output</span>
+              </span>
+              <input type="checkbox" checked={Boolean(form.llm_json_mode_enabled)} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_json_mode_enabled: event.target.checked } }))} />
+            </label>
+
+            <label className="flex items-center justify-between gap-3 px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <span>
+                <span className="block mb-1" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Streaming</span>
+                <span style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>Enable streamed Groq responses where supported</span>
+              </span>
+              <input type="checkbox" checked={Boolean(form.llm_streaming_enabled)} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_streaming_enabled: event.target.checked } }))} />
+            </label>
+          </div>
+        </section>
+
+        <section className="p-5" style={glass}>
+          <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem', marginBottom: 12 }}>
+            Study Controls
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Daily new cards limit</span>
               <input type="number" min={1} max={100} value={form.daily_new_cards_limit ?? 20} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, daily_new_cards_limit: Number(event.target.value) || 20 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />

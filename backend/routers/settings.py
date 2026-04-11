@@ -17,6 +17,11 @@ DEFAULT_SETTINGS = {
     "groq_api_key": "",
     "llm_model": "meta-llama/llama-4-scout-17b-16e-instruct",
     "llm_fallback_model": "llama-3.1-8b-instant",
+    "llm_temperature": 0.1,
+    "llm_top_p": 1.0,
+    "llm_max_completion_tokens": 4096,
+    "llm_json_mode_enabled": True,
+    "llm_streaming_enabled": True,
     "daily_new_cards_limit": 20,
     "cards_per_document": 20,
     "questions_per_document": 10,
@@ -32,6 +37,11 @@ class SettingsResponse(BaseModel):
     groq_api_key: str = ""
     llm_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     llm_fallback_model: str = "llama-3.1-8b-instant"
+    llm_temperature: float = 0.1
+    llm_top_p: float = 1.0
+    llm_max_completion_tokens: int = 4096
+    llm_json_mode_enabled: bool = True
+    llm_streaming_enabled: bool = True
     daily_new_cards_limit: int = 20
     cards_per_document: int = 20
     questions_per_document: int = 10
@@ -44,6 +54,11 @@ class SettingsUpdate(BaseModel):
     groq_api_key: Optional[str] = None
     llm_model: Optional[str] = None
     llm_fallback_model: Optional[str] = None
+    llm_temperature: Optional[float] = None
+    llm_top_p: Optional[float] = None
+    llm_max_completion_tokens: Optional[int] = None
+    llm_json_mode_enabled: Optional[bool] = None
+    llm_streaming_enabled: Optional[bool] = None
     daily_new_cards_limit: Optional[int] = None
     cards_per_document: Optional[int] = None
     questions_per_document: Optional[int] = None
@@ -104,6 +119,12 @@ def update_settings(body: SettingsUpdate):
             1,
             min(int(update_data["questions_per_document"]), settings.MAX_QUESTIONS_PER_REQUEST),
         )
+    if "llm_max_completion_tokens" in update_data:
+        update_data["llm_max_completion_tokens"] = max(1, int(update_data["llm_max_completion_tokens"]))
+    if "llm_temperature" in update_data:
+        update_data["llm_temperature"] = max(0.0, min(float(update_data["llm_temperature"]), 2.0))
+    if "llm_top_p" in update_data:
+        update_data["llm_top_p"] = max(0.0, min(float(update_data["llm_top_p"]), 1.0))
 
     current.update(update_data)
     _save_settings(current)

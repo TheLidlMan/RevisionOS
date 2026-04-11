@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Graph, SpinnerGap, WarningCircle } from '@phosphor-icons/react';
-import { getModules, getKnowledgeGraph, detectConceptGaps } from '../api/client';
+import { getModules, getKnowledgeGraph, detectConceptGapsStream } from '../api/client';
 import type { GraphNode, ConceptGap } from '../types';
 
 const glass = {
@@ -32,10 +32,27 @@ export default function KnowledgeGraph() {
   const [gaps, setGaps] = useState<ConceptGap[]>([]);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [gapStatus, setGapStatus] = useState('');
+  const [gapDelta, setGapDelta] = useState('');
 
   const gapMutation = useMutation({
-    mutationFn: (modId: string) => detectConceptGaps(modId),
-    onSuccess: (data) => setGaps(data.gaps),
+    mutationFn: (modId: string) =>
+      detectConceptGapsStream(modId, (event) => {
+        if (event.event === 'status') {
+          setGapStatus(event.message || event.stage || 'Analyzing');
+        }
+        if (event.event === 'delta') {
+          setGapDelta((current) => `${current}${event.delta || ''}`.slice(-240));
+        }
+        if (event.event === 'final' && event.result) {
+          setGaps(event.result.gaps);
+          setGapStatus('Gap analysis complete');
+        }
+      }),
+    onMutate: () => {
+      setGapStatus('Preparing gap analysis');
+      setGapDelta('');
+    },
   });
 
   const { data: modules } = useQuery({
@@ -198,31 +215,39 @@ export default function KnowledgeGraph() {
           ))}
         </select>
         {moduleId && (
-          <button
-            onClick={() => gapMutation.mutate(moduleId)}
-            disabled={gapMutation.isPending}
-            style={{
-              background: 'rgba(255,165,0,0.12)',
-              border: '1px solid rgba(255,165,0,0.3)',
-              borderRadius: '8px',
-              color: 'rgba(255,165,0,0.85)',
-              fontWeight: 400,
-              fontSize: '0.85rem',
-              cursor: gapMutation.isPending ? 'wait' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              opacity: gapMutation.isPending ? 0.6 : 1,
-            }}
-            className="px-3 py-2.5 transition-colors"
-          >
-            {gapMutation.isPending ? (
-              <SpinnerGap className="w-4 h-4 animate-spin" />
-            ) : (
-              <WarningCircle className="w-4 h-4" />
+          <>
+            <button
+              onClick={() => gapMutation.mutate(moduleId)}
+              disabled={gapMutation.isPending}
+              style={{
+                background: 'rgba(255,165,0,0.12)',
+                border: '1px solid rgba(255,165,0,0.3)',
+                borderRadius: '8px',
+                color: 'rgba(255,165,0,0.85)',
+                fontWeight: 400,
+                fontSize: '0.85rem',
+                cursor: gapMutation.isPending ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                opacity: gapMutation.isPending ? 0.6 : 1,
+              }}
+              className="px-3 py-2.5 transition-colors"
+            >
+              {gapMutation.isPending ? (
+                <SpinnerGap className="w-4 h-4 animate-spin" />
+              ) : (
+                <WarningCircle className="w-4 h-4" />
+              )}
+              Detect Gaps
+            </button>
+            {(gapMutation.isPending || gapStatus) && (
+              <div className="px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                {gapStatus}
+                {gapMutation.isPending && gapDelta ? ` · ${gapDelta}` : ''}
+              </div>
             )}
-            Detect Gaps
-          </button>
+          </>
         )}
       </div>
 

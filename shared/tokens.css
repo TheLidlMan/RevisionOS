@@ -1,0 +1,55 @@
+/*
+ * Revise OS — Scholar Glass Design Tokens
+ * Shared between frontend/ and marketing/ apps.
+ */
+
+:root {
+  /* Backgrounds */
+  --bg: #0f0f0f;
+  --bg-warm: #1a1714;
+  --surface: rgba(255, 248, 240, 0.04);
+  --surface-hover: rgba(255, 248, 240, 0.08);
+
+  /* Borders */
+  --border: rgba(139, 115, 85, 0.15);
+  --border-focus: rgba(139, 115, 85, 0.3);
+
+  /* Text */
+  --text: #f5f0e8;
+  --text-secondary: rgba(245, 240, 232, 0.5);
+  --text-tertiary: rgba(245, 240, 232, 0.25);
+
+  /* Accent */
+  --accent: #c4956a;
+  --accent-dark: #a87d56;
+  --accent-soft: rgba(196, 149, 106, 0.15);
+
+  /* Semantic */
+  --danger: rgba(220, 120, 100, 0.8);
+  --success: rgba(120, 180, 120, 0.8);
+
+  /* Typography */
+  --heading: 'Clash Display', 'General Sans', sans-serif;
+  --sans: 'General Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+
+  /* Radii & Effects */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --blur: blur(20px);
+}
+
+/* Light theme overrides */
+body.theme-light {
+  --bg: #faf8f5;
+  --bg-warm: #f5f0e8;
+  --surface: rgba(139, 115, 85, 0.05);
+  --surface-hover: rgba(139, 115, 85, 0.09);
+  --border: rgba(139, 115, 85, 0.18);
+  --border-focus: rgba(139, 115, 85, 0.35);
+  --text: #3c2415;
+  --text-secondary: rgba(60, 36, 21, 0.55);
+  --text-tertiary: rgba(60, 36, 21, 0.3);
+  --accent: #8b7355;
+  --accent-soft: rgba(139, 115, 85, 0.12);
+}
