@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     JWT_SECRET: str = ""
     DATABASE_URL: str = "sqlite:///./revisionos.db"
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "https://revisionos-frontend.pages.dev"
+    )
+    CORS_ORIGIN_REGEX: str = r"https://([A-Za-z0-9-]+\.)?revisionos-frontend\.pages\.dev"
     LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     LLM_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
     MAX_CONTEXT_TOKENS: int = 800000
@@ -49,6 +54,11 @@ settings = Settings()
 
 def get_cors_origins() -> list[str]:
     return [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
+
+def get_cors_origin_regex() -> str | None:
+    regex = settings.CORS_ORIGIN_REGEX.strip()
+    return regex or None
 
 
 def _load_persisted_settings() -> dict:

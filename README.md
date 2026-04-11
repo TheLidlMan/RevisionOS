@@ -141,6 +141,8 @@ RevisionOS/
 |----------|---------|-------------|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,https://revisionos-frontend.pages.dev` | Comma-separated allowed frontend origins |
+| `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?revisionos-frontend\.pages\.dev` | Optional regex for Cloudflare Pages preview URLs |
 | `LLM_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Primary LLM model |
 | `UPLOAD_DIR` | `./uploads` | File upload directory |
 | `DAILY_NEW_CARDS_LIMIT` | `20` | Max new cards per day |
@@ -171,6 +173,7 @@ Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repos
 | `RAILWAY_SERVICE_ID` | Railway backend service id (recommended, avoids name ambiguity) |
 | `RAILWAY_SERVICE_NAME` | Railway backend service name (fallback if service id is not provided) |
 | `VITE_API_BASE_URL` | Public backend API base URL for frontend builds (e.g. `https://revisionos-api-production.up.railway.app/api`) |
+| `CORS_ORIGINS` | Backend allowed frontend origins for Railway (e.g. `https://revisionos-frontend.pages.dev`) |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Pages deploy permissions |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
 | `CLOUDFLARE_PAGES_PROJECT` | Cloudflare Pages project name (e.g. `revisionos-frontend`) |
