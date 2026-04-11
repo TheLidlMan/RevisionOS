@@ -1,19 +1,19 @@
 import json
+import uuid
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
 from models.flashcard import Flashcard
 from models.module import Module
-from services import ai_service
+from models.document import Document
 from services.fsrs_service import schedule_review
-from services.pipeline_service import _generate_missing_flashcards
+from services import ai_service
 
 router = APIRouter(tags=["flashcards"])
 
@@ -51,7 +51,6 @@ class FlashcardResponse(BaseModel):
     source_document_id: Optional[str] = None
     source_excerpt: Optional[str] = None
     tags: list[str] = []
-    generation_source: str = "MANUAL"
     due: Optional[datetime] = None
     stability: float = 0.0
     difficulty: float = 0.0
@@ -62,7 +61,6 @@ class FlashcardResponse(BaseModel):
     state: str = "NEW"
     last_review: Optional[datetime] = None
     created_at: datetime
-    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -113,7 +111,6 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
         source_document_id=card.source_document_id,
         source_excerpt=card.source_excerpt,
         tags=tags,
-        generation_source=card.generation_source,
         due=card.due,
         stability=card.stability,
         difficulty=card.difficulty,
@@ -124,7 +121,6 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
         state=card.state,
         last_review=card.last_review,
         created_at=card.created_at,
-        updated_at=card.updated_at,
     )
 
 
@@ -134,8 +130,6 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
 def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
-    generation_source: Optional[str] = None,
-    state: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Flashcard)
@@ -144,10 +138,6 @@ def list_flashcards(
     if due:
         now = datetime.utcnow()
         query = query.filter(Flashcard.due <= now)
-    if generation_source:
-        query = query.filter(Flashcard.generation_source == generation_source.upper())
-    if state:
-        query = query.filter(Flashcard.state == state.upper())
     cards = query.order_by(Flashcard.due.asc()).all()
     return [_card_to_response(c) for c in cards]
 
@@ -168,12 +158,10 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
         source_document_id=body.source_document_id,
         source_excerpt=body.source_excerpt,
         tags=json.dumps(body.tags),
-        generation_source="MANUAL",
         due=datetime.utcnow(),
         state="NEW",
     )
     db.add(card)
-    module.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(card)
     return _card_to_response(card)
@@ -194,9 +182,6 @@ def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(
         card.cloze_text = body.cloze_text
     if body.tags is not None:
         card.tags = json.dumps(body.tags)
-    module = db.query(Module).filter(Module.id == card.module_id).first()
-    if module:
-        module.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(card)
     return _card_to_response(card)
@@ -207,9 +192,6 @@ def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
     card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
-    module = db.query(Module).filter(Module.id == card.module_id).first()
-    if module:
-        module.updated_at = datetime.utcnow()
     db.delete(card)
     db.commit()
     return None
@@ -247,9 +229,6 @@ def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(ge
     card.lapses = result["lapses"]
     card.state = result["state"]
     card.last_review = result["last_review"]
-    module = db.query(Module).filter(Module.id == card.module_id).first()
-    if module:
-        module.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(card)
@@ -281,47 +260,59 @@ async def generate_cards_for_module(
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
-    before_ids = {card.id for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()}
-    await _generate_missing_flashcards(module, db)
+    docs = (
+        db.query(Document)
+        .filter(Document.module_id == module_id, Document.processing_status == "done")
+        .all()
+    )
+    if not docs:
+        raise HTTPException(status_code=400, detail="No processed documents found in this module")
+
+    num_cards = (body.num_cards if body and body.num_cards else settings.CARDS_PER_DOCUMENT)
+    all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
+
+    # Truncate if too long
+    max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
+    if len(all_text) > max_chars:
+        all_text = all_text[:max_chars]
+
+    generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
+
+    created_cards = []
+    for card_data in generated_cards_data:
+        card_type = card_data.get("type", "basic").upper()
+        if card_type not in ("BASIC", "CLOZE"):
+            card_type = "BASIC"
+
+        tags = card_data.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+
+        front_val = card_data.get("front") or ""
+        back_val = card_data.get("back") or ""
+        # For CLOZE cards the AI may omit back; fall back to cloze_text
+        if card_type == "CLOZE" and not back_val:
+            back_val = card_data.get("cloze_text") or ""
+
+        card = Flashcard(
+            module_id=module_id,
+            front=front_val,
+            back=back_val,
+            card_type=card_type,
+            cloze_text=card_data.get("cloze_text"),
+            source_document_id=docs[0].id if docs else None,
+            tags=json.dumps(tags),
+            due=datetime.utcnow(),
+            state="NEW",
+        )
+        db.add(card)
+        created_cards.append(card)
+
     db.commit()
-    created_cards = [
-        card
-        for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
-        if card.id not in before_ids
-    ]
+    for c in created_cards:
+        db.refresh(c)
 
-    return GenerateCardsResponse(generated=len(created_cards), cards=[_card_to_response(card) for card in created_cards])
-
-
-@router.post("/api/modules/{module_id}/generate-cards/stream")
-async def generate_cards_for_module_stream(
-    module_id: str,
-    body: Optional[GenerateCardsRequest] = None,
-    db: Session = Depends(get_db),
-):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
-    if not settings.GROQ_API_KEY:
-        raise HTTPException(status_code=400, detail="Groq API key not configured")
-
-    async def event_stream():
-        try:
-            yield ai_service.encode_sse_event({"event": "status", "kind": "flashcard_generation", "message": "Generating flashcards"})
-            before_ids = {card.id for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()}
-            await _generate_missing_flashcards(module, db)
-            db.commit()
-            created_cards = [
-                card
-                for card in db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
-                if card.id not in before_ids
-            ]
-            result = GenerateCardsResponse(
-                generated=len(created_cards),
-                cards=[_card_to_response(card) for card in created_cards],
-            ).model_dump(mode="json")
-            yield ai_service.encode_sse_event({"event": "final", "kind": "flashcard_generation", "result": result})
-        except Exception as exc:
-            yield ai_service.encode_sse_event({"event": "error", "kind": "flashcard_generation", "message": str(exc)})
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return GenerateCardsResponse(
+        generated=len(created_cards),
+        cards=[_card_to_response(c) for c in created_cards],
+    )
