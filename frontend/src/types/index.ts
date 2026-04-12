@@ -149,6 +149,11 @@ export interface ReviewResponse {
   lapses: number;
   state: CardState;
   last_review?: string;
+  xp_earned?: number;
+  xp_total?: number;
+  level?: number;
+  level_up?: boolean;
+  new_achievements?: { key: string; name: string; icon: string }[];
 }
 
 export type QuestionType = 'MCQ' | 'SHORT_ANSWER' | 'TRUE_FALSE' | 'FILL_BLANK' | 'EXAM_STYLE';
@@ -704,4 +709,59 @@ export interface OcclusionRegion {
   width: number;
   height: number;
   label: string;
+}
+
+// ---- Feature: Gamification ----
+export interface UserStats {
+  streak_current: number;
+  streak_longest: number;
+  last_study_date?: string;
+  xp_total: number;
+  level: number;
+  xp_for_current_level: number;
+  xp_for_next_level: number;
+  hearts_remaining: number;
+  hearts_enabled: boolean;
+  daily_goal_target: number;
+  daily_goal_completed: number;
+  daily_goal_date?: string;
+  total_cards_reviewed: number;
+  total_quizzes_completed: number;
+  total_perfect_quizzes: number;
+  total_study_time_sec: number;
+}
+
+export interface AchievementDef {
+  achievement_key: string;
+  name: string;
+  description: string;
+  icon: string;
+  unlocked: boolean;
+  unlocked_at?: string;
+}
+
+export interface XPAwardResponse {
+  xp_earned: number;
+  xp_total: number;
+  level: number;
+  level_up: boolean;
+  new_achievements: { key: string; name: string; icon: string }[];
+}
+
+export interface HeartUseResponse {
+  hearts_remaining: number;
+  hearts_enabled: boolean;
+  replenish_at?: string;
+}
+
+// ---- Feature: AI Tutor ----
+export interface TutorExplainResponse {
+  explanation: string;
+  key_takeaways: string[];
+  memory_hook: string;
+}
+
+export interface TopicGenerateResponse {
+  generated: number;
+  topic: string;
 }

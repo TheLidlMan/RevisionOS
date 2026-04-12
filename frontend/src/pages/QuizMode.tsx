@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
@@ -18,6 +18,8 @@ import type {
   SessionResults,
   QuestionForQuiz,
 } from '../types';
+import confetti from 'canvas-confetti';
+import AITutorPanel from '../components/AITutorPanel';
 
 type Phase = 'config' | 'quiz' | 'results';
 
@@ -57,6 +59,7 @@ export default function QuizMode() {
   const [results, setResults] = useState<SessionResults | null>(null);
   const [generationStatus, setGenerationStatus] = useState('');
   const [generationDelta, setGenerationDelta] = useState('');
+  const [showTutor, setShowTutor] = useState(false);
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -110,7 +113,11 @@ export default function QuizMode() {
       submitAnswer(sessionId, { question_id: questionId, user_answer: answer }),
     onSuccess: (data) => {
       setAnswerResult(data);
-      if (data.is_correct) setScore((s) => s + 1);
+      if (data.is_correct) {
+        setScore((s) => s + 1);
+        // Mini confetti burst on correct answer
+        confetti({ particleCount: 30, spread: 50, origin: { y: 0.7 }, colors: ['#c4956a', '#78b478', '#f5f0e8'] });
+      }
     },
   });
 
@@ -119,6 +126,8 @@ export default function QuizMode() {
     onSuccess: (data) => {
       setResults(data);
       setPhase('results');
+      // Celebration confetti on quiz completion
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
     },
   });
 
@@ -556,6 +565,14 @@ export default function QuizMode() {
           {answerResult.explanation && (
             <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>{answerResult.explanation}</p>
           )}
+          <button
+            onClick={() => setShowTutor(true)}
+            className="mt-3 flex items-center gap-1.5 text-sm transition-all hover:opacity-80"
+            style={{ color: 'var(--accent)', fontWeight: 400, fontSize: '0.8rem' }}
+          >
+            <Brain size={14} />
+            Ask Tutor
+          </button>
         </motion.div>
       )}
 
@@ -593,6 +610,15 @@ export default function QuizMode() {
           </button>
         )}
       </div>
+
+      {/* AI Tutor Panel */}
+      {showTutor && question && (
+        <AITutorPanel
+          concept={question.question_text}
+          context={answerResult?.explanation || ''}
+          onClose={() => setShowTutor(false)}
+        />
+      )}
     </div>
   );
 }

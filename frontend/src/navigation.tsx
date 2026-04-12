@@ -5,6 +5,7 @@ import {
   Graph,
   SquaresFour,
   TrendDown,
+  Trophy,
 } from '@phosphor-icons/react';
 import { matchPath } from 'react-router-dom';
 
@@ -26,6 +27,7 @@ export interface ResolvedAppPage {
 export const primaryNavItems = [
   { to: '/', label: 'Dashboard', icon: SquaresFour },
   { to: '/quiz', label: 'Quiz', icon: BookOpen },
+  { to: '/achievements', label: 'Trophies', icon: Trophy },
   { to: '/knowledge-graph', label: 'Graph', icon: Graph },
   { to: '/curriculum', label: 'Plan', icon: CalendarDots },
   { to: '/forgetting-curve', label: 'Curve', icon: TrendDown },
@@ -59,6 +61,7 @@ const appPageConfigs: AppPageConfig[] = [
   },
   { pattern: '/knowledge-graph', title: 'Knowledge Graph' },
   { pattern: '/forgetting-curve', title: 'Forgetting Curve' },
+  { pattern: '/achievements', title: 'Achievements' },
   { pattern: '/curriculum', title: 'Study Plan' },
   { pattern: '/settings', title: 'Settings' },
   { pattern: '/quiz', title: 'Quiz' },

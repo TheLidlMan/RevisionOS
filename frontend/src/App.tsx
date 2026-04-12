@@ -15,6 +15,7 @@ import KnowledgeGraph from './pages/KnowledgeGraph';
 import CurriculumPage from './pages/CurriculumPage';
 import LoginPage from './pages/LoginPage';
 import ForgettingCurve from './pages/ForgettingCurve';
+import AchievementsPage from './pages/AchievementsPage';
 import { useAuthStore } from './store/auth';
 
 export default function App() {
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
             <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
             <Route path="/quiz" element={<QuizMode />} />
+            <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
             <Route path="/curriculum" element={<CurriculumPage />} />

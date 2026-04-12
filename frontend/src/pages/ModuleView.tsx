@@ -32,6 +32,7 @@ import {
   getKnowledgeGraph,
   getModule,
   updateModule,
+  generateCardsFromTopic,
 } from '../api/client';
 import ShowMoreText from '../components/ShowMoreText';
 import Skeleton from '../components/Skeleton';
@@ -79,6 +80,8 @@ export default function ModuleView() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [topicGenOpen, setTopicGenOpen] = useState(false);
+  const [topicInput, setTopicInput] = useState('');
   const [examDateDraft, setExamDateDraft] = useState<string | null>(null);
   const [documentSort, setDocumentSort] = usePersistentState<DocumentSort>(`module:${id}:document-sort`, 'UPDATED');
   const [pendingDocumentDeletes, setPendingDocumentDeletes] = useState<string[]>([]);
@@ -187,6 +190,25 @@ export default function ModuleView() {
       queryClient.invalidateQueries({ queryKey: ['module', id] });
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
+    },
+  });
+
+  const topicGenerateMutation = useMutation({
+    mutationFn: (topic: string) => generateCardsFromTopic(topic, id!, 30),
+    onSuccess: (data) => {
+      showToast({
+        title: 'Cards Generated',
+        description: `Generated ${data.generated} flashcards for "${data.topic}"`,
+        tone: 'success',
+      });
+      setTopicGenOpen(false);
+      setTopicInput('');
+      queryClient.invalidateQueries({ queryKey: ['module', id] });
+      queryClient.invalidateQueries({ queryKey: ['modules'] });
+      queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
+    },
+    onError: () => {
+      showToast({ title: 'Generation failed', description: 'Could not generate cards for this topic.', tone: 'error' });
     },
   });
 
@@ -447,6 +469,14 @@ export default function ModuleView() {
                   {generateCardsMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <CardsThree size={18} />}
                   {generateCardsMutation.isPending ? 'Generating Cards' : 'Generate Cards'}
                 </button>
+                <button
+                  type="button"
+                  className="scholar-btn-secondary"
+                  onClick={() => setTopicGenOpen(!topicGenOpen)}
+                >
+                  <BookOpen size={18} />
+                  From Topic
+                </button>
                 <details className="relative">
                   <summary
                     className="list-none cursor-pointer px-4 py-2.5 inline-flex items-center justify-center gap-2 w-full"
@@ -505,6 +535,38 @@ export default function ModuleView() {
         </div>
         {flashcardStatus && (
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>{flashcardStatus}</p>
+        )}
+        {topicGenOpen && (
+          <div className="mt-3 p-4" style={glass}>
+            <p style={{ color: 'var(--text)', fontWeight: 500, fontSize: '0.9rem', marginBottom: 8 }}>
+              Generate Cards from Topic
+            </p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: 12 }}>
+              Enter a topic name and AI will generate flashcards from scratch — no upload needed.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={topicInput}
+                onChange={(e) => setTopicInput(e.target.value)}
+                placeholder="e.g. Black-Scholes model, Krebs cycle, Treaty of Versailles"
+                className="flex-1 px-3 py-2 rounded-lg"
+                style={{ background: 'rgba(139,115,85,0.1)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.9rem' }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && topicInput.trim()) {
+                    topicGenerateMutation.mutate(topicInput.trim());
+                  }
+                }}
+              />
+              <button
+                onClick={() => topicGenerateMutation.mutate(topicInput.trim())}
+                disabled={!topicInput.trim() || topicGenerateMutation.isPending}
+                className="scholar-btn px-4 py-2"
+              >
+                {topicGenerateMutation.isPending ? <SpinnerGap size={16} className="animate-spin" /> : 'Generate'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

@@ -617,3 +617,46 @@ export const getSessionReplay = (sessionId: string) =>
 // ---- Feature: Mastery Heatmap ----
 export const getMasteryHeatmap = (days: number = 90) =>
   client.get<MasteryHeatmapData>('/analytics/mastery-heatmap', { params: { days } }).then((r) => r.data);
+
+// ---- Feature: Gamification ----
+export const getGamificationStats = () =>
+  client.get<import('../types').UserStats>('/gamification/stats').then((r) => r.data);
+
+export const getAchievements = () =>
+  client.get<import('../types').AchievementDef[]>('/gamification/achievements').then((r) => r.data);
+
+export const updateDailyGoal = (target: number) =>
+  client.post<import('../types').UserStats>('/gamification/daily-goal', { target }).then((r) => r.data);
+
+export const toggleHearts = (enabled: boolean) =>
+  client.post<import('../types').HeartUseResponse>('/gamification/hearts/toggle', { enabled }).then((r) => r.data);
+
+export const useHeart = () =>
+  client.post<import('../types').HeartUseResponse>('/gamification/hearts/use').then((r) => r.data);
+
+export const awardXP = () =>
+  client.post<import('../types').XPAwardResponse>('/gamification/xp/award').then((r) => r.data);
+
+// ---- Feature: AI Tutor ----
+export const tutorExplain = (
+  concept: string,
+  context: string = '',
+  mode: 'eli5' | 'deep' | 'example' | 'why_wrong' = 'eli5',
+  cardId?: string,
+  userAnswer?: string,
+) =>
+  client.post<import('../types').TutorExplainResponse>('/tutor/explain', {
+    concept,
+    context,
+    mode,
+    card_id: cardId,
+    user_answer: userAnswer,
+  }).then((r) => r.data);
+
+// ---- Feature: Topic Generation ----
+export const generateCardsFromTopic = (topic: string, moduleId: string, numCards: number = 30) =>
+  client.post<import('../types').TopicGenerateResponse>('/tutor/topic-generate', {
+    topic,
+    module_id: moduleId,
+    num_cards: numCards,
+  }).then((r) => r.data);
