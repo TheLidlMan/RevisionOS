@@ -29,7 +29,7 @@ const MODES = [
   { key: 'why_wrong' as const, label: 'Why Wrong?', icon: Question, desc: 'Explain errors' },
 ];
 
-export default function AITutorPanel({ concept, context, cardId, cardFront, cardBack, onClose }: AITutorPanelProps) {
+export default function AITutorPanel({ concept, context, cardId, cardFront, onClose }: AITutorPanelProps) {
   const [selectedMode, setSelectedMode] = useState<'eli5' | 'deep' | 'example' | 'why_wrong'>('eli5');
   const [result, setResult] = useState<TutorExplainResponse | null>(null);
 

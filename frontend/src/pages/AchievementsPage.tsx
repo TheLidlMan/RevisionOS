@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Trophy, Target, Heart } from '@phosphor-icons/react';
 import { getGamificationStats, getAchievements, updateDailyGoal, toggleHearts } from '../api/client';
-import type { UserStats, AchievementDef } from '../types';
 import Skeleton from '../components/Skeleton';
 import MasteryRing from '../components/MasteryRing';
 import { useState } from 'react';
