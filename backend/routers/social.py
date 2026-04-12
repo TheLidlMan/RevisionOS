@@ -3,8 +3,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import func
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -28,7 +28,7 @@ class LeaderboardEntry(BaseModel):
 
 
 class LeaderboardResponse(BaseModel):
-    entries: list[LeaderboardEntry]
+    entries: list[LeaderboardEntry] = Field(default_factory=list)
     your_rank: int | None = None
 
 
@@ -47,7 +47,8 @@ def get_leaderboard(
     user: Optional[User] = Depends(get_current_user),
 ):
     """Global leaderboard ranked by total reviews."""
-    users = db.query(User).filter(User.is_active == True).all()
+    users = db.query(User).filter(User.is_active.is_(True)).all()
+    users_by_id = {u.id: u for u in users}
 
     cutoff = _get_timeframe_cutoff(timeframe)
 
@@ -74,35 +75,50 @@ def get_leaderboard(
     }
 
     streak_dates: dict[str, set] = defaultdict(set)
-    for session_user_id, started_at in (
-        db.query(StudySession.user_id, StudySession.started_at)
-        .filter(StudySession.user_id.isnot(None), StudySession.started_at.isnot(None))
-        .all()
-    ):
-        streak_dates[session_user_id].add(started_at.date())
+    session_dates_query = db.query(
+        StudySession.user_id,
+        func.date(StudySession.started_at),
+    ).filter(
+        StudySession.user_id.isnot(None),
+        StudySession.started_at.isnot(None),
+    )
+    for session_user_id, session_date in session_dates_query.distinct().all():
+        if session_user_id and session_date:
+            streak_dates[session_user_id].add(datetime.fromisoformat(session_date).date())
 
-    card_totals: dict[str, int] = defaultdict(int)
-    mastered_totals: dict[str, int] = defaultdict(int)
-    for card_user_id, state, lapses, reps in (
-        db.query(Flashcard.user_id, Flashcard.state, Flashcard.lapses, Flashcard.reps)
+    card_totals: dict[str, int] = {}
+    mastered_totals: dict[str, int] = {}
+    for card_user_id, total_cards, mastered_cards in (
+        db.query(
+            Flashcard.user_id,
+            func.count(Flashcard.id),
+            func.sum(case((
+                and_(
+                    Flashcard.state == "REVIEW",
+                    Flashcard.lapses == 0,
+                    Flashcard.reps >= 2,
+                ),
+                1,
+            ), else_=0)),
+        )
         .filter(Flashcard.user_id.isnot(None))
+        .group_by(Flashcard.user_id)
         .all()
     ):
-        card_totals[card_user_id] += 1
-        if state == "REVIEW" and lapses == 0 and reps >= 2:
-            mastered_totals[card_user_id] += 1
+        card_totals[card_user_id] = total_cards or 0
+        mastered_totals[card_user_id] = mastered_cards or 0
 
     entries = []
-    for u in users:
-        total_reviews = review_counts.get(u.id, 0)
-        total_sessions = session_counts.get(u.id, 0)
+    for user_id, u in users_by_id.items():
+        total_reviews = review_counts.get(user_id, 0)
+        total_sessions = session_counts.get(user_id, 0)
 
         if total_reviews == 0 and total_sessions == 0:
             continue
 
         streak = 0
         today = datetime.utcnow().date()
-        user_session_dates = streak_dates.get(u.id, set())
+        user_session_dates = streak_dates.get(user_id, set())
         for i in range(365):
             check_date = today - timedelta(days=i)
             if check_date in user_session_dates:
@@ -113,12 +129,12 @@ def get_leaderboard(
                 break
 
         mastery_pct = 0.0
-        if card_totals.get(u.id):
-            mastery_pct = round((mastered_totals.get(u.id, 0) / card_totals[u.id]) * 100, 1)
+        if card_totals.get(user_id):
+            mastery_pct = round((mastered_totals.get(user_id, 0) / card_totals[user_id]) * 100, 1)
 
         entries.append(LeaderboardEntry(
             rank=0,
-            user_id=u.id,
+            user_id=user_id,
             display_name=u.display_name,
             streak=streak,
             mastery_pct=mastery_pct,
@@ -166,16 +182,21 @@ def list_shared_modules(db: Session = Depends(get_db)):
     """List publicly shared modules (stub — returns all modules with user info)."""
     from models.module import Module
 
-    modules = db.query(Module).filter(Module.user_id.isnot(None)).limit(20).all()
+    modules = (
+        db.query(Module, User.display_name)
+        .join(User, User.id == Module.user_id)
+        .filter(Module.user_id.isnot(None))
+        .limit(20)
+        .all()
+    )
     results = []
-    for m in modules:
-        owner = db.query(User).filter(User.id == m.user_id).first()
+    for m, owner_name in modules:
         results.append({
             "id": m.id,
             "name": m.name,
             "description": m.description,
             "color": m.color,
-            "owner_name": owner.display_name if owner else "Unknown",
+            "owner_name": owner_name or "Unknown",
             "created_at": m.created_at.isoformat() if m.created_at else None,
         })
     return results

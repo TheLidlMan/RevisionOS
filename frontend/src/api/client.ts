@@ -121,6 +121,47 @@ const getApiUrl = (path: string) => {
   return `${normalizedBase}${normalizedPath}`;
 };
 
+const stripHtml = (value: string) =>
+  value
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const getReadableStreamError = async (response: Response) => {
+  const fallbackMessage = `Streaming request failed with status ${response.status}`;
+  const contentType = response.headers.get('content-type') || '';
+  const text = (await response.text()).trim();
+
+  if (!text) {
+    return fallbackMessage;
+  }
+
+  if (contentType.includes('application/json')) {
+    try {
+      const payload = JSON.parse(text) as { detail?: string; message?: string; error?: string };
+      return payload.detail || payload.message || payload.error || fallbackMessage;
+    } catch {
+      return fallbackMessage;
+    }
+  }
+
+  if (text.startsWith('<')) {
+    return stripHtml(text) || fallbackMessage;
+  }
+
+  return text;
+};
+
+const createStreamError = (message: string, cause?: unknown) => {
+  const error = new Error(message);
+  if (cause !== undefined) {
+    Object.assign(error, { cause });
+  }
+  return error;
+};
+
 export const getAuthGoogleStartUrl = (returnTo?: string, redirect: boolean = false) => {
   const params = new URLSearchParams();
   if (returnTo) {
@@ -140,8 +181,7 @@ const consumeEventStream = async <T>(
   onEvent?: (event: AIStreamEvent<T>) => void,
 ): Promise<T> => {
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Streaming request failed with status ${response.status}`);
+    throw createStreamError(await getReadableStreamError(response));
   }
   if (!response.body) {
     throw new Error('Streaming response did not include a body');
@@ -151,36 +191,72 @@ const consumeEventStream = async <T>(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalResult: T | undefined;
+  let done = false;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
+  const processEventBlock = (block: string) => {
+    const lines = block.replace(/\r/g, '').split('\n');
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (!line || line.startsWith(':')) {
+        continue;
+      }
+
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).replace(/^\s/, ''));
+      }
     }
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
+
+    if (dataLines.length === 0) {
+      return;
+    }
+
+    const payload = dataLines.join('\n').trim();
+    if (!payload) {
+      return;
+    }
+
+    let event: AIStreamEvent<T>;
+    try {
+      event = JSON.parse(payload) as AIStreamEvent<T>;
+    } catch (error) {
+      throw createStreamError('Streaming response returned malformed JSON', error);
+    }
+
+    onEvent?.(event);
+    if (event.event === 'error') {
+      throw createStreamError(event.message || 'Streaming request failed');
+    }
+    if (event.event === 'final') {
+      finalResult = event.result as T;
+    }
+  };
+
+  while (!done) {
+    const chunk = await reader.read();
+    done = chunk.done;
+    buffer += decoder.decode(chunk.value, { stream: !done });
+    const parts = buffer.split(/\r?\n\r?\n/);
     buffer = parts.pop() ?? '';
 
-    for (const chunk of parts) {
-      const dataLine = chunk
-        .split('\n')
-        .find((line) => line.startsWith('data:'));
-      if (!dataLine) {
-        continue;
-      }
-      const payload = dataLine.slice(5).trim();
-      if (!payload) {
-        continue;
-      }
-      const event = JSON.parse(payload) as AIStreamEvent<T>;
-      onEvent?.(event);
-      if (event.event === 'error') {
-        throw new Error(event.message || 'Streaming request failed');
-      }
-      if (event.event === 'final') {
-        finalResult = event.result as T;
-      }
+    for (const part of parts) {
+      processEventBlock(part);
     }
+  }
+
+  const flushed = decoder.decode();
+  if (flushed) {
+    buffer += flushed;
+  }
+
+  if (buffer.trim()) {
+    processEventBlock(buffer);
+  }
+
+  try {
+    await reader.cancel();
+  } catch {
+    // Ignore cancellation errors after stream completion.
   }
 
   if (finalResult === undefined) {
@@ -189,22 +265,35 @@ const consumeEventStream = async <T>(
   return finalResult;
 };
 
+const withReadableStreamErrors = async <T>(request: Promise<T>) => {
+  try {
+    return await request;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw createStreamError(error.message, error);
+    }
+    throw createStreamError('Streaming request failed', error);
+  }
+};
+
 const streamJson = async <T>(
   path: string,
   body: unknown,
   onEvent?: (event: AIStreamEvent<T>) => void,
 ) => {
   const token = getAuthToken();
-  const response = await fetch(getApiUrl(path), {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  return consumeEventStream<T>(response, onEvent);
+  return withReadableStreamErrors((async () => {
+    const response = await fetch(getApiUrl(path), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    return consumeEventStream<T>(response, onEvent);
+  })());
 };
 
 const streamFormData = async <T>(
@@ -213,13 +302,15 @@ const streamFormData = async <T>(
   onEvent?: (event: AIStreamEvent<T>) => void,
 ) => {
   const token = getAuthToken();
-  const response = await fetch(getApiUrl(path), {
-    method: 'POST',
-    credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: form,
-  });
-  return consumeEventStream<T>(response, onEvent);
+  return withReadableStreamErrors((async () => {
+    const response = await fetch(getApiUrl(path), {
+      method: 'POST',
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    });
+    return consumeEventStream<T>(response, onEvent);
+  })());
 };
 
 // Modules
@@ -430,7 +521,7 @@ export const getPerformanceOverTime = (moduleId?: string, days?: number) =>
 // ---- Phase 3: Folder Import ----
 
 export const importFolder = (moduleId: string, folderPath: string) =>
-  client.post(`/documents/import-folder/${moduleId}`, { folder_path: folderPath }).then((r) => r.data);
+  client.post(`/documents/import-folder/${moduleId}`, { path: folderPath }).then((r) => r.data);
 
 // ---- Phase 4: Knowledge & Export ----
 
@@ -476,9 +567,6 @@ export const authSession = () =>
 export const authLogout = () =>
   client.post('/auth/logout').then((r) => r.data);
 
-export const authGoogleStart = (returnTo?: string) =>
-  client.get(getAuthGoogleStartUrl(returnTo)).then((r) => r.data);
-
 // ---- Social / Leaderboard ----
 export const getLeaderboard = (timeframe?: string) =>
   client.get('/social/leaderboard', { params: { timeframe } }).then((r) => r.data);
@@ -512,9 +600,6 @@ export const getContentMap = (moduleId: string) =>
 
 export const indexDocument = (documentId: string) =>
   client.post(`/documents/${documentId}/index`).then((r) => r.data);
-
-export const generateQuestionsForConcept = (conceptId: string, numQuestions?: number) =>
-  client.post(`/concepts/${conceptId}/generate-questions`, null, { params: { num_questions: numQuestions || 5 } }).then((r) => r.data);
 
 // ---- Feature: Forgetting Curve ----
 export const getForgettingCurve = (cardId: string) =>

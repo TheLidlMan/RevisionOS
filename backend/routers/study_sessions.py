@@ -2,9 +2,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 
 from database import get_db
 from models.quiz_session import StudySession
@@ -51,7 +51,7 @@ class DailyActivity(BaseModel):
 class StreakResponse(BaseModel):
     current_streak: int = 0
     longest_streak: int = 0
-    daily_activity: list[DailyActivity] = []
+    daily_activity: list[DailyActivity] = Field(default_factory=list)
 
 
 class DailyScore(BaseModel):
@@ -61,7 +61,7 @@ class DailyScore(BaseModel):
 
 
 class PerformanceOverTimeResponse(BaseModel):
-    daily_scores: list[DailyScore] = []
+    daily_scores: list[DailyScore] = Field(default_factory=list)
     days: int = 30
     module_id: Optional[str] = None
 
@@ -75,7 +75,10 @@ def list_sessions(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    query = db.query(StudySession)
+    query = db.query(
+        StudySession,
+        Module.name.label("module_name"),
+    ).outerjoin(Module, Module.id == StudySession.module_id)
     if user:
         query = query.filter(StudySession.user_id == user.id)
     if module_id:
@@ -83,12 +86,7 @@ def list_sessions(
     sessions = query.order_by(StudySession.started_at.desc()).limit(limit).all()
 
     results = []
-    for s in sessions:
-        module_name = None
-        if s.module_id:
-            mod = db.query(Module).filter(Module.id == s.module_id).first()
-            if mod:
-                module_name = mod.name
+    for s, module_name in sessions:
         results.append(SessionListItem(
             id=s.id,
             module_id=s.module_id,
@@ -107,48 +105,52 @@ def list_sessions(
 
 @router.get("/api/analytics/overview", response_model=OverviewResponse)
 def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    mod_query = db.query(Module)
-    card_query = db.query(Flashcard)
-    session_query_base = db.query(StudySession)
-    if user:
-        mod_query = mod_query.filter(Module.user_id == user.id)
-        card_query = card_query.filter(Flashcard.user_id == user.id)
-        session_query_base = session_query_base.filter(StudySession.user_id == user.id)
-    total_modules = mod_query.count()
-    total_cards = card_query.count()
-
     now = datetime.utcnow()
-    due_query = db.query(Flashcard).filter(Flashcard.due <= now)
-    if user:
-        due_query = due_query.filter(Flashcard.user_id == user.id)
-    due_today = due_query.count()
+    module_query = db.query(func.count(Module.id))
+    card_summary_query = db.query(
+        func.count(Flashcard.id),
+        func.sum(case((Flashcard.due <= now, 1), else_=0)),
+        func.sum(
+            case((
+                and_(
+                    Flashcard.state == "REVIEW",
+                    Flashcard.lapses == 0,
+                    Flashcard.reps >= 2,
+                ),
+                1,
+            ), else_=0)
+        ),
+    )
+    session_dates_query = db.query(func.date(StudySession.started_at)).filter(StudySession.started_at.isnot(None))
 
-    # Calculate streak: consecutive days with at least one session
-    streak = 0
+    if user:
+        module_query = module_query.filter(Module.user_id == user.id)
+        card_summary_query = card_summary_query.filter(Flashcard.user_id == user.id)
+        session_dates_query = session_dates_query.filter(StudySession.user_id == user.id)
+
+    total_modules = module_query.scalar() or 0
+    total_cards, due_today, mastered = card_summary_query.one()
+    total_cards = total_cards or 0
+    due_today = due_today or 0
+    mastered = mastered or 0
+
     today = datetime.utcnow().date()
+    session_dates = {
+        datetime.fromisoformat(session_date).date()
+        for (session_date,) in session_dates_query.distinct().all()
+        if session_date
+    }
+    streak = 0
     for i in range(365):
         check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-        sess_q = (
-            session_query_base
-            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
-        )
-        has_session = sess_q.first()
-        if has_session:
+        if check_date in session_dates:
             streak += 1
-        else:
-            if i == 0:
-                continue  # Today might not have a session yet
-            break
+            continue
+        if i == 0:
+            continue
+        break
 
-    # Overall mastery
-    all_cards = card_query.all()
-    if all_cards:
-        mastered = sum(1 for c in all_cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
-        overall_mastery = round((mastered / len(all_cards)) * 100, 1)
-    else:
-        overall_mastery = 0.0
+    overall_mastery = round((mastered / total_cards) * 100, 1) if total_cards else 0.0
 
     return OverviewResponse(
         total_modules=total_modules,
@@ -163,75 +165,73 @@ def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] =
 def get_streaks(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Current streak, longest streak, and daily activity for last 30 days."""
     today = datetime.utcnow().date()
+    window_start = today - timedelta(days=29)
+    session_counts_query = db.query(
+        func.date(StudySession.started_at).label("date"),
+        func.count(StudySession.id).label("sessions"),
+    ).filter(StudySession.started_at.isnot(None))
+    review_counts_query = db.query(
+        func.date(StudySession.started_at).label("date"),
+        func.count(ReviewLog.id).label("items_reviewed"),
+    ).join(ReviewLog, ReviewLog.session_id == StudySession.id).filter(StudySession.started_at.isnot(None))
+    streak_dates_query = db.query(func.date(StudySession.started_at)).filter(StudySession.started_at.isnot(None))
 
-    # Build daily activity for last 30 days
-    daily_activity: list[DailyActivity] = []
+    if user:
+        session_counts_query = session_counts_query.filter(StudySession.user_id == user.id)
+        review_counts_query = review_counts_query.filter(StudySession.user_id == user.id)
+        streak_dates_query = streak_dates_query.filter(StudySession.user_id == user.id)
+
+    session_counts_query = session_counts_query.filter(
+        StudySession.started_at >= datetime.combine(window_start, datetime.min.time())
+    ).group_by(func.date(StudySession.started_at))
+    review_counts_query = review_counts_query.filter(
+        StudySession.started_at >= datetime.combine(window_start, datetime.min.time())
+    ).group_by(func.date(StudySession.started_at))
+
+    session_counts = {date: count for date, count in session_counts_query.all() if date}
+    review_counts = {date: count for date, count in review_counts_query.all() if date}
+
+    daily_activity = []
     active_days: list[bool] = []
-
     for i in range(30):
         check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-
-        sess_q = db.query(func.count(StudySession.id)).filter(
-            StudySession.started_at >= day_start, StudySession.started_at <= day_end
-        )
-        if user:
-            sess_q = sess_q.filter(StudySession.user_id == user.id)
-        session_count = sess_q.scalar() or 0
-
-        items_reviewed = 0
-        if session_count > 0:
-            sid_q = db.query(StudySession).filter(
-                StudySession.started_at >= day_start, StudySession.started_at <= day_end
-            )
-            if user:
-                sid_q = sid_q.filter(StudySession.user_id == user.id)
-            session_ids = [s.id for s in sid_q.all()]
-            if session_ids:
-                items_reviewed = (
-                    db.query(func.count(ReviewLog.id))
-                    .filter(ReviewLog.session_id.in_(session_ids))
-                    .scalar()
-                ) or 0
-
+        date_key = check_date.isoformat()
+        session_count = session_counts.get(date_key, 0)
         daily_activity.append(DailyActivity(
-            date=check_date.isoformat(),
+            date=date_key,
             sessions=session_count,
-            items_reviewed=items_reviewed,
+            items_reviewed=review_counts.get(date_key, 0),
         ))
         active_days.append(session_count > 0)
 
-    # Current streak
     current_streak = 0
     for i, active in enumerate(active_days):
         if active:
             current_streak += 1
-        else:
-            if i == 0:
-                continue  # Today may not have activity yet
-            break
+            continue
+        if i == 0:
+            continue
+        break
 
-    # Longest streak (check up to 365 days)
+    streak_dates = sorted(
+        {
+            datetime.fromisoformat(session_date).date()
+            for (session_date,) in streak_dates_query.distinct().all()
+            if session_date
+        }
+    )
     longest_streak = 0
-    temp_streak = 0
-    for i in range(365):
-        check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-        longest_q = db.query(StudySession).filter(
-            StudySession.started_at >= day_start, StudySession.started_at <= day_end
-        )
-        if user:
-            longest_q = longest_q.filter(StudySession.user_id == user.id)
-        has_session = longest_q.first()
-        if has_session:
-            temp_streak += 1
-            longest_streak = max(longest_streak, temp_streak)
+    previous_date = None
+    current_run = 0
+    for streak_date in streak_dates:
+        if previous_date and (streak_date - previous_date).days == 1:
+            current_run += 1
         else:
-            temp_streak = 0
+            current_run = 1
+        longest_streak = max(longest_streak, current_run)
+        previous_date = streak_date
 
-    daily_activity.reverse()  # Chronological order
+    daily_activity.reverse()
 
     return StreakResponse(
         current_streak=current_streak,
@@ -249,39 +249,35 @@ def get_performance_over_time(
 ):
     """Daily average scores over time."""
     today = datetime.utcnow().date()
+    start_date = today - timedelta(days=days - 1)
+    query = db.query(
+        func.date(StudySession.started_at).label("date"),
+        func.avg(StudySession.score_pct).label("avg_score"),
+        func.count(StudySession.id).label("sessions"),
+    ).filter(
+        StudySession.started_at >= datetime.combine(start_date, datetime.min.time()),
+        StudySession.ended_at.isnot(None),
+    )
+    if user:
+        query = query.filter(StudySession.user_id == user.id)
+    if module_id:
+        query = query.filter(StudySession.module_id == module_id)
+
+    score_by_date = {
+        date: (round(avg_score or 0.0, 1), sessions)
+        for date, avg_score, sessions in query.group_by(func.date(StudySession.started_at)).all()
+        if date
+    }
+
     daily_scores: list[DailyScore] = []
-
     for i in range(days):
-        check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-
-        query = db.query(StudySession).filter(
-            StudySession.started_at >= day_start,
-            StudySession.started_at <= day_end,
-            StudySession.ended_at.isnot(None),
-        )
-        if user:
-            query = query.filter(StudySession.user_id == user.id)
-        if module_id:
-            query = query.filter(StudySession.module_id == module_id)
-
-        sessions = query.all()
-        if sessions:
-            avg_score = sum(s.score_pct for s in sessions) / len(sessions)
-            daily_scores.append(DailyScore(
-                date=check_date.isoformat(),
-                avg_score=round(avg_score, 1),
-                sessions=len(sessions),
-            ))
-        else:
-            daily_scores.append(DailyScore(
-                date=check_date.isoformat(),
-                avg_score=0.0,
-                sessions=0,
-            ))
-
-    daily_scores.reverse()  # Chronological order
+        check_date = start_date + timedelta(days=i)
+        avg_score, session_count = score_by_date.get(check_date.isoformat(), (0.0, 0))
+        daily_scores.append(DailyScore(
+            date=check_date.isoformat(),
+            avg_score=avg_score,
+            sessions=session_count,
+        ))
 
     return PerformanceOverTimeResponse(
         daily_scores=daily_scores,

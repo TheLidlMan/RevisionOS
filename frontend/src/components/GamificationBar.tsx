@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { getGamificationStats } from '../api/client';
+import { usePageVisibility } from '../hooks/usePageVisibility';
 import type { UserStats } from '../types';
 
 const glass = {
@@ -91,10 +92,11 @@ function HeartsDisplay({ hearts, enabled }: { hearts: number; enabled: boolean }
 }
 
 export default function GamificationBar() {
+  const isPageVisible = usePageVisibility();
   const { data: stats, isLoading } = useQuery({
     queryKey: ['gamification-stats'],
     queryFn: getGamificationStats,
-    refetchInterval: 30000, // Refresh every 30s
+    refetchInterval: isPageVisible ? 30000 : false,
   });
 
   if (isLoading || !stats) {

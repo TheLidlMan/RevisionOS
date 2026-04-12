@@ -63,8 +63,10 @@ def get_db():
         db.close()
 
 
-def create_tables():
+def create_tables(dev_bootstrap: bool = False):
     import models  # noqa: F401 — registers all models
+    if not dev_bootstrap:
+        return
     Base.metadata.create_all(bind=engine)
     _ensure_runtime_schema()
 

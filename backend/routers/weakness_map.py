@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -35,7 +35,7 @@ class ConceptConfidence(BaseModel):
 
 
 class WeaknessMapResponse(BaseModel):
-    concepts: list[ConceptConfidence]
+    concepts: list[ConceptConfidence] = Field(default_factory=list)
     total_concepts: int = 0
     weak_count: int = 0
     mastered_count: int = 0
@@ -45,12 +45,12 @@ class OptimalSessionItem(BaseModel):
     concept_id: str
     concept_name: str
     confidence_score: float
-    question_ids: list[str] = []
-    flashcard_ids: list[str] = []
+    question_ids: list[str] = Field(default_factory=list)
+    flashcard_ids: list[str] = Field(default_factory=list)
 
 
 class OptimalSessionResponse(BaseModel):
-    items: list[OptimalSessionItem]
+    items: list[OptimalSessionItem] = Field(default_factory=list)
     total_items: int = 0
 
 
@@ -186,7 +186,7 @@ def get_optimal_session(
     cutoff = max(1, len(scored) // 5)
     weak_concepts = scored[:cutoff]
 
-    items: list[OptimalSessionItem] = []
+    items: list[OptimalSessionItem] = Field(default_factory=list)
     total_items = 0
 
     for conf, concept in weak_concepts:

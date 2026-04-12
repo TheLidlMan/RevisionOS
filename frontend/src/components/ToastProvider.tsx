@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CheckCircle, WarningCircle, X } from '@phosphor-icons/react';
 import { ToastContext, type ToastInput, type ToastTone } from './toast-context';
@@ -29,6 +29,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timeoutsRef = useRef<Map<string, number>>(new Map());
 
+  useEffect(() => () => {
+    timeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
+    timeoutsRef.current.clear();
+  }, []);
+
   const dismiss = useCallback((id: string) => {
     const timeout = timeoutsRef.current.get(id);
     if (timeout) {
@@ -40,7 +45,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const showToast = useCallback(
     ({ durationMs = 5000, tone = 'info', ...toast }: ToastInput) => {
-      const id = crypto.randomUUID();
+      const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `toast-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const nextToast: Toast = { id, tone, durationMs, ...toast };
       setToasts((current) => [...current, nextToast]);
       const timeout = window.setTimeout(() => dismiss(id), durationMs);

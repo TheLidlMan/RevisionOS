@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -480,13 +480,22 @@ def cancel_document_processing(
 # ---------- Folder import schemas ----------
 
 class FolderImportRequest(BaseModel):
-    path: str
+    path: Optional[str] = None
+    folder_path: Optional[str] = Field(default=None, alias="folder_path")
+
+    @model_validator(mode="after")
+    def validate_path(self):
+        resolved_path = self.path or self.folder_path
+        if not resolved_path:
+            raise ValueError("path is required")
+        self.path = resolved_path
+        return self
 
 
 class FolderImportResult(BaseModel):
     imported: int = 0
     failed: int = 0
-    files: list[dict] = []
+    files: list[dict] = Field(default_factory=list)
 
 
 # ---------- Folder import endpoint ----------

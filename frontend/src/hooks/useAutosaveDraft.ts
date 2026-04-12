@@ -11,7 +11,7 @@ export function useAutosaveDraft<T>(
   enabled = true,
   delayMs = 500,
 ) {
-  const [draft, setDraft, hydrated] = usePersistentState<T>(storageKey, initialValue);
+  const [draft, setDraftState, hydrated] = usePersistentState<T>(storageKey, initialValue, { persist: false });
   const [initialStored] = useState(() => {
     if (!isBrowser() || !enabled) {
       return false;
@@ -51,7 +51,7 @@ export function useAutosaveDraft<T>(
     setRestored(false);
     setStatus('idle');
     const next = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
-    setDraft(next);
+    setDraftState(next);
   };
 
   return {
@@ -60,7 +60,7 @@ export function useAutosaveDraft<T>(
       if (enabled && hydrated) {
         setStatus('saving');
       }
-      setDraft(value);
+      setDraftState(value);
     }) as Dispatch<SetStateAction<T>>,
     status,
     restored,

@@ -153,7 +153,7 @@ class SynthesisCardOut(BaseModel):
     front: str
     back: str
     card_type: str
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -161,7 +161,7 @@ class SynthesisCardOut(BaseModel):
 
 class SynthesisCardsResponse(BaseModel):
     generated: int
-    cards: list[SynthesisCardOut]
+    cards: list[SynthesisCardOut] = Field(default_factory=list)
 
 
 # ── Elaboration Prompts ──────────────────────────────────────────
@@ -173,7 +173,7 @@ class FollowUpQuestion(BaseModel):
 
 class ElaborationResponse(BaseModel):
     card_id: str
-    follow_up_questions: list[FollowUpQuestion]
+    follow_up_questions: list[FollowUpQuestion] = Field(default_factory=list)
 
 
 # ── Free Recall ──────────────────────────────────────────────────

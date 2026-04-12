@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import logging
 import os
 from time import perf_counter
@@ -16,13 +17,27 @@ from routers import weakness_map, knowledge_graph, search as search_router, curr
 from routers import social, integrations, collaboration, features
 from routers import gamification, tutor
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    validate_auth_settings()
+    create_tables(dev_bootstrap=settings.DATABASE_URL.startswith("sqlite"))
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    await ensure_document_retry_worker_started()
+    try:
+        yield
+    finally:
+        await stop_document_retry_worker()
+
+
 fastapi_app = FastAPI(
     title="Revise OS API",
     description="AI-Powered Adaptive Study Platform Backend",
     version="1.0.0",
+    lifespan=lifespan,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _should_log_request_timing(path: str) -> bool:
@@ -104,20 +119,6 @@ fastapi_app.include_router(collaboration.router)
 fastapi_app.include_router(features.router)
 fastapi_app.include_router(gamification.router)
 fastapi_app.include_router(tutor.router)
-
-
-@fastapi_app.on_event("startup")
-async def on_startup():
-    validate_auth_settings()
-    create_tables()
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    await ensure_document_retry_worker_started()
-
-
-@fastapi_app.on_event("shutdown")
-async def on_shutdown():
-    await stop_document_retry_worker()
-
 
 @fastapi_app.get("/")
 def root():

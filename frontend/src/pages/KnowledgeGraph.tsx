@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Graph, SpinnerGap, WarningCircle } from '@phosphor-icons/react';
 import { getModules, getKnowledgeGraph, detectConceptGapsStream } from '../api/client';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import type { GraphNode, ConceptGap } from '../types';
 
 const glass = {
@@ -34,6 +35,7 @@ export default function KnowledgeGraph() {
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [gapStatus, setGapStatus] = useState('');
   const [gapDelta, setGapDelta] = useState('');
+  const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const gapMutation = useMutation({
     mutationFn: (modId: string) =>
@@ -63,11 +65,11 @@ export default function KnowledgeGraph() {
   const { data: graph, isLoading } = useQuery({
     queryKey: ['knowledge-graph', moduleId],
     queryFn: () => getKnowledgeGraph(moduleId),
-    enabled: !!moduleId,
+    enabled: Boolean(moduleId) && isDesktop,
   });
 
   const layout = useMemo(() => {
-    if (!graph || graph.nodes.length === 0) return { positions: new Map<string, { x: number; y: number }>(), width: 900, height: 700 };
+    if (!isDesktop || !moduleId || !graph || graph.nodes.length === 0) return { positions: new Map<string, { x: number; y: number }>(), width: 900, height: 700 };
     const nodes = [...graph.nodes].sort(
       (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || a.name.localeCompare(b.name),
     );
@@ -174,7 +176,7 @@ export default function KnowledgeGraph() {
     }
 
     return { positions, width, height };
-  }, [graph, gaps]);
+  }, [gaps, graph, isDesktop, moduleId]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto w-full">

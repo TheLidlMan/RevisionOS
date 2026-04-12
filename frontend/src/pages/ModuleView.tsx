@@ -40,6 +40,7 @@ import Skeleton from '../components/Skeleton';
 import { useToast } from '../hooks/useToast';
 import { browserStorage } from '../utils/browser';
 import UploadDocumentsModal from '../components/UploadDocumentsModal';
+import { usePageVisibility } from '../hooks/usePageVisibility';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import type { ContentMapData, CurriculumData, Document, KnowledgeGraphData, ModuleDetail } from '../types';
@@ -91,6 +92,7 @@ export default function ModuleView() {
   const [flashcardStatus, setFlashcardStatus] = useState('');
   const deleteTimeoutsRef = useRef<Map<string, number>>(new Map());
   const moduleDeleteTimeoutRef = useRef<number | null>(null);
+  const isPageVisible = usePageVisibility();
   useScrollRestoration(`module:${id}`);
 
   const refreshModuleData = () => {
@@ -106,8 +108,11 @@ export default function ModuleView() {
     queryFn: () => getModule(id!),
     enabled: !!id,
     refetchInterval: (query) => {
+      if (!isPageVisible) {
+        return false;
+      }
       const data = query.state.data as ModuleDetail | undefined;
-      return data && ['queued', 'running', 'cancelling'].includes(data.pipeline_status) ? 2000 : false;
+      return data && ['queued', 'running', 'cancelling'].includes(data.pipeline_status) ? 2000 : 15000;
     },
   });
 

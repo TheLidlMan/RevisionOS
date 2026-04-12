@@ -28,12 +28,13 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const formInitialized = useRef(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [apiKey, setApiKey] = useState('');
   const {
-    draft,
+    draft: form,
     setDraft,
     status: draftStatus,
     restored,
-  } = useAutosaveDraft('settings:draft', () => ({ apiKey: '', form: {} as SettingsUpdate }));
+  } = useAutosaveDraft('settings:draft', () => ({} as SettingsUpdate));
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -44,9 +45,8 @@ export default function SettingsPage() {
     if (settingsQuery.data && !formInitialized.current) {
       formInitialized.current = true;
       setDraft((current) => ({
-        ...current,
-        form: Object.keys(current.form || {}).length > 0
-          ? current.form
+        ...(Object.keys(current || {}).length > 0
+          ? current
           : {
               llm_model_fast: settingsQuery.data.llm_model_fast,
               llm_model: settingsQuery.data.llm_model,
@@ -60,8 +60,10 @@ export default function SettingsPage() {
               cards_per_document: settingsQuery.data.cards_per_document,
               questions_per_document: settingsQuery.data.questions_per_document,
               daily_new_cards_limit: settingsQuery.data.daily_new_cards_limit,
+              weakness_threshold: settingsQuery.data.weakness_threshold,
               desired_retention: settingsQuery.data.desired_retention,
-            },
+              theme: settingsQuery.data.theme,
+            }),
       }));
     }
   }, [setDraft, settingsQuery.data]);
@@ -78,19 +80,19 @@ export default function SettingsPage() {
 
   const validateAndSaveMutation = useMutation({
     mutationFn: async () => {
-      if (!draft.apiKey.trim()) {
+      if (!apiKey.trim()) {
         throw new Error('Enter an API key first.');
       }
-      const result = await validateApiKey(draft.apiKey.trim());
+      const result = await validateApiKey(apiKey.trim());
       if (!result.valid) {
         throw new Error(result.message);
       }
-      return updateSettings({ groq_api_key: draft.apiKey.trim() });
+      return updateSettings({ groq_api_key: apiKey.trim() });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       setFeedback({ type: 'success', message: 'Groq API key validated and saved.' });
-      setDraft((current) => ({ ...current, apiKey: '' }));
+      setApiKey('');
     },
     onError: (error) => setFeedback({ type: 'error', message: (error as Error).message }),
   });
@@ -111,9 +113,8 @@ export default function SettingsPage() {
     );
   }
 
-  const form = draft.form;
   const canSave = Boolean(form.llm_model) && Boolean(form.llm_model_fast) && !saveMutation.isPending;
-  const canValidateKey = draft.apiKey.trim().length > 0 && !validateAndSaveMutation.isPending;
+  const canValidateKey = apiKey.trim().length > 0 && !validateAndSaveMutation.isPending;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
@@ -137,13 +138,13 @@ export default function SettingsPage() {
             Validate and save the key in one step so automatic summaries and flashcards can run.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="password"
-              value={draft.apiKey}
-              onChange={(event) => {
-                setDraft((current) => ({ ...current, apiKey: event.target.value }));
-                setFeedback(null);
-              }}
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(event) => {
+                  setApiKey(event.target.value);
+                  setFeedback(null);
+                }}
               placeholder={settingsQuery.data?.groq_api_key || 'gsk_...'}
               className="flex-1 px-3 py-3"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}
@@ -153,7 +154,7 @@ export default function SettingsPage() {
               Validate & Save
             </button>
           </div>
-          {!draft.apiKey.trim() ? (
+          {!apiKey.trim() ? (
             <p style={{ color: 'var(--text-tertiary)', fontSize: '0.82rem', marginTop: 10 }}>Paste a Groq key to validate and save it.</p>
           ) : null}
         </section>
@@ -168,7 +169,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Fast model</span>
-              <select value={form.llm_model_fast ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_model_fast: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <select value={form.llm_model_fast ?? ''} onChange={(event) => setDraft((current) => ({ ...current, llm_model_fast: event.target.value }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
                 {MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -177,7 +178,7 @@ export default function SettingsPage() {
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Mid model</span>
-              <select value={form.llm_model_quality ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_model_quality: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <select value={form.llm_model_quality ?? ''} onChange={(event) => setDraft((current) => ({ ...current, llm_model_quality: event.target.value }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
                 {MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -186,7 +187,7 @@ export default function SettingsPage() {
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Main model</span>
-              <select value={form.llm_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_model: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <select value={form.llm_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, llm_model: event.target.value }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
                 {MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -195,7 +196,7 @@ export default function SettingsPage() {
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Fallback model</span>
-              <select value={form.llm_fallback_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_fallback_model: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+              <select value={form.llm_fallback_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, llm_fallback_model: event.target.value }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
                 {MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -204,17 +205,17 @@ export default function SettingsPage() {
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Temperature</span>
-              <input type="number" min={0} max={2} step={0.1} value={form.llm_temperature ?? 0.1} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_temperature: Number(event.target.value) || 0 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+              <input type="number" min={0} max={2} step={0.1} value={form.llm_temperature ?? 0.1} onChange={(event) => setDraft((current) => ({ ...current, llm_temperature: Number(event.target.value) || 0 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Top P</span>
-              <input type="number" min={0} max={1} step={0.05} value={form.llm_top_p ?? 1} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_top_p: Number(event.target.value) || 0 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+              <input type="number" min={0} max={1} step={0.05} value={form.llm_top_p ?? 1} onChange={(event) => setDraft((current) => ({ ...current, llm_top_p: Number(event.target.value) || 0 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Max completion tokens</span>
-              <input type="number" min={1} max={65536} value={form.llm_max_completion_tokens ?? 4096} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_max_completion_tokens: Number(event.target.value) || 4096 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+              <input type="number" min={1} max={65536} value={form.llm_max_completion_tokens ?? 4096} onChange={(event) => setDraft((current) => ({ ...current, llm_max_completion_tokens: Number(event.target.value) || 4096 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label className="flex items-center justify-between gap-3 px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
@@ -222,7 +223,7 @@ export default function SettingsPage() {
                 <span className="block mb-1" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>JSON mode</span>
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>Request structured Groq JSON output</span>
               </span>
-              <input type="checkbox" checked={Boolean(form.llm_json_mode_enabled)} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_json_mode_enabled: event.target.checked } }))} />
+              <input type="checkbox" checked={Boolean(form.llm_json_mode_enabled)} onChange={(event) => setDraft((current) => ({ ...current, llm_json_mode_enabled: event.target.checked }))} />
             </label>
 
             <label className="flex items-center justify-between gap-3 px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
@@ -230,7 +231,7 @@ export default function SettingsPage() {
                 <span className="block mb-1" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Streaming</span>
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>Enable streamed Groq responses where supported</span>
               </span>
-              <input type="checkbox" checked={Boolean(form.llm_streaming_enabled)} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_streaming_enabled: event.target.checked } }))} />
+              <input type="checkbox" checked={Boolean(form.llm_streaming_enabled)} onChange={(event) => setDraft((current) => ({ ...current, llm_streaming_enabled: event.target.checked }))} />
             </label>
           </div>
         </section>
@@ -242,22 +243,22 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Daily new cards limit</span>
-              <input type="number" min={1} max={100} value={form.daily_new_cards_limit ?? 20} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, daily_new_cards_limit: Number(event.target.value) || 20 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+               <input type="number" min={1} max={100} value={form.daily_new_cards_limit ?? 20} onChange={(event) => setDraft((current) => ({ ...current, daily_new_cards_limit: Number(event.target.value) || 20 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Flashcards per document</span>
-              <input type="number" min={1} max={200} value={form.cards_per_document ?? 200} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, cards_per_document: Number(event.target.value) || 200 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+               <input type="number" min={1} max={200} value={form.cards_per_document ?? 200} onChange={(event) => setDraft((current) => ({ ...current, cards_per_document: Number(event.target.value) || 200 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Quiz questions per run</span>
-              <input type="number" min={1} max={20} value={form.questions_per_document ?? 10} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, questions_per_document: Number(event.target.value) || 10 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+               <input type="number" min={1} max={20} value={form.questions_per_document ?? 10} onChange={(event) => setDraft((current) => ({ ...current, questions_per_document: Number(event.target.value) || 10 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Desired retention</span>
-              <input type="number" min={0.5} max={0.99} step={0.01} value={form.desired_retention ?? 0.9} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, desired_retention: Number(event.target.value) || 0.9 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+               <input type="number" min={0.5} max={0.99} step={0.01} value={form.desired_retention ?? 0.9} onChange={(event) => setDraft((current) => ({ ...current, desired_retention: Number(event.target.value) || 0.9 }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
           </div>
 

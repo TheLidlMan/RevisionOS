@@ -6,6 +6,7 @@ import CreateModuleModal from '../components/CreateModuleModal';
 import ModuleCard from '../components/ModuleCard';
 import Skeleton from '../components/Skeleton';
 import GamificationBar from '../components/GamificationBar';
+import { usePageVisibility } from '../hooks/usePageVisibility';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { formatRelativeTime } from '../utils/formatters';
 
@@ -20,6 +21,7 @@ const glass = {
 export default function Dashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [sortBy, setSortBy] = usePersistentState<'UPDATED' | 'NEWEST' | 'OLDEST' | 'NAME'>('dashboard:module-sort', 'UPDATED');
+  const isPageVisible = usePageVisibility();
 
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics'],
@@ -30,8 +32,13 @@ export default function Dashboard() {
     queryKey: ['modules'],
     queryFn: getModules,
     refetchInterval: (query) => {
+      if (!isPageVisible) {
+        return false;
+      }
       const data = query.state.data;
-      return data?.some((module) => module.pipeline_status === 'running' || module.pipeline_status === 'queued') ? 2000 : false;
+      return data?.some((module) => module.pipeline_status === 'running' || module.pipeline_status === 'queued')
+        ? 2000
+        : 15000;
     },
   });
 

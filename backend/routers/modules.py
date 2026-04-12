@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -62,7 +62,7 @@ class ModuleResponse(BaseModel):
 
 
 class ModuleDetailResponse(ModuleResponse):
-    documents: list[dict] = []
+    documents: list[dict] = Field(default_factory=list)
 
 
 class ModuleStatsResponse(BaseModel):

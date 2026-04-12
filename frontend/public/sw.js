@@ -1,5 +1,6 @@
-const SHELL_CACHE = 'reviseos-shell-v1';
-const RUNTIME_CACHE = 'reviseos-runtime-v1';
+const CACHE_VERSION = '2026-04-12-v2';
+const SHELL_CACHE = `reviseos-shell-${CACHE_VERSION}`;
+const RUNTIME_CACHE = `reviseos-runtime-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -13,7 +14,7 @@ const SHELL_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_ASSETS))
+      .then((cache) => Promise.all(SHELL_ASSETS.map((asset) => cache.add(new Request(asset, { cache: 'reload' })))))
       .then(() => self.skipWaiting())
   );
 });
@@ -63,13 +64,9 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        const response = await fetch(request);
-        const cache = await caches.open(RUNTIME_CACHE);
-        cache.put(request, response.clone());
-        return response;
+        return await fetch(request, { cache: 'no-store' });
       } catch {
-        const cached = await caches.match(request);
-        return cached || caches.match('/index.html') || caches.match('/');
+        return (await caches.match('/index.html')) || (await caches.match('/'));
       }
     })());
     return;

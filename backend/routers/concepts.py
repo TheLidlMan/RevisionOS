@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -59,8 +59,8 @@ class ConceptDetailResponse(BaseModel):
     explanation: Optional[str] = None
     importance_score: float = 0.5
     created_at: datetime
-    flashcards: list[FlashcardBrief] = []
-    questions: list[QuestionBrief] = []
+    flashcards: list[FlashcardBrief] = Field(default_factory=list)
+    questions: list[QuestionBrief] = Field(default_factory=list)
     accuracy_rate: float = 0.0
     total_reviews: int = 0
 
@@ -70,8 +70,8 @@ class DrillSessionResponse(BaseModel):
     concept_id: str
     concept_name: str
     session_type: str = "WEAKNESS_DRILL"
-    question_ids: list[str] = []
-    flashcard_ids: list[str] = []
+    question_ids: list[str] = Field(default_factory=list)
+    flashcard_ids: list[str] = Field(default_factory=list)
     total_items: int = 0
 
 

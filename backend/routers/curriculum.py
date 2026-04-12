@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -24,13 +24,13 @@ class SessionPlan(BaseModel):
     day: str
     activity: str
     duration_minutes: int = 30
-    concepts: list[str] = []
+    concepts: list[str] = Field(default_factory=list)
 
 
 class WeekPlan(BaseModel):
     week: int
-    focus_areas: list[str] = []
-    sessions: list[SessionPlan] = []
+    focus_areas: list[str] = Field(default_factory=list)
+    sessions: list[SessionPlan] = Field(default_factory=list)
 
 
 class CurriculumResponse(BaseModel):

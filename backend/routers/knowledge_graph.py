@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
@@ -38,8 +38,8 @@ class GraphEdge(BaseModel):
 
 class KnowledgeGraphResponse(BaseModel):
     module_name: str = ""
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
 
 
 # ---------- Helpers ----------

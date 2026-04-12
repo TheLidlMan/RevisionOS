@@ -29,7 +29,7 @@ class TutorExplainRequest(BaseModel):
 
 class TutorExplainResponse(BaseModel):
     explanation: str
-    key_takeaways: list[str] = []
+    key_takeaways: list[str] = Field(default_factory=list)
     memory_hook: str = ""
 
 

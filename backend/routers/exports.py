@@ -2,13 +2,14 @@ import io
 import json
 import os
 import random
+import tempfile
 import uuid
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -28,10 +29,10 @@ router = APIRouter(tags=["exports"])
 
 class ExportModuleResponse(BaseModel):
     module: dict
-    documents: list[dict]
-    concepts: list[dict]
-    flashcards: list[dict]
-    quiz_questions: list[dict]
+    documents: list[dict] = Field(default_factory=list)
+    concepts: list[dict] = Field(default_factory=list)
+    flashcards: list[dict] = Field(default_factory=list)
+    quiz_questions: list[dict] = Field(default_factory=list)
     exported_at: str
 
 
@@ -58,6 +59,17 @@ def _module_to_export_dict(db: Session, module: Module) -> dict:
     concepts = db.query(Concept).filter(Concept.module_id == module.id).all()
     flashcards = db.query(Flashcard).filter(Flashcard.module_id == module.id).all()
     questions = db.query(QuizQuestion).filter(QuizQuestion.module_id == module.id).all()
+
+    def _parse_json_array(value: Optional[str]) -> list:
+        if not value:
+            return []
+        if isinstance(value, list):
+            return value
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     return {
         "module": {
@@ -90,7 +102,7 @@ def _module_to_export_dict(db: Session, module: Module) -> dict:
                 "card_type": f.card_type,
                 "cloze_text": f.cloze_text,
                 "source_excerpt": f.source_excerpt,
-                "tags": f.tags,
+                "tags": _parse_json_array(f.tags),
             }
             for f in flashcards
         ],
@@ -98,7 +110,7 @@ def _module_to_export_dict(db: Session, module: Module) -> dict:
             {
                 "question_text": q.question_text,
                 "question_type": q.question_type,
-                "options": q.options,
+                "options": _parse_json_array(q.options),
                 "correct_answer": q.correct_answer,
                 "explanation": q.explanation,
                 "difficulty": q.difficulty,
@@ -156,17 +168,24 @@ def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
         )
         deck.add_note(note)
 
-    # Write to in-memory buffer
-    buf = io.BytesIO()
-    package = genanki.Package(deck)
-    package.write_to_file(buf)
-    buf.seek(0)
+    temp_path: str | None = None
+    payload = b""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".apkg", delete=False) as temp_file:
+            temp_path = temp_file.name
+        package = genanki.Package(deck)
+        package.write_to_file(temp_path)
+        with open(temp_path, "rb") as packaged_file:
+            payload = packaged_file.read()
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
     safe_name = "".join(c for c in module.name if c.isalnum() or c in (" ", "-", "_")).strip()
     filename = f"{safe_name}.apkg"
 
     return StreamingResponse(
-        buf,
+        io.BytesIO(payload),
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -259,8 +278,11 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         tags = f_data.get("tags", "[]")
         if isinstance(tags, list):
             tags = json.dumps(tags)
+        elif not isinstance(tags, str):
+            tags = "[]"
         card = Flashcard(
             module_id=module.id,
+            user_id=user.id if user else None,
             front=f_data.get("front", ""),
             back=f_data.get("back", ""),
             card_type=f_data.get("card_type", "BASIC"),
@@ -279,8 +301,11 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         options = q_data.get("options")
         if isinstance(options, list):
             options = json.dumps(options)
+        elif options is not None and not isinstance(options, str):
+            options = None
         question = QuizQuestion(
             module_id=module.id,
+            user_id=user.id if user else None,
             question_text=q_data.get("question_text", ""),
             question_type=q_data.get("question_type", "MCQ"),
             options=options,

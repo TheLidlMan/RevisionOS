@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +12,7 @@ from config import reload_runtime_settings, settings
 from services.ai_service import validate_api_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+logger = logging.getLogger(__name__)
 
 SETTINGS_FILE = Path(__file__).resolve().parent.parent / "settings.json"
 
@@ -86,16 +89,39 @@ class ValidateKeyResponse(BaseModel):
 
 def _load_settings() -> dict:
     if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            merged = {**DEFAULT_SETTINGS, **data}
-            return merged
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("Settings file must contain a JSON object")
+            return {**DEFAULT_SETTINGS, **data}
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning("Failed to load settings from %s: %s", SETTINGS_FILE, exc)
     return dict(DEFAULT_SETTINGS)
 
 
 def _save_settings(data: dict) -> None:
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=SETTINGS_FILE.parent,
+            prefix=f"{SETTINGS_FILE.stem}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            json.dump(data, temp_file, indent=2)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = temp_file.name
+        os.replace(temp_path, SETTINGS_FILE)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("Failed to persist settings to %s: %s", SETTINGS_FILE, exc)
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise HTTPException(status_code=500, detail="Failed to persist settings")
 
 
 # ---------- Endpoints ----------

@@ -87,6 +87,10 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
       );
       queryClient.invalidateQueries({ queryKey: ['modules'] });
       queryClient.invalidateQueries({ queryKey: ['module', moduleId] });
+      queryClient.invalidateQueries({ queryKey: ['content-map', moduleId] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-graph', moduleId] });
+      queryClient.invalidateQueries({ queryKey: ['curriculum', moduleId] });
+      queryClient.invalidateQueries({ queryKey: ['quiz-status', moduleId] });
       onUploaded?.();
     },
     onError: (error, { idx }) => {

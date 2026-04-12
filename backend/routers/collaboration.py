@@ -17,6 +17,41 @@ _rooms: dict[str, dict] = {}
 _connections: dict[str, list[WebSocket]] = {}
 
 
+def _dedupe_participants(participants: list[dict]) -> list[dict]:
+    deduped: dict[str, dict] = {}
+    for participant in participants:
+        user_id = str(participant.get("user_id") or "").strip()
+        if not user_id:
+            continue
+        deduped[user_id] = {
+            "user_id": user_id,
+            "display_name": participant.get("display_name") or "Unknown",
+        }
+    return list(deduped.values())
+
+
+def _prune_room_state(room_id: str) -> None:
+    connections = _connections.get(room_id, [])
+    if connections:
+        _connections[room_id] = connections
+        return
+    _connections.pop(room_id, None)
+
+
+async def _broadcast(room_id: str, payload: dict) -> None:
+    live_connections: list[WebSocket] = []
+    for connection in _connections.get(room_id, []):
+        try:
+            await connection.send_json(payload)
+            live_connections.append(connection)
+        except Exception:
+            continue
+    if live_connections:
+        _connections[room_id] = live_connections
+    else:
+        _connections.pop(room_id, None)
+
+
 class CreateRoomRequest(BaseModel):
     module_id: str
     name: str
@@ -55,7 +90,6 @@ def create_room(
         "created_at": datetime.utcnow().isoformat(),
     }
     _rooms[room_id] = room
-    _connections[room_id] = []
 
     return RoomResponse(**room)
 
@@ -109,50 +143,38 @@ async def websocket_room(websocket: WebSocket, room_id: str):
 
             if msg_type == "join":
                 user_info = data.get("user", {})
-                _rooms[room_id]["participants"].append(user_info)
-                for ws in _connections[room_id]:
-                    try:
-                        await ws.send_json({
-                            "type": "user_joined",
-                            "data": user_info,
-                            "participants": _rooms[room_id]["participants"],
-                        })
-                    except Exception:
-                        pass
+                _rooms[room_id]["participants"] = _dedupe_participants(
+                    [*_rooms[room_id]["participants"], user_info]
+                )
+                await _broadcast(room_id, {
+                    "type": "user_joined",
+                    "data": user_info,
+                    "participants": _rooms[room_id]["participants"],
+                })
 
             elif msg_type == "answer":
-                for ws in _connections[room_id]:
-                    try:
-                        await ws.send_json({
-                            "type": "answer_submitted",
-                            "data": data.get("data", {}),
-                        })
-                    except Exception:
-                        pass
+                await _broadcast(room_id, {
+                    "type": "answer_submitted",
+                    "data": data.get("data", {}),
+                })
 
             elif msg_type == "chat":
-                for ws in _connections[room_id]:
-                    try:
-                        await ws.send_json({
-                            "type": "chat_message",
-                            "data": data.get("data", {}),
-                        })
-                    except Exception:
-                        pass
+                await _broadcast(room_id, {
+                    "type": "chat_message",
+                    "data": data.get("data", {}),
+                })
 
             elif msg_type == "next_question":
-                for ws in _connections[room_id]:
-                    try:
-                        await ws.send_json({
-                            "type": "next_question",
-                            "data": data.get("data", {}),
-                        })
-                    except Exception:
-                        pass
+                await _broadcast(room_id, {
+                    "type": "next_question",
+                    "data": data.get("data", {}),
+                })
 
     except WebSocketDisconnect:
         if room_id in _connections:
             _connections[room_id] = [ws for ws in _connections[room_id] if ws != websocket]
+            _prune_room_state(room_id)
     except Exception:
         if room_id in _connections:
             _connections[room_id] = [ws for ws in _connections[room_id] if ws != websocket]
+            _prune_room_state(room_id)

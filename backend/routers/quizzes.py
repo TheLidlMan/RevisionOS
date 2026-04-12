@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -80,7 +80,7 @@ class GenerateQuizResponse(BaseModel):
 class StartSessionRequest(BaseModel):
     module_id: Optional[str] = None
     session_type: str = "QUIZ"
-    question_ids: list[str] = []
+    question_ids: list[str] = Field(default_factory=list)
 
 
 class SessionResponse(BaseModel):
@@ -94,7 +94,7 @@ class SessionResponse(BaseModel):
     incorrect: int = 0
     skipped: int = 0
     score_pct: float = 0.0
-    questions: list[QuestionForQuiz] = []
+    questions: list[QuestionForQuiz] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -121,7 +121,7 @@ class SessionResultsResponse(BaseModel):
     incorrect: int
     skipped: int
     score_pct: float
-    review_logs: list[dict] = []
+    review_logs: list[dict] = Field(default_factory=list)
 
 
 # ---------- Helpers ----------

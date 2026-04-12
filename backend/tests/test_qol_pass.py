@@ -1,8 +1,10 @@
+import json
 import os
 import shutil
 import tempfile
 import unittest
 import uuid
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +21,7 @@ from config import settings
 from database import Base, SessionLocal, engine
 from models.concept import Concept
 from models.document import Document
+from models.flashcard import Flashcard
 from models.module import Module
 from models.quiz_question import QuizQuestion
 from models.user import User
@@ -115,9 +118,22 @@ class BalancedQolPassRouteTests(unittest.TestCase):
                 difficulty="MEDIUM",
             )
             db.add_all([self.owner_question, self.other_question])
+            self.owner_flashcard = Flashcard(
+                id=str(uuid.uuid4()),
+                user_id=self.owner.id,
+                module_id=self.owner_module.id,
+                front="Owned front",
+                back="Owned back",
+                tags='["tag-a", "tag-b"]',
+                state="REVIEW",
+                lapses=0,
+                reps=2,
+            )
+            db.add(self.owner_flashcard)
             db.commit()
             self.owner_question_id = self.owner_question.id
             self.other_question_id = self.other_question.id
+            self.owner_flashcard_id = self.owner_flashcard.id
 
     def tearDown(self):
         shutil.rmtree(self.upload_dir, ignore_errors=True)
@@ -211,6 +227,69 @@ class BalancedQolPassRouteTests(unittest.TestCase):
         finally:
             shutil.rmtree(import_dir, ignore_errors=True)
 
+    def test_import_folder_accepts_legacy_folder_path_key(self):
+        self._as_owner()
+        import_dir = tempfile.mkdtemp(prefix="revisionos-import-folder-legacy-")
+        try:
+            source_file = Path(import_dir) / "legacy.txt"
+            source_file.write_text("legacy folder path", encoding="utf-8")
+
+            response = self.client.post(
+                f"/api/documents/import-folder/{self.owner_module_id}",
+                json={"folder_path": import_dir},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["imported"], 1)
+        finally:
+            shutil.rmtree(import_dir, ignore_errors=True)
+
+    def test_export_anki_returns_apkg_download(self):
+        self._as_owner()
+
+        response = self.client.get(f"/api/modules/{self.owner_module_id}/export-anki")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment; filename=", response.headers["content-disposition"])
+        self.assertGreater(len(response.content), 0)
+
+    def test_json_export_normalizes_arrays_and_import_accepts_legacy_strings(self):
+        self._as_owner()
+
+        export_response = self.client.get(f"/api/modules/{self.owner_module_id}/export-json")
+        self.assertEqual(export_response.status_code, 200)
+        exported = export_response.json()
+        self.assertEqual(exported["flashcards"][0]["tags"], ["tag-a", "tag-b"])
+        self.assertEqual(exported["quiz_questions"][0]["options"], ["A", "B", "C", "D"])
+
+        legacy_payload = {
+            "module": {"name": "Legacy Import", "description": "", "color": "#abcdef"},
+            "documents": [],
+            "concepts": [],
+            "flashcards": [{"front": "Legacy front", "back": "Legacy back", "tags": '["legacy"]'}],
+            "quiz_questions": [{
+                "question_text": "Legacy question",
+                "question_type": "MCQ",
+                "options": '["X","Y"]',
+                "correct_answer": "X",
+                "explanation": "",
+                "difficulty": "MEDIUM",
+            }],
+        }
+
+        import_response = self.client.post(
+            "/api/modules/import-json",
+            files={"file": ("legacy.json", json.dumps(legacy_payload).encode("utf-8"), "application/json")},
+        )
+        self.assertEqual(import_response.status_code, 200)
+
+        imported_module_id = import_response.json()["module_id"]
+        with SessionLocal() as db:
+            imported_card = db.query(Flashcard).filter(Flashcard.module_id == imported_module_id).one()
+            imported_question = db.query(QuizQuestion).filter(QuizQuestion.module_id == imported_module_id).one()
+            self.assertEqual(imported_card.tags, '["legacy"]')
+            self.assertEqual(imported_question.options, '["X","Y"]')
+
     def test_upload_document_background_completion_uses_request_scoped_db_safely(self):
         self._as_owner()
 
@@ -253,7 +332,17 @@ class BalancedQolPassRouteTests(unittest.TestCase):
                 event_handler({"event": "status", "stage": "processing"})
                 event_handler({"event": "final", "stage": "done"})
 
-        with patch("routers.documents.process_document_pipeline", new=fake_pipeline):
+        original_run_coroutine_threadsafe = asyncio.run_coroutine_threadsafe
+
+        def blocking_run_coroutine_threadsafe(coro, loop):
+            future = original_run_coroutine_threadsafe(coro, loop)
+            future.result(timeout=1)
+            return future
+
+        with (
+            patch("routers.documents.process_document_pipeline", new=fake_pipeline),
+            patch("routers.documents.asyncio.run_coroutine_threadsafe", new=blocking_run_coroutine_threadsafe),
+        ):
             response = self.client.post(
                 "/api/documents/upload-stream",
                 data={"module_id": self.owner_module_id},

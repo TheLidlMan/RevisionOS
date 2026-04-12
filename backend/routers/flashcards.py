@@ -35,7 +35,7 @@ class FlashcardCreate(BaseModel):
     concept_id: Optional[str] = None
     source_document_id: Optional[str] = None
     source_excerpt: Optional[str] = None
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
 
 
 class FlashcardUpdate(BaseModel):
@@ -56,7 +56,7 @@ class FlashcardResponse(BaseModel):
     cloze_text: Optional[str] = None
     source_document_id: Optional[str] = None
     source_excerpt: Optional[str] = None
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
     due: Optional[datetime] = None
     stability: float = 0.0
     difficulty: float = 0.0
@@ -90,7 +90,7 @@ class ReviewResponse(BaseModel):
     xp_total: int = 0
     level: int = 1
     level_up: bool = False
-    new_achievements: list[dict] = []
+    new_achievements: list[dict] = Field(default_factory=list)
 
 
 class GenerateCardsRequest(BaseModel):
