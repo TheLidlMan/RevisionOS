@@ -172,8 +172,6 @@ def _replenish_hearts(stats: UserStats) -> None:
     """Replenish hearts based on time elapsed."""
     if stats.hearts_remaining >= HEARTS_MAX:
         return
-    if stats.hearts_last_replenish is None:
-        stats.hearts_last_replenish = datetime.utcnow()
     now = datetime.utcnow()
     elapsed = (now - stats.hearts_last_replenish).total_seconds()
     hearts_to_add = int(elapsed // (HEARTS_REPLENISH_MINUTES * 60))
@@ -307,6 +305,8 @@ def process_card_review(db: Session, user_id: str) -> XPAwardResponse:
         xp += XP_DAILY_GOAL_MET
         stats.xp_total += XP_DAILY_GOAL_MET
 
+    if stats.hearts_last_replenish is None:
+        stats.hearts_last_replenish = datetime.utcnow()
     _replenish_hearts(stats)
     db.commit()
 
@@ -366,6 +366,8 @@ def get_stats(
         return UserStatsResponse()
 
     stats = _get_or_create_stats(db, user.id)
+    if stats.hearts_last_replenish is None:
+        stats.hearts_last_replenish = datetime.utcnow()
     _replenish_hearts(stats)
     db.commit()
 
@@ -460,6 +462,8 @@ def toggle_hearts(
     stats = _get_or_create_stats(db, user.id)
     stats.hearts_enabled = body.enabled
     if body.enabled:
+        if stats.hearts_last_replenish is None:
+            stats.hearts_last_replenish = datetime.utcnow()
         _replenish_hearts(stats)
     db.commit()
 
@@ -484,6 +488,8 @@ def use_heart(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     stats = _get_or_create_stats(db, user.id)
+    if stats.hearts_last_replenish is None:
+        stats.hearts_last_replenish = datetime.utcnow()
     _replenish_hearts(stats)
 
     if not stats.hearts_enabled:
