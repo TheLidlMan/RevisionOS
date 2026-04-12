@@ -61,6 +61,10 @@ function resultRoute(result: SearchResult): string {
   }
 }
 
+function resultKey(result: SearchResult): string {
+  return `${result.type}:${result.id}`;
+}
+
 interface SearchDialogProps {
   onClose: () => void;
 }
@@ -71,7 +75,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
   const [query, setQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [selectedResultKey, setSelectedResultKey] = useState<string | null>(null);
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -85,10 +89,6 @@ function SearchDialog({ onClose }: SearchDialogProps) {
   });
 
   const results = useMemo(() => searchData?.results ?? [], [searchData]);
-  const resultSetKey = useMemo(
-    () => results.map((result) => `${result.type}:${result.id}`).join('|'),
-    [results],
-  );
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300);
@@ -100,11 +100,18 @@ function SearchDialog({ onClose }: SearchDialogProps) {
     return () => window.clearTimeout(timeout);
   }, []);
 
-  useEffect(() => {
-    setSelectedIdx(0);
-  }, [debouncedQuery, moduleFilter, resultSetKey]);
+  const highlightedIdx = useMemo(() => {
+    if (results.length === 0) {
+      return -1;
+    }
 
-  const highlightedIdx = results.length === 0 ? -1 : Math.min(selectedIdx, results.length - 1);
+    if (!selectedResultKey) {
+      return 0;
+    }
+
+    const index = results.findIndex((result) => resultKey(result) === selectedResultKey);
+    return index >= 0 ? index : 0;
+  }, [results, selectedResultKey]);
 
   const handleSelect = useCallback(
     (result: SearchResult) => {
@@ -120,10 +127,16 @@ function SearchDialog({ onClose }: SearchDialogProps) {
         onClose();
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIdx((i) => Math.min(i + 1, results.length - 1));
+        const nextIdx = Math.min(highlightedIdx + 1, results.length - 1);
+        if (results[nextIdx]) {
+          setSelectedResultKey(resultKey(results[nextIdx]));
+        }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedIdx((i) => Math.max(i - 1, 0));
+        const nextIdx = Math.max(highlightedIdx - 1, 0);
+        if (results[nextIdx]) {
+          setSelectedResultKey(resultKey(results[nextIdx]));
+        }
       } else if (e.key === 'Enter' && highlightedIdx >= 0 && results[highlightedIdx]) {
         handleSelect(results[highlightedIdx]);
       }
@@ -161,6 +174,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
+                  setSelectedResultKey(null);
                 }}
                 placeholder="Search concepts, flashcards, questions…"
                 className="flex-1 py-4"
@@ -177,6 +191,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 value={moduleFilter}
                 onChange={(e) => {
                   setModuleFilter(e.target.value);
+                  setSelectedResultKey(null);
                 }}
                 className="px-2 py-1 text-xs"
                 style={sg.input}
@@ -206,7 +221,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 ) : (
                   <ul>
                     {results.map((result, idx) => (
-                      <li key={`${result.type}-${result.id}`}>
+                      <li key={resultKey(result)}>
                         <button
                           onClick={() => handleSelect(result)}
                           className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
@@ -216,7 +231,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                           }}
                           onMouseEnter={(e) => {
                             if (idx !== highlightedIdx) e.currentTarget.style.background = sg.hover;
-                            setSelectedIdx(idx);
+                            setSelectedResultKey(resultKey(result));
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.background = idx === highlightedIdx ? sg.accentSoft : 'transparent';
