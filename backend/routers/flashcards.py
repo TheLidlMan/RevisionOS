@@ -2,10 +2,11 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -63,11 +64,21 @@ class FlashcardResponse(BaseModel):
     scheduled_days: int = 0
     reps: int = 0
     lapses: int = 0
+    generation_source: str = "MANUAL"
     state: str = "NEW"
     last_review: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class FlashcardListResponse(BaseModel):
+    items: list[FlashcardResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
 
 
 class ReviewRequest(BaseModel):
@@ -128,9 +139,11 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
         scheduled_days=card.scheduled_days,
         reps=card.reps,
         lapses=card.lapses,
+        generation_source=card.generation_source,
         state=card.state,
         last_review=card.last_review,
         created_at=card.created_at,
+        updated_at=card.updated_at,
     )
 
 
@@ -183,20 +196,53 @@ def _allocate_card_targets(docs: list[Document], requested_total: Optional[int])
 
 # ---------- Endpoints ----------
 
-@router.get("/api/flashcards", response_model=list[FlashcardResponse])
+@router.get("/api/flashcards", response_model=FlashcardListResponse)
 def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
+    generation_source: Optional[str] = None,
+    state: Optional[str] = None,
+    search: Optional[str] = None,
+    sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"] = "updated_desc",
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     query = db.query(Flashcard)
     if module_id:
         query = query.filter(Flashcard.module_id == module_id)
+    if generation_source:
+        query = query.filter(Flashcard.generation_source == generation_source.upper())
+    if state:
+        query = query.filter(Flashcard.state == state.upper())
     if due:
         now = datetime.utcnow()
         query = query.filter(Flashcard.due <= now)
-    cards = query.order_by(Flashcard.due.asc()).all()
-    return [_card_to_response(c) for c in cards]
+    if search:
+        term = f"%{search.strip()}%"
+        if term != "%%":
+            query = query.filter(or_(Flashcard.front.ilike(term), Flashcard.back.ilike(term)))
+
+    total = query.with_entities(func.count(Flashcard.id)).scalar() or 0
+
+    if sort == "created_desc":
+        query = query.order_by(Flashcard.created_at.desc(), Flashcard.id.desc())
+    elif sort == "created_asc":
+        query = query.order_by(Flashcard.created_at.asc(), Flashcard.id.asc())
+    elif sort == "front_asc":
+        query = query.order_by(Flashcard.front.asc(), Flashcard.created_at.asc(), Flashcard.id.asc())
+    else:
+        query = query.order_by(Flashcard.updated_at.desc(), Flashcard.id.desc())
+
+    cards = query.offset(offset).limit(limit).all()
+    items = [_card_to_response(card) for card in cards]
+    return FlashcardListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(items) < total,
+    )
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
