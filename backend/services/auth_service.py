@@ -19,6 +19,7 @@ from models.auth_session import AuthSession
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 SESSION_COOKIE_NAME = "reviseos_session"
+AUTH_SESSIONS_TABLE_NAME = AuthSession.__tablename__
 
 logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -63,7 +64,7 @@ def _is_missing_auth_sessions_table(exc: Exception) -> bool:
         return True
 
     message = str(original_exc).lower()
-    return "auth_sessions" in message and (
+    return AUTH_SESSIONS_TABLE_NAME in message and (
         "does not exist" in message
         or "undefined table" in message
         or "no such table" in message
@@ -87,7 +88,10 @@ def _query_session(
     except (OperationalError, ProgrammingError) as exc:
         if not _is_missing_auth_sessions_table(exc):
             raise
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            logger.warning("Rollback failed after auth session lookup error", exc_info=True)
         logger.warning(
             "Skipping session lookup because auth_sessions is unavailable: %s",
             getattr(exc, "orig", exc),
