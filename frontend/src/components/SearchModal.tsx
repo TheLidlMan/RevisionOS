@@ -101,15 +101,19 @@ function SearchDialog({ onClose }: SearchDialogProps) {
   }, []);
 
   const highlightedIdx = useMemo(() => {
+    const activeSelectedResultKey = results.some((result) => resultKey(result) === selectedResultKey)
+      ? selectedResultKey
+      : null;
+
     if (results.length === 0) {
       return -1;
     }
 
-    if (!selectedResultKey) {
+    if (!activeSelectedResultKey) {
       return 0;
     }
 
-    const index = results.findIndex((result) => resultKey(result) === selectedResultKey);
+    const index = results.findIndex((result) => resultKey(result) === activeSelectedResultKey);
     return index >= 0 ? index : 0;
   }, [results, selectedResultKey]);
 

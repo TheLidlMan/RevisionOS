@@ -379,7 +379,7 @@ async def index_document_endpoint(
 @router.get("/{document_id}", response_model=DocumentResponse)
 def get_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     doc = require_owned_document(db, document_id, user)
-    if not doc or doc.delete_requested_at:
+    if doc.delete_requested_at:
         raise HTTPException(status_code=404, detail="Document not found")
     backfill_document_summaries([doc], db)
     return _document_to_response(doc)
