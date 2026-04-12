@@ -61,7 +61,7 @@ function resultRoute(result: SearchResult): string {
   }
 }
 
-function resultKey(result: SearchResult): string {
+function getResultKey(result: SearchResult): string {
   return `${result.type}:${result.id}`;
 }
 
@@ -101,7 +101,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
   }, []);
 
   const highlightedIdx = useMemo(() => {
-    const activeSelectedResultKey = results.some((result) => resultKey(result) === selectedResultKey)
+    const activeSelectedResultKey = results.some((result) => getResultKey(result) === selectedResultKey)
       ? selectedResultKey
       : null;
 
@@ -113,7 +113,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
       return 0;
     }
 
-    const index = results.findIndex((result) => resultKey(result) === activeSelectedResultKey);
+    const index = results.findIndex((result) => getResultKey(result) === activeSelectedResultKey);
     return index >= 0 ? index : 0;
   }, [results, selectedResultKey]);
 
@@ -133,13 +133,13 @@ function SearchDialog({ onClose }: SearchDialogProps) {
         e.preventDefault();
         const nextIdx = Math.min(highlightedIdx + 1, results.length - 1);
         if (results[nextIdx]) {
-          setSelectedResultKey(resultKey(results[nextIdx]));
+          setSelectedResultKey(getResultKey(results[nextIdx]));
         }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const nextIdx = Math.max(highlightedIdx - 1, 0);
         if (results[nextIdx]) {
-          setSelectedResultKey(resultKey(results[nextIdx]));
+          setSelectedResultKey(getResultKey(results[nextIdx]));
         }
       } else if (e.key === 'Enter' && highlightedIdx >= 0 && results[highlightedIdx]) {
         handleSelect(results[highlightedIdx]);
@@ -225,7 +225,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 ) : (
                   <ul>
                     {results.map((result, idx) => (
-                      <li key={resultKey(result)}>
+                      <li key={getResultKey(result)}>
                         <button
                           onClick={() => handleSelect(result)}
                           className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
@@ -235,7 +235,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                           }}
                           onMouseEnter={(e) => {
                             if (idx !== highlightedIdx) e.currentTarget.style.background = sg.hover;
-                            setSelectedResultKey(resultKey(result));
+                            setSelectedResultKey(getResultKey(result));
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.background = idx === highlightedIdx ? sg.accentSoft : 'transparent';

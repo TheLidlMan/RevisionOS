@@ -253,7 +253,7 @@ class BalancedQolPassRouteTests(unittest.TestCase):
                 event_handler({"event": "status", "stage": "processing"})
                 event_handler({"event": "final", "stage": "done"})
 
-        with patch("routers.documents.process_document_pipeline", side_effect=fake_pipeline):
+        with patch("routers.documents.process_document_pipeline", new=fake_pipeline):
             response = self.client.post(
                 "/api/documents/upload-stream",
                 data={"module_id": self.owner_module_id},

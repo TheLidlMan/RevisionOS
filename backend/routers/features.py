@@ -74,6 +74,7 @@ def _stream_ai_route(
                         event["result"] = final_mapper(envelope)
                     yield ai_service.encode_sse_event(event)
         except asyncio.CancelledError:
+            logger.info("Streaming AI route cancelled for kind=%s", kind)
             raise
         except Exception as exc:
             logger.exception("Streaming AI route failed for kind=%s: %s", kind, exc)

@@ -313,6 +313,7 @@ async def upload_document_stream(
                     await asyncio.sleep(SSE_KEEPALIVE_INTERVAL_SECONDS)
                     await queue.put(SSE_KEEPALIVE_COMMENT)
             except asyncio.CancelledError:
+                logger.info("Document upload keepalive cancelled for %s", document_id)
                 raise
 
         def run_pipeline_in_thread() -> None:
