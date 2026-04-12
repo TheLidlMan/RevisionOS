@@ -58,7 +58,11 @@ def _hash_token(raw_token: str) -> str:
 
 
 def _is_missing_auth_sessions_table(exc: Exception) -> bool:
-    message = str(getattr(exc, "orig", exc)).lower()
+    original_exc = getattr(exc, "orig", exc)
+    if getattr(original_exc, "pgcode", None) == "42P01" or getattr(original_exc, "sqlstate", None) == "42P01":
+        return True
+
+    message = str(original_exc).lower()
     return "auth_sessions" in message and (
         "does not exist" in message
         or "undefined table" in message
@@ -84,7 +88,10 @@ def _query_session(
         if not _is_missing_auth_sessions_table(exc):
             raise
         db.rollback()
-        logger.warning("Skipping session lookup because auth_sessions is unavailable")
+        logger.warning(
+            "Skipping session lookup because auth_sessions is unavailable: %s",
+            getattr(exc, "orig", exc),
+        )
         return None
 
 
