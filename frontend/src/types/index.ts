@@ -740,12 +740,20 @@ export interface AchievementDef {
   unlocked_at?: string;
 }
 
+export interface AchievementResponse {
+  achievement_key: string;
+  name: string;
+  description: string;
+  icon: string;
+  unlocked_at?: string;
+}
+
 export interface XPAwardResponse {
   xp_earned: number;
   xp_total: number;
   level: number;
   level_up: boolean;
-  new_achievements: { key: string; name: string; icon: string }[];
+  new_achievements: AchievementResponse[];
 }
 
 export interface HeartUseResponse {

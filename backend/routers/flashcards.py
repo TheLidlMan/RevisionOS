@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -19,6 +20,7 @@ from services.auth_service import get_current_user
 from models.user import User
 
 router = APIRouter(tags=["flashcards"])
+logger = logging.getLogger(__name__)
 
 
 # ---------- Pydantic schemas ----------
@@ -262,8 +264,8 @@ def review_flashcard(
                     for a in xp_result.new_achievements
                 ],
             }
-        except Exception:
-            pass  # Gamification is non-critical
+        except Exception as exc:
+            logger.warning("Failed to award gamification XP for card review %s: %s", card_id, exc)
 
     return ReviewResponse(
         id=card.id,

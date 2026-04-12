@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -36,7 +36,7 @@ class TutorExplainResponse(BaseModel):
 class TopicGenerateRequest(BaseModel):
     topic: str
     module_id: str
-    num_cards: int = 30
+    num_cards: int = Field(default=30, ge=1, le=settings.MAX_CARDS_PER_REQUEST)
 
 
 class TopicGenerateResponse(BaseModel):
@@ -56,7 +56,14 @@ async def tutor_explain(
     card_front = None
     card_back = None
     if body.card_id:
-        card = db.query(Flashcard).filter(Flashcard.id == body.card_id).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        card = (
+            db.query(Flashcard)
+            .join(Module, Module.id == Flashcard.module_id)
+            .filter(Flashcard.id == body.card_id, Module.user_id == user.id)
+            .first()
+        )
         if card:
             card_front = card.front
             card_back = card.back
@@ -89,11 +96,18 @@ async def topic_generate(
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    module = (
+        db.query(Module)
+        .filter(Module.id == body.module_id, Module.user_id == user.id)
+        .first()
+    )
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    user_id = user.id if user else None
+    user_id = user.id
     with ai_quota_scope(user_id):
         cards_data = await ai_service.generate_cards_from_topic(body.topic, body.num_cards)
 

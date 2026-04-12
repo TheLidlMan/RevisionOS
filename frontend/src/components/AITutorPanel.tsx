@@ -33,19 +33,20 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
   const [result, setResult] = useState<TutorExplainResponse | null>(null);
 
   const explainMutation = useMutation({
-    mutationFn: () => tutorExplain(
-      concept || cardFront || 'this concept',
-      context || '',
-      selectedMode,
-      cardId,
-    ),
+    mutationFn: (mode: typeof selectedMode) =>
+      tutorExplain(
+        concept || cardFront || 'this concept',
+        context || '',
+        mode,
+        cardId,
+      ),
     onSuccess: (data) => setResult(data),
   });
 
   const handleExplain = (mode: typeof selectedMode) => {
     setSelectedMode(mode);
     setResult(null);
-    explainMutation.mutate();
+    explainMutation.mutate(mode);
   };
 
   return (

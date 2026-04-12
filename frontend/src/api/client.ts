@@ -637,6 +637,9 @@ export const useHeart = () =>
 export const awardXP = () =>
   client.post<import('../types').XPAwardResponse>('/gamification/xp/award').then((r) => r.data);
 
+export const awardQuizCompletion = (scorePct: number) =>
+  client.post<import('../types').XPAwardResponse>('/gamification/quiz-complete', { score_pct: scorePct }).then((r) => r.data);
+
 // ---- Feature: AI Tutor ----
 export const tutorExplain = (
   concept: string,

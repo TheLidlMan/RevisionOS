@@ -123,6 +123,10 @@ class HeartUseResponse(BaseModel):
     replenish_at: Optional[datetime] = None
 
 
+class QuizCompletionAwardRequest(BaseModel):
+    score_pct: float
+
+
 # ---------- Helpers ----------
 
 def _get_or_create_stats(db: Session, user_id: str) -> UserStats:
@@ -173,7 +177,9 @@ def _replenish_hearts(stats: UserStats) -> None:
     hearts_to_add = int(elapsed // (HEARTS_REPLENISH_MINUTES * 60))
     if hearts_to_add > 0:
         stats.hearts_remaining = min(HEARTS_MAX, stats.hearts_remaining + hearts_to_add)
-        stats.hearts_last_replenish = now
+        stats.hearts_last_replenish = stats.hearts_last_replenish + timedelta(
+            minutes=hearts_to_add * HEARTS_REPLENISH_MINUTES
+        )
 
 
 def _update_streak(stats: UserStats) -> list[AchievementResponse]:
@@ -230,9 +236,11 @@ def process_card_review(db: Session, user_id: str) -> XPAwardResponse:
     new_achievements: list[AchievementResponse] = []
 
     # Check comeback before updating streak
+    comeback_bonus_applied = False
     if stats.last_study_date:
         days_gap = (datetime.utcnow().date() - stats.last_study_date.date()).days
         if days_gap >= 3:
+            comeback_bonus_applied = True
             ach = _check_and_unlock(db, user_id, "comeback")
             if ach:
                 new_achievements.append(ach)
@@ -245,6 +253,8 @@ def process_card_review(db: Session, user_id: str) -> XPAwardResponse:
 
     # Calculate XP
     xp = XP_CARD_REVIEWED
+    if comeback_bonus_applied:
+        xp += XP_COMEBACK_BONUS
     xp += min(stats.streak_current, 30) * XP_STREAK_BONUS  # Streak bonus capped at 30 days
 
     old_level = stats.level
@@ -488,6 +498,8 @@ def use_heart(
             headers={"X-Replenish-At": replenish_at.isoformat()},
         )
 
+    if stats.hearts_remaining == HEARTS_MAX:
+        stats.hearts_last_replenish = datetime.utcnow()
     stats.hearts_remaining -= 1
     db.commit()
 
@@ -511,3 +523,14 @@ def award_xp_endpoint(
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return process_card_review(db, user.id)
+
+
+@router.post("/api/gamification/quiz-complete", response_model=XPAwardResponse)
+def award_quiz_completion(
+    body: QuizCompletionAwardRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return process_quiz_complete(db, user.id, body.score_pct)

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowCounterClockwise, ArrowLeft, Confetti, Lightbulb, SpinnerGap, TrendUp, Brain, Heart } from '@phosphor-icons/react';
 import { getFlashcards, reviewFlashcard, getElaborationPrompts, submitConfidence, getGamificationStats, useHeart } from '../api/client';
 import type { Flashcard, Rating, ElaborationResponse, ReviewResponse } from '../types';
+import axios from 'axios';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { formatDays } from '../utils/formatters';
@@ -33,6 +34,30 @@ const glass = {
   borderRadius: '12px',
   backdropFilter: 'blur(20px)',
 } as const;
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (axios.isAxiosError(error)) {
+    return error.response?.status;
+  }
+
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  const errorWithStatus = error as {
+    status?: number;
+    response?: {
+      status?: number;
+      data?: {
+        status?: number;
+      };
+    };
+  };
+
+  return errorWithStatus.status
+    ?? errorWithStatus.response?.status
+    ?? errorWithStatus.response?.data?.status;
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -122,7 +147,13 @@ export default function FlashcardReview() {
 
   const heartMutation = useMutation({
     mutationFn: useHeart,
-    onError: () => setOutOfHearts(true),
+    onError: (error) => {
+      if (getErrorStatus(error) === 429) {
+        setOutOfHearts(true);
+        return;
+      }
+      console.error('Failed to use heart:', error);
+    },
   });
 
   const reviewMutation = useMutation({
