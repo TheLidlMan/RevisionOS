@@ -13,6 +13,30 @@ from services import vector_service
 logger = logging.getLogger(__name__)
 
 
+def backfill_document_summaries(docs: list[Document], db: Session) -> bool:
+    """Rewrite legacy stringified summary payloads into clean summary text."""
+    updated = False
+
+    for doc in docs:
+        summary_text, _ = ai_service.normalize_summary_content(doc.summary)
+        normalized_summary = summary_text or None
+        if doc.summary == normalized_summary:
+            continue
+
+        doc.summary = normalized_summary
+        updated = True
+
+        embedding_input = f"{doc.filename}: {normalized_summary or ''}"
+        embedding = vector_service.embed_text(embedding_input)
+        if embedding:
+            vector_service.store_embedding(db, "documents", doc.id, embedding)
+
+    if updated:
+        db.commit()
+
+    return updated
+
+
 def _concept_path(name: str, parent_path: Optional[str] = None) -> str:
     return f"{parent_path}/{name}" if parent_path else name
 
@@ -36,13 +60,18 @@ async def summarize_document(document_id: str, db: Session) -> Optional[str]:
     if not doc or not doc.raw_text:
         return None
 
+    filename = doc.filename
+    text = doc.raw_text
+
     if not settings.GROQ_API_KEY:
         return None
 
-    text = doc.raw_text
     max_chars = 60000
     if len(text) > max_chars:
         text = text[:max_chars]
+
+    # Release the checked-out connection before waiting on the LLM.
+    db.close()
 
     try:
         messages = [
@@ -58,7 +87,7 @@ async def summarize_document(document_id: str, db: Session) -> Optional[str]:
                     "Return a JSON object with a `summary` field.\n"
                     "Write a 200-300 word summary focusing on main topics, key concepts, "
                     "important definitions, and what a student should learn from the material.\n\n"
-                    f"Document: {doc.filename}\n\n"
+                    f"Document: {filename}\n\n"
                     f"Content:\n{text}"
                 ),
             },
@@ -70,9 +99,15 @@ async def summarize_document(document_id: str, db: Session) -> Optional[str]:
             response_format=ai_service.JSON_RESPONSE_FORMAT if settings.LLM_JSON_MODE_ENABLED else None,
             expected_payload_key="summary",
         )
-        doc.summary = str(envelope.get("data", {}).get("summary", "")).strip()
+        summary_payload = envelope.get("data", {}).get("summary", envelope.get("data", {}))
+        summary, _ = ai_service.normalize_summary_content(summary_payload)
 
-        emb = vector_service.embed_text(f"{doc.filename}: {doc.summary}")
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            return None
+        doc.summary = summary or None
+
+        emb = vector_service.embed_text(f"{doc.filename}: {doc.summary or ''}")
         if emb:
             vector_service.store_embedding(db, "documents", doc.id, emb)
 
@@ -93,19 +128,25 @@ async def index_document(document_id: str, db: Session, skip_summary: bool = Fal
     if not doc or not doc.raw_text:
         return []
 
+    module_id = doc.module_id
+    user_id = doc.user_id
+    text = doc.raw_text
+
     if not settings.GROQ_API_KEY:
         return []
 
     if not skip_summary:
         await summarize_document(document_id, db)
 
-    text = doc.raw_text
     max_chars = 120000
     if len(text) > max_chars:
         text = text[:max_chars]
 
+    # Topic extraction can take tens of seconds; don't hold a DB connection open.
+    db.close()
+
     try:
-        topics = await extract_topics_hierarchical(text, doc.module_id)
+        topics = await extract_topics_hierarchical(text, module_id)
 
         created_concepts: list[dict] = []
         created_ids: set[str] = set()
@@ -126,7 +167,7 @@ async def index_document(document_id: str, db: Session, skip_summary: bool = Fal
 
         def upsert_topic(topic: dict, parent_id: Optional[str], parent_path: Optional[str]) -> None:
             query = db.query(Concept).filter(
-                Concept.module_id == doc.module_id,
+                Concept.module_id == module_id,
                 Concept.name == topic["name"],
             )
             if parent_id is None:
@@ -154,7 +195,7 @@ async def index_document(document_id: str, db: Session, skip_summary: bool = Fal
             else:
                 concept = Concept(
                     id=str(uuid.uuid4()),
-                    module_id=doc.module_id,
+                    module_id=module_id,
                     name=topic["name"],
                     definition=topic.get("definition", ""),
                     explanation=topic.get("explanation", ""),
@@ -162,7 +203,7 @@ async def index_document(document_id: str, db: Session, skip_summary: bool = Fal
                     study_weight=topic.get("study_weight", 1.0),
                     parent_concept_id=parent_id,
                     order_index=topic.get("order_index", 0),
-                    user_id=doc.user_id,
+                    user_id=user_id,
                 )
                 db.add(concept)
                 is_new = True

@@ -216,7 +216,7 @@ def transcribe_audio(file_path: str) -> str:
 
     with open(safe_path, "rb") as f:
         files = {"file": (os.path.basename(safe_path), f)}
-        data = {"model": "whisper-large-v3"}
+        data = {"model": settings.WHISPER_MODEL}
 
         with httpx.Client(timeout=120.0) as client:
             response = client.post(

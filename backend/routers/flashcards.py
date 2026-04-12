@@ -134,6 +134,53 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
     )
 
 
+def _allocate_card_targets(docs: list[Document], requested_total: Optional[int]) -> dict[str, int]:
+    if not docs:
+        return {}
+
+    if requested_total is None:
+        return {doc.id: settings.CARDS_PER_DOCUMENT for doc in docs}
+
+    if requested_total <= 0:
+        return {doc.id: 0 for doc in docs}
+
+    weights = [max(1, doc.word_count or len((doc.raw_text or "").split()) or 1) for doc in docs]
+    if requested_total < len(docs):
+        ranked_indexes = sorted(range(len(docs)), key=lambda idx: weights[idx], reverse=True)
+        allocations = [0 for _ in docs]
+        for idx in ranked_indexes[:requested_total]:
+            allocations[idx] = 1
+        return {doc.id: allocations[index] for index, doc in enumerate(docs)}
+
+    total_weight = sum(weights) or len(docs)
+    allocations = [max(1, round(requested_total * weight / total_weight)) for weight in weights]
+
+    difference = requested_total - sum(allocations)
+    ranked_indexes = sorted(range(len(docs)), key=lambda idx: weights[idx], reverse=True)
+
+    while difference > 0:
+        for idx in ranked_indexes:
+            allocations[idx] += 1
+            difference -= 1
+            if difference == 0:
+                break
+
+    while difference < 0:
+        adjusted = False
+        for idx in reversed(ranked_indexes):
+            if allocations[idx] <= 1:
+                continue
+            allocations[idx] -= 1
+            difference += 1
+            adjusted = True
+            if difference == 0:
+                break
+        if not adjusted:
+            break
+
+    return {doc.id: allocations[index] for index, doc in enumerate(docs)}
+
+
 # ---------- Endpoints ----------
 
 @router.get("/api/flashcards", response_model=list[FlashcardResponse])
@@ -296,6 +343,9 @@ async def generate_cards_for_module(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    module_name = module.name
+    module_user_id = module.user_id
+
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -311,20 +361,45 @@ async def generate_cards_for_module(
     if not docs:
         raise HTTPException(status_code=400, detail="No processed documents found in this module")
 
-    num_cards = (body.num_cards if body and body.num_cards else settings.CARDS_PER_DOCUMENT)
-    all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
+    requested_total = body.num_cards if body and body.num_cards else None
+    card_targets = _allocate_card_targets(docs, requested_total)
+    generated_cards_data: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
 
-    # Truncate if too long
-    max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
-    if len(all_text) > max_chars:
-        all_text = all_text[:max_chars]
+    with ai_quota_scope(module_user_id):
+        for doc in docs:
+            raw_text = (doc.raw_text or "").strip()
+            target_cards = card_targets.get(doc.id, settings.CARDS_PER_DOCUMENT)
+            if not raw_text or target_cards <= 0:
+                continue
 
-    with ai_quota_scope(module.user_id):
-        generated_cards_data = await ai_service.generate_flashcards(all_text, num_cards, module.name)
+            doc_cards = await ai_service.generate_flashcards(
+                raw_text,
+                target_cards,
+                module_name,
+                source_name=doc.filename,
+            )
+
+            for card_data in doc_cards:
+                if not isinstance(card_data, dict):
+                    continue
+                front = str(card_data.get("front") or "").strip()
+                back = str(card_data.get("back") or "").strip()
+                pair = (front.lower(), back.lower())
+                if not front or not back or pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                generated_cards_data.append(
+                    {
+                        **card_data,
+                        "source_document_id": doc.id,
+                        "source_excerpt": raw_text[:200],
+                    }
+                )
 
     created_cards = []
     for card_data in generated_cards_data:
-        card_type = card_data.get("type", "basic").upper()
+        card_type = str(card_data.get("type", "basic")).upper()
         if card_type not in ("BASIC", "CLOZE"):
             card_type = "BASIC"
 
@@ -339,15 +414,18 @@ async def generate_cards_for_module(
             back_val = card_data.get("cloze_text") or ""
 
         card = Flashcard(
+            user_id=module_user_id,
             module_id=module_id,
             front=front_val,
             back=back_val,
             card_type=card_type,
             cloze_text=card_data.get("cloze_text"),
-            source_document_id=docs[0].id if docs else None,
+            source_document_id=card_data.get("source_document_id"),
+            source_excerpt=card_data.get("source_excerpt"),
             tags=json.dumps(tags),
             due=datetime.utcnow(),
             state="NEW",
+            generation_source="AUTO",
         )
         db.add(card)
         created_cards.append(card)

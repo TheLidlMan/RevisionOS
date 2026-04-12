@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from time import perf_counter
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from config import settings
-from database import get_db
+from database import get_db, get_pool_snapshot, is_pool_under_pressure
 from models.quiz_question import QuizQuestion
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
@@ -286,6 +287,9 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    module_name = module.name
+    module_user_id = module.user_id
+
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -301,6 +305,8 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
     if not docs:
         raise HTTPException(status_code=400, detail="No processed documents found in this module")
 
+    source_document_id = docs[0].id if docs else None
+
     all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
     max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
     if len(all_text) > max_chars:
@@ -312,13 +318,15 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         settings.MAX_QUESTIONS_PER_REQUEST,
     )
 
-    with ai_quota_scope(module.user_id):
+    db.close()
+
+    with ai_quota_scope(module_user_id):
         generated = await ai_service.generate_quiz_questions(
             text=all_text,
             num_questions=num_questions,
             question_types=body.question_types,
             difficulty=body.difficulty,
-            subject=module.name,
+            subject=module_name,
         )
 
     created_questions = []
@@ -338,7 +346,7 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
             correct_answer=qdata.get("correct_answer", ""),
             explanation=qdata.get("explanation", ""),
             difficulty=diff,
-            source_document_id=docs[0].id if docs else None,
+            source_document_id=source_document_id,
         )
         db.add(question)
         created_questions.append(question)
@@ -358,6 +366,8 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
     module = db.query(Module).filter(Module.id == body.module_id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
+    module_name = module.name
+    module_user_id = module.user_id
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -372,6 +382,8 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
     )
     if not docs:
         raise HTTPException(status_code=400, detail="No processed documents found in this module")
+
+    source_document_id = docs[0].id if docs else None
 
     all_text = "\n\n---\n\n".join(d.raw_text or "" for d in docs if d.raw_text)
     max_chars = min(settings.MAX_CONTEXT_TOKENS * 3, settings.MAX_PROMPT_CHARS)
@@ -388,12 +400,16 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
         num_questions=num_questions,
         question_types=body.question_types,
         difficulty=body.difficulty,
-        subject=module.name,
+        subject=module_name,
     )
 
+    db.close()
+
     async def event_stream():
+        started = perf_counter()
+        pool_before = get_pool_snapshot()
         try:
-            with ai_quota_scope(module.user_id):
+            with ai_quota_scope(module_user_id):
                 async for event in ai_service.stream_groq_completion(
                     messages,
                     kind="quiz_questions",
@@ -419,7 +435,7 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
                                 correct_answer=qdata.get("correct_answer", ""),
                                 explanation=qdata.get("explanation", ""),
                                 difficulty=diff,
-                                source_document_id=docs[0].id if docs else None,
+                                source_document_id=source_document_id,
                             )
                             db.add(question)
                             created_questions.append(question)
@@ -434,6 +450,23 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
                     yield ai_service.encode_sse_event(event)
         except Exception as exc:
             yield ai_service.encode_sse_event({"event": "error", "kind": "quiz_questions", "message": str(exc)})
+        finally:
+            if settings.REQUEST_TIMING_LOG_ENABLED:
+                duration_ms = (perf_counter() - started) * 1000
+                pool_after = get_pool_snapshot()
+                level = logging.WARNING if (
+                    duration_ms >= settings.REQUEST_TIMING_WARN_MS
+                    or is_pool_under_pressure(pool_before, settings.POOL_PRESSURE_WARN_RATIO)
+                    or is_pool_under_pressure(pool_after, settings.POOL_PRESSURE_WARN_RATIO)
+                ) else logging.INFO
+                logger.log(
+                    level,
+                    "ai_stream_timing kind=%s duration_ms=%.1f pool_before=%s pool_after=%s",
+                    "quiz_questions",
+                    duration_ms,
+                    pool_before,
+                    pool_after,
+                )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -495,34 +528,44 @@ async def submit_answer(
     user: Optional[User] = Depends(get_current_user),
 ):
     session = _get_owned_session(db, session_id, user)
+    session_user_id = session.user_id or (user.id if user else None)
 
     question = db.query(QuizQuestion).filter(QuizQuestion.id == body.question_id).first()
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
 
+    question_id = question.id
+    question_text = question.question_text
+    correct_answer = question.correct_answer
+    question_type = question.question_type
+
     # Determine correctness
     is_correct = False
     ai_feedback = None
 
-    if question.question_type in ("MCQ", "TRUE_FALSE"):
-        is_correct = body.user_answer.strip().lower() == question.correct_answer.strip().lower()
-    elif question.question_type in ("SHORT_ANSWER", "EXAM_STYLE", "FILL_BLANK"):
+    if question_type in ("MCQ", "TRUE_FALSE"):
+        is_correct = body.user_answer.strip().lower() == correct_answer.strip().lower()
+    elif question_type in ("SHORT_ANSWER", "EXAM_STYLE", "FILL_BLANK"):
         # Simple exact match check first
-        if body.user_answer.strip().lower() == question.correct_answer.strip().lower():
+        if body.user_answer.strip().lower() == correct_answer.strip().lower():
             is_correct = True
         elif settings.GROQ_API_KEY:
             try:
-                with ai_quota_scope(session.user_id or (user.id if user else None)):
+                db.close()
+                with ai_quota_scope(session_user_id):
                     ai_feedback = await ai_service.grade_answer(
-                        question.question_text,
-                        question.correct_answer,
+                        question_text,
+                        correct_answer,
                         body.user_answer,
                     )
                 score = ai_feedback.get("score", 0)
                 is_correct = score >= 60
             except Exception:
                 # Fall back to simple match
-                is_correct = body.user_answer.strip().lower() == question.correct_answer.strip().lower()
+                is_correct = body.user_answer.strip().lower() == correct_answer.strip().lower()
+
+    question = db.query(QuizQuestion).filter(QuizQuestion.id == question_id).first()
+    session = _get_owned_session(db, session_id, user)
 
     # Update question stats
     question.times_answered += 1
@@ -656,12 +699,16 @@ async def _generate_quiz_for_module(module_id: str, user_id: str = None):
             if not module:
                 return
 
+            module_name = module.name
+
             docs = db.query(Document).filter(
                 Document.module_id == module_id,
                 Document.processing_status == "done",
             ).all()
             if not docs:
                 return
+
+            source_document_id = docs[0].id if docs else None
 
             combined_text = "\n\n".join(d.raw_text for d in docs if d.raw_text)
             if not combined_text.strip():
@@ -670,13 +717,16 @@ async def _generate_quiz_for_module(module_id: str, user_id: str = None):
             question_types = ["MCQ"]
             difficulty = "MEDIUM"
             num_questions = min(settings.QUESTIONS_PER_DOCUMENT, settings.MAX_QUESTIONS_PER_REQUEST)
+            db.close()
             questions = await ai_service.generate_quiz_questions(
                 combined_text,
                 num_questions,
                 question_types,
                 difficulty,
-                subject=module.name,
+                subject=module_name,
             )
+
+            db = SessionLocal()
 
             normalized_questions: list[QuizQuestion] = []
             for q_data in questions:
@@ -701,7 +751,7 @@ async def _generate_quiz_for_module(module_id: str, user_id: str = None):
                         correct_answer=correct_answer,
                         explanation=q_data.get("explanation", ""),
                         difficulty=_normalize_question_difficulty(q_data.get("difficulty", difficulty), default="MEDIUM"),
-                        source_document_id=docs[0].id if docs else None,
+                        source_document_id=source_document_id,
                         user_id=user_id,
                     )
                 )

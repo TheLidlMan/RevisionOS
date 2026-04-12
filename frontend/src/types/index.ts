@@ -71,6 +71,7 @@ export interface Document {
   file_size_bytes: number;
   file_sha256?: string;
   summary?: string;
+  summary_data?: Record<string, unknown> | unknown[];
   last_pipeline_updated_at?: string;
   cancelled_at?: string;
   created_at: string;
@@ -273,7 +274,9 @@ export interface AnalyticsOverview {
 
 export interface Settings {
   groq_api_key: string;
+  llm_model_fast: string;
   llm_model: string;
+  llm_model_quality: string;
   llm_fallback_model: string;
   llm_temperature: number;
   llm_top_p: number;
@@ -290,7 +293,9 @@ export interface Settings {
 
 export interface SettingsUpdate {
   groq_api_key?: string;
+  llm_model_fast?: string;
   llm_model?: string;
+  llm_model_quality?: string;
   llm_fallback_model?: string;
   llm_temperature?: number;
   llm_top_p?: number;

@@ -13,6 +13,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta
+from time import perf_counter
 from typing import Optional as OptionalType
 
 import httpx
@@ -23,7 +24,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import get_db
+from database import get_db, get_pool_snapshot, is_pool_under_pressure
 from models.concept import Concept
 from models.document import Document
 from models.flashcard import Flashcard
@@ -55,6 +56,8 @@ def _stream_ai_route(
     final_mapper,
 ) -> StreamingResponse:
     async def event_stream():
+        started = perf_counter()
+        pool_before = get_pool_snapshot()
         try:
             with ai_quota_scope(user_id):
                 async for event in ai_service.stream_groq_completion(
@@ -70,6 +73,23 @@ def _stream_ai_route(
                     yield ai_service.encode_sse_event(event)
         except Exception:
             return
+        finally:
+            if settings.REQUEST_TIMING_LOG_ENABLED:
+                duration_ms = (perf_counter() - started) * 1000
+                pool_after = get_pool_snapshot()
+                level = logging.WARNING if (
+                    duration_ms >= settings.REQUEST_TIMING_WARN_MS
+                    or is_pool_under_pressure(pool_before, settings.POOL_PRESSURE_WARN_RATIO)
+                    or is_pool_under_pressure(pool_after, settings.POOL_PRESSURE_WARN_RATIO)
+                ) else logging.INFO
+                logger.log(
+                    level,
+                    "ai_stream_timing kind=%s duration_ms=%.1f pool_before=%s pool_after=%s",
+                    kind,
+                    duration_ms,
+                    pool_before,
+                    pool_after,
+                )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -759,6 +779,7 @@ async def detect_gaps(
     ]
 
     messages = _concept_gap_messages(existing_concepts, all_text)
+    db.close()
     try:
         envelope = await ai_service._call_groq(
             messages,
@@ -809,11 +830,13 @@ async def detect_gaps_stream(
     if len(all_text) > settings.MAX_PROMPT_CHARS:
         all_text = all_text[: settings.MAX_PROMPT_CHARS]
     existing_concepts = [c.name for c in db.query(Concept).filter(Concept.module_id == module_id).all()]
+    module_user_id = module.user_id
+    db.close()
 
     return _stream_ai_route(
         _concept_gap_messages(existing_concepts, all_text),
         kind="concept_gaps",
-        user_id=module.user_id,
+        user_id=module_user_id,
         expected_payload_key="gaps",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: {"gaps": envelope.get("data", {}).get("gaps", [])},
@@ -856,10 +879,14 @@ async def synthesis_cards(
         for name, concepts in module_concepts.items()
         if concepts
     )
+    primary_module_id = body.module_ids[0]
+    request_user_id = user.id if user else None
+
+    db.close()
 
     messages = _synthesis_card_messages(body.num_cards, concept_summary)
     try:
-        with ai_quota_scope(user.id if user else None):
+        with ai_quota_scope(request_user_id):
             envelope = await ai_service._call_groq(
                 messages,
                 kind="synthesis_cards",
@@ -873,7 +900,6 @@ async def synthesis_cards(
     except (json.JSONDecodeError, ValueError):
         raise HTTPException(status_code=502, detail="Failed to parse AI response")
 
-    primary_module_id = body.module_ids[0]
     created: list[Flashcard] = []
     for cd in cards_data:
         tags = cd.get("tags", ["synthesis"])
@@ -885,7 +911,7 @@ async def synthesis_cards(
         card = Flashcard(
             id=str(uuid.uuid4()),
             module_id=primary_module_id,
-            user_id=user.id if user else None,
+            user_id=request_user_id,
             front=cd.get("front", ""),
             back=cd.get("back", ""),
             card_type="BASIC",
@@ -937,8 +963,11 @@ async def elaborate(
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
     messages = _elaboration_messages(card)
+    resolved_user_id = card.user_id or (user.id if user else None)
+    resolved_card_id = card.id
+    db.close()
     try:
-        with ai_quota_scope(card.user_id or (user.id if user else None)):
+        with ai_quota_scope(resolved_user_id):
             envelope = await ai_service._call_groq(
                 messages,
                 kind="elaboration_questions",
@@ -960,7 +989,7 @@ async def elaborate(
     except (json.JSONDecodeError, ValueError):
         follow_ups = []
 
-    return ElaborationResponse(card_id=card.id, follow_up_questions=follow_ups)
+    return ElaborationResponse(card_id=resolved_card_id, follow_up_questions=follow_ups)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -998,8 +1027,10 @@ async def free_recall(
         source_material = source_material[:max_chars]
 
     messages = _free_recall_messages(body.topic, concept_list, source_material, body.user_text)
+    module_user_id = module.user_id
+    db.close()
     try:
-        with ai_quota_scope(module.user_id):
+        with ai_quota_scope(module_user_id):
             envelope = await ai_service._call_groq(
                 messages,
                 kind="free_recall",
@@ -1054,11 +1085,13 @@ async def free_recall_stream(
     concept_list = "\n".join(f"- {c.name}: {c.definition or 'No definition'}" for c in concepts)
     if len(source_material) > settings.MAX_PROMPT_CHARS:
         source_material = source_material[: settings.MAX_PROMPT_CHARS]
+    module_user_id = module.user_id
+    db.close()
 
     return _stream_ai_route(
         _free_recall_messages(body.topic, concept_list, source_material, body.user_text),
         kind="free_recall",
-        user_id=module.user_id,
+        user_id=module_user_id,
         expected_payload_key="score_pct",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: envelope.get("data", {}),
@@ -1114,6 +1147,10 @@ async def clip_url(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    module_id = module.id
+    user_id = user.id if user else None
+    db.close()
+
     validated_url = _validate_external_url(body.url)
 
     try:
@@ -1136,8 +1173,8 @@ async def clip_url(
 
     doc = Document(
         id=str(uuid.uuid4()),
-        user_id=user.id if user else None,
-        module_id=body.module_id,
+        user_id=user_id,
+        module_id=module_id,
         filename=body.url,
         file_type="URL",
         file_path=body.url,
@@ -1230,6 +1267,10 @@ async def exam_submit(
     if session.session_type != "TIMED_EXAM":
         raise HTTPException(status_code=400, detail="Session is not a timed exam")
 
+    session_module_id = session.module_id
+    session_user_id = session.user_id or (user.id if user else None)
+    resolved_session_id = session.id
+
     results: list[ExamResultItem] = []
     correct_count = 0
 
@@ -1238,32 +1279,40 @@ async def exam_submit(
             db.query(QuizQuestion)
             .filter(
                 QuizQuestion.id == ans.question_id,
-                QuizQuestion.module_id == session.module_id,
+                QuizQuestion.module_id == session_module_id,
             )
             .first()
         )
         if not question:
             continue
 
+        question_id = question.id
+        question_text = question.question_text
+        correct_answer = question.correct_answer
+        question_type = question.question_type
+
         # Determine correctness
-        correct_answer_lower = (question.correct_answer or "").strip().lower()
+        correct_answer_lower = (correct_answer or "").strip().lower()
         user_answer_lower = ans.user_answer.strip().lower()
         was_correct = user_answer_lower == correct_answer_lower
 
         # For short-answer / exam-style, use AI grading if available
         if (
-            question.question_type in ("SHORT_ANSWER", "EXAM_STYLE")
+            question_type in ("SHORT_ANSWER", "EXAM_STYLE")
             and not was_correct
             and settings.GROQ_API_KEY
         ):
             try:
-                with ai_quota_scope(session.user_id or (user.id if user else None)):
+                db.close()
+                with ai_quota_scope(session_user_id):
                     grade = await ai_service.grade_answer(
-                        question.question_text, question.correct_answer, ans.user_answer
+                        question_text, correct_answer, ans.user_answer
                     )
                 was_correct = grade.get("score", 0) >= 50
             except Exception:
                 pass
+
+        question = db.query(QuizQuestion).filter(QuizQuestion.id == question_id).first()
 
         if was_correct:
             correct_count += 1
@@ -1277,7 +1326,7 @@ async def exam_submit(
         log = ReviewLog(
             id=str(uuid.uuid4()),
             user_id=user.id if user else None,
-            session_id=session.id,
+            session_id=resolved_session_id,
             item_id=question.id,
             item_type="QUESTION",
             rating="GOOD" if was_correct else "AGAIN",
@@ -1302,6 +1351,7 @@ async def exam_submit(
     incorrect_count = total - correct_count
     score_pct = round((correct_count / total) * 100, 1) if total > 0 else 0.0
 
+    session = _scope_session_query(db, session_id, user).first()
     session.ended_at = datetime.utcnow()
     session.correct = correct_count
     session.incorrect = incorrect_count
@@ -1483,9 +1533,12 @@ async def writing_prompt(
         (d.raw_text or "")[:2000] for d in docs if d.raw_text
     )[:6000]
 
-    messages = _writing_prompt_messages(module.name, material, doc_excerpt)
+    module_name = module.name
+    module_user_id = module.user_id
+    messages = _writing_prompt_messages(module_name, material, doc_excerpt)
+    db.close()
     try:
-        with ai_quota_scope(module.user_id):
+        with ai_quota_scope(module_user_id):
             envelope = await ai_service._call_groq(
                 messages,
                 kind="writing_prompt",
@@ -1525,11 +1578,14 @@ async def writing_prompt_stream(
     ).all()
     material = "\n".join(f"- {c.name}: {c.definition or ''}" for c in concepts)
     doc_excerpt = "\n\n".join((d.raw_text or "")[:2000] for d in docs if d.raw_text)[:6000]
+    module_name = module.name
+    module_user_id = module.user_id
+    db.close()
 
     return _stream_ai_route(
-        _writing_prompt_messages(module.name, material, doc_excerpt),
+        _writing_prompt_messages(module_name, material, doc_excerpt),
         kind="writing_prompt",
-        user_id=module.user_id,
+        user_id=module_user_id,
         expected_payload_key="question",
         max_completion_tokens=2048,
         final_mapper=lambda envelope: envelope.get("data", {}),

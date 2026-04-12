@@ -15,6 +15,15 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
+const MODEL_OPTIONS = [
+  { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
+  { value: 'openai/gpt-oss-20b', label: 'OpenAI GPT-OSS 20B' },
+  { value: 'openai/gpt-oss-120b', label: 'OpenAI GPT-OSS 120B' },
+  { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile' },
+  { value: 'groq/compound-mini', label: 'Groq Compound Mini' },
+  { value: 'groq/compound', label: 'Groq Compound' },
+] as const;
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const formInitialized = useRef(false);
@@ -39,13 +48,16 @@ export default function SettingsPage() {
         form: Object.keys(current.form || {}).length > 0
           ? current.form
           : {
+              llm_model_fast: settingsQuery.data.llm_model_fast,
               llm_model: settingsQuery.data.llm_model,
+              llm_model_quality: settingsQuery.data.llm_model_quality,
               llm_fallback_model: settingsQuery.data.llm_fallback_model,
               llm_temperature: settingsQuery.data.llm_temperature,
               llm_top_p: settingsQuery.data.llm_top_p,
               llm_max_completion_tokens: settingsQuery.data.llm_max_completion_tokens,
               llm_json_mode_enabled: settingsQuery.data.llm_json_mode_enabled,
               llm_streaming_enabled: settingsQuery.data.llm_streaming_enabled,
+              cards_per_document: settingsQuery.data.cards_per_document,
               questions_per_document: settingsQuery.data.questions_per_document,
               daily_new_cards_limit: settingsQuery.data.daily_new_cards_limit,
               desired_retention: settingsQuery.data.desired_retention,
@@ -100,7 +112,7 @@ export default function SettingsPage() {
   }
 
   const form = draft.form;
-  const canSave = Boolean(form.llm_model) && !saveMutation.isPending;
+  const canSave = Boolean(form.llm_model) && Boolean(form.llm_model_fast) && !saveMutation.isPending;
   const canValidateKey = draft.apiKey.trim().length > 0 && !validateAndSaveMutation.isPending;
 
   return (
@@ -155,22 +167,38 @@ export default function SettingsPage() {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
-              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>LLM model</span>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Fast model</span>
+              <select value={form.llm_model_fast ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_model_fast: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Mid model</span>
+              <select value={form.llm_model_quality ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_model_quality: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Main model</span>
               <select value={form.llm_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_model: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
-                <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B</option>
-                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-                <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
-                <option value="gemma2-9b-it">Gemma 2 9B</option>
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Fallback model</span>
               <select value={form.llm_fallback_model ?? ''} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_fallback_model: event.target.value } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
-                <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B</option>
-                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-                <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
-                <option value="gemma2-9b-it">Gemma 2 9B</option>
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
 
@@ -186,7 +214,7 @@ export default function SettingsPage() {
 
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Max completion tokens</span>
-              <input type="number" min={1} max={16384} value={form.llm_max_completion_tokens ?? 4096} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_max_completion_tokens: Number(event.target.value) || 4096 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+              <input type="number" min={1} max={65536} value={form.llm_max_completion_tokens ?? 4096} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, llm_max_completion_tokens: Number(event.target.value) || 4096 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label className="flex items-center justify-between gap-3 px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
@@ -215,6 +243,11 @@ export default function SettingsPage() {
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Daily new cards limit</span>
               <input type="number" min={1} max={100} value={form.daily_new_cards_limit ?? 20} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, daily_new_cards_limit: Number(event.target.value) || 20 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
+            </label>
+
+            <label>
+              <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>Flashcards per document</span>
+              <input type="number" min={1} max={200} value={form.cards_per_document ?? 200} onChange={(event) => setDraft((current) => ({ ...current, form: { ...current.form, cards_per_document: Number(event.target.value) || 200 } }))} className="w-full px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }} />
             </label>
 
             <label>

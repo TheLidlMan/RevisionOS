@@ -69,6 +69,7 @@ async def tutor_explain(
             card_back = card.back
 
     user_id = user.id if user else None
+    db.close()
     with ai_quota_scope(user_id):
         result = await ai_service.tutor_explain(
             concept=body.concept,
@@ -108,6 +109,7 @@ async def topic_generate(
         raise HTTPException(status_code=404, detail="Module not found")
 
     user_id = user.id
+    db.close()
     with ai_quota_scope(user_id):
         cards_data = await ai_service.generate_cards_from_topic(body.topic, body.num_cards)
 

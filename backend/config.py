@@ -45,12 +45,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = ",".join(DEFAULT_CORS_ORIGINS)
     CORS_ORIGIN_REGEX: str = DEFAULT_CORS_ORIGIN_REGEX
     LLM_MODEL_FAST: str = "llama-3.1-8b-instant"
-    LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
-    LLM_MODEL_QUALITY: str = "meta-llama/llama-4-maverick-17b-128e-instruct"
-    LLM_FALLBACK_MODEL: str = "llama-3.1-8b-instant"
+    LLM_MODEL: str = "openai/gpt-oss-120b"
+    LLM_MODEL_QUALITY: str = "openai/gpt-oss-20b"
+    LLM_FALLBACK_MODEL: str = "llama-3.3-70b-versatile"
     LLM_TEMPERATURE: float = 0.1
     LLM_TOP_P: float = 1.0
     LLM_MAX_COMPLETION_TOKENS: int = 4096
+    LLM_MAX_COMPLETION_TOKENS_BULK: int = 32768
     LLM_JSON_MODE_ENABLED: bool = True
     LLM_STREAMING_ENABLED: bool = True
     MAX_CONTEXT_TOKENS: int = 800000
@@ -63,6 +64,12 @@ class Settings(BaseSettings):
     MAX_QUESTIONS_PER_REQUEST: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
+    WHISPER_MODEL: str = "whisper-large-v3-turbo"
+    WHISPER_HQ_MODEL: str = "whisper-large-v3"
+    REQUEST_TIMING_LOG_ENABLED: bool = True
+    REQUEST_TIMING_WARN_MS: int = 1000
+    AUTH_SESSION_WARN_MS: int = 250
+    POOL_PRESSURE_WARN_RATIO: float = 0.8
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str = ""

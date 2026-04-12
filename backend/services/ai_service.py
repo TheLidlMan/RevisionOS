@@ -1,5 +1,7 @@
 import json
+import ast
 import logging
+import re
 from typing import Any, AsyncIterator, Optional
 
 import httpx
@@ -15,14 +17,98 @@ JSON_RESPONSE_FORMAT = {"type": "json_object"}
 FAST_MODEL_KINDS = frozenset({
     "document_summary",
 })
-QUALITY_MODEL_KINDS = frozenset({
+MID_MODEL_KINDS = frozenset({
     "answer_grading",
-    "elaboration_questions",
-    "free_recall",
-    "writing_grade",
-    "writing_prompt",
-    "tutor_explain",
+    "concept_gaps",
 })
+LARGE_DOCUMENT_TOKEN_THRESHOLD = 80000
+TARGET_CHUNK_TOKENS = 20000
+MIN_CHUNK_TOKENS = 15000
+MAX_CHUNK_TOKENS = 30000
+TOKEN_TO_CHAR_RATIO = 4
+CHUNK_OVERLAP_TOKENS = 500
+CHUNK_OVERLAP_CHARS = CHUNK_OVERLAP_TOKENS * TOKEN_TO_CHAR_RATIO
+SYNTHESIS_CARD_TARGET = 20
+FLASHCARD_DEDUP_BATCH_SIZE = 80
+
+SYSTEM_PROMPT_FLASHCARDS = """
+You are an expert study card creator trained in spaced repetition science (SuperMemo/Anki best practices).
+
+CORE RULES (enforce strictly):
+1. ATOMIC: One fact per card. Never combine two concepts.
+2. MINIMUM INFORMATION: Shortest possible question that uniquely identifies the answer.
+3. NO ENUMERATIONS: Never ask "list the X causes of Y". Make one card per item instead.
+4. NO SETS: Never ask for lists. Decompose into atomic questions.
+5. BIDIRECTIONAL: For key terms/definitions, create BOTH directions (term->definition AND definition->term).
+6. CLOZE DELETIONS: For sentences with key terms, create cloze cards: "The {{c1::term}} does X."
+7. INTERFERENCE PREVENTION: If two concepts are similar, include a distinguishing cue in the question.
+8. CONCEPTUAL DEPTH: Mix recall cards (what) with understanding cards (why/how/mechanism).
+9. CONTEXT CUES: Begin questions with "In [topic]..." when a term is ambiguous.
+10. EXAM FOCUS: Prioritise content that tests application over pure recall.
+
+CARD TYPES TO GENERATE:
+- basic: Standard Q&A
+- cloze: Fill-in-the-blank with {{c1::term}} syntax
+- comparison: "What is the key difference between X and Y in [dimension]?"
+- scenario: "Given [situation], what would happen to X?"
+- mechanism: "Why does X lead to Y?"
+- calculation: Show worked formula (for maths/finance content)
+
+Be exhaustive. Do not stop until every distinct fact, formula, definition, process,
+relationship, and application in the source has a card.
+"""
+
+USER_PROMPT_FLASHCARDS = """
+Subject area: {subject}
+Generate as many flashcards as needed to FULLY cover the content below.
+Aim for at minimum {min_cards} cards, but generate more if the content warrants it.
+Prioritise exam-likely content. Mix all card types.
+
+Additional instructions:
+{extra_instructions}
+
+Card types to emphasise: {card_types_emphasis}
+
+Return ONLY valid JSON array:
+[{{"front": "...", "back": "...", "type": "basic|cloze|comparison|scenario|mechanism|calculation",
+  "cloze_text": "..." or null, "tags": ["topic1", "topic2"], "importance": "high|medium|low"}}]
+
+Content:
+{text}
+"""
+
+SUBJECT_MODES: dict[str, dict[str, Any]] = {
+    "finance": {
+        "extra_instructions": (
+            "- For all formulas: create one card showing the formula, one card explaining each variable.\n"
+            "- For ratios: include both the formula and the interpretation.\n"
+            "- For regulations: include jurisdiction and effective date when present.\n"
+            "- For valuation methods: include assumptions and limitations.\n"
+            "- Worked examples are mandatory for calculations."
+        ),
+        "card_types_emphasis": ["calculation", "mechanism", "scenario"],
+    },
+    "medicine": {
+        "extra_instructions": (
+            "- One symptom per card, never lists of symptoms.\n"
+            "- Drug mechanism, side effects, and contraindications must be separate cards.\n"
+            "- Diagnostic criteria should be split into one criterion per card."
+        ),
+        "card_types_emphasis": ["basic", "cloze", "mechanism"],
+    },
+    "law": {
+        "extra_instructions": (
+            "- Create bidirectional cards for case name and legal principle.\n"
+            "- Include statute section numbers where present.\n"
+            "- Always include jurisdiction for rules, statutes, and cases."
+        ),
+        "card_types_emphasis": ["basic", "comparison", "scenario"],
+    },
+    "default": {
+        "extra_instructions": "Be exhaustive. Prioritise understanding over recall.",
+        "card_types_emphasis": ["basic", "cloze", "mechanism"],
+    },
+}
 
 
 def _resolve_primary_model(kind: str, override_model: Optional[str]) -> str:
@@ -30,7 +116,7 @@ def _resolve_primary_model(kind: str, override_model: Optional[str]) -> str:
         return override_model
     if kind in FAST_MODEL_KINDS:
         return settings.LLM_MODEL_FAST
-    if kind in QUALITY_MODEL_KINDS:
+    if kind in MID_MODEL_KINDS:
         return settings.LLM_MODEL_QUALITY
     return settings.LLM_MODEL
 
@@ -123,8 +209,115 @@ def _parse_json_response(text: str) -> list | dict:
     return json.loads(text)
 
 
+def _try_parse_structured_string(text: str) -> Any:
+    candidate = (text or "").strip()
+    if not candidate:
+        return None
+
+    looks_structured = (
+        (candidate.startswith("{") and candidate.endswith("}"))
+        or (candidate.startswith("[") and candidate.endswith("]"))
+        or candidate.startswith("```")
+    )
+    if not looks_structured:
+        return None
+
+    try:
+        return _parse_json_response(candidate)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    try:
+        parsed = ast.literal_eval(candidate)
+    except (SyntaxError, ValueError):
+        return None
+
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def normalize_json_like_content(value: Any) -> Any:
+    if isinstance(value, str):
+        parsed = _try_parse_structured_string(value)
+        if parsed is None:
+            return value.strip()
+        return normalize_json_like_content(parsed)
+    if isinstance(value, dict):
+        return {str(key): normalize_json_like_content(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [normalize_json_like_content(item) for item in value]
+    return value
+
+
+def _humanize_summary_key(key: str) -> str:
+    return re.sub(r"\s+", " ", key.replace("_", " ")).strip().capitalize()
+
+
+def _summary_list_to_text(value: list[Any]) -> str:
+    parts: list[str] = []
+    for item in value:
+        item_text = summary_content_to_text(item)
+        if item_text:
+            parts.append(item_text)
+    return "; ".join(parts)
+
+
+def summary_content_to_text(value: Any) -> str:
+    normalized = normalize_json_like_content(value)
+
+    if normalized is None:
+        return ""
+    if isinstance(normalized, str):
+        return normalized.strip()
+    if isinstance(normalized, list):
+        return _summary_list_to_text(normalized)
+    if not isinstance(normalized, dict):
+        return str(normalized).strip()
+
+    nested_summary = normalized.get("summary")
+    if nested_summary is not None and nested_summary is not normalized:
+        nested_summary_text = summary_content_to_text(nested_summary)
+        if nested_summary_text:
+            return nested_summary_text
+
+    ordered_keys = [
+        "overview",
+        "main_topics",
+        "key_concepts",
+        "important_definitions",
+        "what_to_learn",
+        "learning_objectives",
+        "next_steps",
+    ]
+    sections: list[str] = []
+    seen_keys: set[str] = set()
+
+    for key in ordered_keys:
+        if key not in normalized:
+            continue
+        seen_keys.add(key)
+        text = summary_content_to_text(normalized[key])
+        if text:
+            sections.append(f"{_humanize_summary_key(key)}: {text}")
+
+    for key, item in normalized.items():
+        if key in seen_keys or key == "summary":
+            continue
+        text = summary_content_to_text(item)
+        if text:
+            sections.append(f"{_humanize_summary_key(key)}: {text}")
+
+    return "\n\n".join(sections).strip()
+
+
+def normalize_summary_content(value: Any) -> tuple[str, Optional[dict[str, Any] | list[Any]]]:
+    normalized = normalize_json_like_content(value)
+    structured = normalized if isinstance(normalized, (dict, list)) else None
+    return summary_content_to_text(normalized), structured
+
+
 def _normalize_json_object(raw_text: str, expected_payload_key: Optional[str]) -> dict[str, Any]:
     parsed = _parse_json_response(raw_text)
+    parsed = normalize_json_like_content(parsed)
     if isinstance(parsed, dict):
         return parsed
     key = expected_payload_key or "items"
@@ -409,43 +602,478 @@ def _json_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]
     ]
 
 
-async def generate_flashcards(text: str, num_cards: int, subject: str) -> list[dict[str, Any]]:
-    """Generate exhaustive flashcards from text using Groq API."""
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // TOKEN_TO_CHAR_RATIO)
+
+
+def _normalize_subject_mode(subject_mode: Optional[str]) -> str:
+    normalized = (subject_mode or "").strip().lower()
+    return normalized if normalized in SUBJECT_MODES else "default"
+
+
+async def detect_subject_mode(text: str) -> str:
+    sample = (text or "").strip()[:12000]
+    if not sample:
+        return "default"
+
     messages = _json_messages(
-        "You create exam-focused cloze flashcards grounded only in the provided material. "
-        "Be exhaustive — extract EVERY distinct fact, concept, definition, formula, process, "
-        "and relationship from the text. Do not summarise or skip details.",
+        "You classify study material into one of these exact subject labels: finance, medicine, law, default.",
         (
-            f"Subject: {subject}\n"
-            f"Create as many flashcards as needed to cover ALL key concepts from the material below. "
-            f"Aim for at least {num_cards} cards but do not stop until every important fact, "
-            f"definition, threshold, relationship, formula, and non-trivial exam point is covered.\n\n"
-            "Requirements:\n"
-            "- Return a JSON object with a `cards` array.\n"
-            "- Each card must have `front`, `back`, `type`, `concept_name`, and `tags`.\n"
-            "- Every `front` must contain exactly one `___` blank.\n"
-            "- `back` is the missing word or phrase.\n"
-            "- `type` must always be `CLOZE`.\n"
-            "- Focus on key definitions, thresholds, relationships, and non-trivial exam material.\n"
-            "- Cover different angles: definitions, examples, comparisons, causes, effects, dates, formulas.\n"
-            "- Avoid duplicate or near-duplicate cards.\n\n"
-            "Material:\n"
-            f"{text}"
+            "Read the material and return only one word from this list: "
+            "finance, medicine, law, default.\n\n"
+            f"Material:\n{sample}"
+        ),
+    )
+
+    try:
+        raw_text, _ = await _request_groq_completion(
+            messages,
+            kind="document_summary",
+            model=settings.LLM_MODEL_FAST,
+            max_completion_tokens=32,
+            response_format=None,
+            allow_json_fallback=False,
+        )
+    except Exception as exc:
+        logger.warning("Subject detection failed, using default mode: %s", exc)
+        return "default"
+
+    detected = re.sub(r"[^a-z]", "", raw_text.strip().splitlines()[0].lower())
+    return detected if detected in SUBJECT_MODES else "default"
+
+
+def _looks_like_heading(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if re.match(r"^#{1,6}\s+\S+", stripped):
+        return True
+    if re.match(r"^---\s*slide\s+\d+", stripped, re.IGNORECASE):
+        return True
+    if len(stripped) <= 90 and stripped.endswith(":"):
+        return True
+    return bool(re.match(r"^[A-Z0-9][A-Z0-9\s/&(),:-]{3,80}$", stripped))
+
+
+def _clean_heading(line: str) -> str:
+    stripped = line.strip()
+    stripped = re.sub(r"^#{1,6}\s*", "", stripped)
+    stripped = re.sub(r"^-+\s*", "", stripped)
+    stripped = re.sub(r"\s*-+$", "", stripped)
+    return stripped.strip(": ").strip() or "Document section"
+
+
+def _split_semantic_sections(text: str) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    current_title = "Document section"
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        section_text = "\n".join(current_lines).strip()
+        if section_text:
+            sections.append({"title": current_title, "text": section_text})
+
+    for line in text.splitlines():
+        if _looks_like_heading(line):
+            flush()
+            current_title = _clean_heading(line)
+            current_lines = []
+            continue
+        current_lines.append(line)
+
+    flush()
+    if sections:
+        return sections
+
+    cleaned = (text or "").strip()
+    return [{"title": "Document section", "text": cleaned}] if cleaned else []
+
+
+def _split_large_block(text: str, title: str, max_chars: int) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    if not paragraphs:
+        paragraphs = [text.strip()]
+
+    current_parts: list[str] = []
+    current_len = 0
+
+    def flush() -> None:
+        nonlocal current_parts, current_len
+        chunk_text = "\n\n".join(current_parts).strip()
+        if chunk_text:
+            blocks.append({"title": title, "text": chunk_text})
+        current_parts = []
+        current_len = 0
+
+    for paragraph in paragraphs:
+        if len(paragraph) > max_chars:
+            flush()
+            for start in range(0, len(paragraph), max_chars):
+                part = paragraph[start:start + max_chars].strip()
+                if part:
+                    blocks.append({"title": title, "text": part})
+            continue
+
+        projected = current_len + len(paragraph) + (2 if current_parts else 0)
+        if current_parts and projected > max_chars:
+            flush()
+        current_parts.append(paragraph)
+        current_len += len(paragraph) + (2 if current_len else 0)
+
+    flush()
+    return blocks
+
+
+def semantic_chunk_document(text: str) -> list[dict[str, str]]:
+    sections = _split_semantic_sections(text)
+    if not sections:
+        return []
+
+    target_chars = TARGET_CHUNK_TOKENS * TOKEN_TO_CHAR_RATIO
+    min_chars = MIN_CHUNK_TOKENS * TOKEN_TO_CHAR_RATIO
+    max_chars = min(MAX_CHUNK_TOKENS * TOKEN_TO_CHAR_RATIO, settings.MAX_PROMPT_CHARS)
+
+    chunks: list[dict[str, str]] = []
+    current_titles: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+
+    def flush() -> None:
+        nonlocal current_titles, current_parts, current_len
+        chunk_text = "\n\n".join(current_parts).strip()
+        if not chunk_text:
+            current_titles = []
+            current_parts = []
+            current_len = 0
+            return
+        title = current_titles[0] if len(current_titles) == 1 else f"{current_titles[0]} -> {current_titles[-1]}"
+        chunks.append({"title": title, "text": chunk_text})
+        current_titles = []
+        current_parts = []
+        current_len = 0
+
+    for section in sections:
+        section_text = section["text"].strip()
+        if not section_text:
+            continue
+
+        if len(section_text) > max_chars:
+            flush()
+            chunks.extend(_split_large_block(section_text, section["title"], max_chars))
+            continue
+
+        projected = current_len + len(section_text) + (2 if current_parts else 0)
+        if current_parts and projected > target_chars and current_len >= min_chars:
+            flush()
+
+        current_titles.append(section["title"])
+        current_parts.append(section_text)
+        current_len += len(section_text) + (2 if current_len else 0)
+
+    flush()
+
+    if len(chunks) <= 1:
+        return chunks
+
+    with_overlap: list[dict[str, str]] = []
+    previous_tail = ""
+    for chunk in chunks:
+        chunk_text = chunk["text"]
+        if previous_tail:
+            chunk_text = f"{previous_tail}\n\n{chunk_text}"
+        with_overlap.append({"title": chunk["title"], "text": chunk_text})
+        previous_tail = chunk["text"][-CHUNK_OVERLAP_CHARS:]
+    return with_overlap
+
+
+def _flashcard_max_completion_tokens(text: str, min_cards: int) -> int:
+    if min_cards >= 100 or _estimate_tokens(text) >= TARGET_CHUNK_TOKENS:
+        return settings.LLM_MAX_COMPLETION_TOKENS_BULK
+    return settings.LLM_MAX_COMPLETION_TOKENS
+
+
+def _build_flashcard_user_prompt(
+    *,
+    subject: str,
+    min_cards: int,
+    text: str,
+    subject_mode: str,
+    section_title: Optional[str] = None,
+    source_name: Optional[str] = None,
+) -> str:
+    mode = SUBJECT_MODES[_normalize_subject_mode(subject_mode)]
+    scope_lines: list[str] = []
+    if source_name:
+        scope_lines.append(f"Source document: {source_name}")
+    if section_title:
+        scope_lines.append(f"Section: {section_title}")
+    scope_lines.append("Prioritise foundational ideas before edge cases, then add application cards.")
+    scope_prefix = "\n".join(scope_lines)
+
+    prompt = USER_PROMPT_FLASHCARDS.format(
+        subject=subject or "this subject",
+        min_cards=max(1, min_cards),
+        extra_instructions=mode["extra_instructions"],
+        card_types_emphasis=", ".join(mode["card_types_emphasis"]),
+        text=text,
+    )
+    return f"{scope_prefix}\n\n{prompt}" if scope_prefix else prompt
+
+
+async def _generate_flashcards_single_pass(
+    *,
+    text: str,
+    min_cards: int,
+    subject: str,
+    subject_mode: str,
+    section_title: Optional[str] = None,
+    source_name: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    messages = _json_messages(
+        SYSTEM_PROMPT_FLASHCARDS,
+        _build_flashcard_user_prompt(
+            subject=subject,
+            min_cards=min_cards,
+            text=text,
+            subject_mode=subject_mode,
+            section_title=section_title,
+            source_name=source_name,
+        ),
+    )
+
+    envelope = await _call_groq(
+        messages,
+        kind="flashcards",
+        max_completion_tokens=_flashcard_max_completion_tokens(text, min_cards),
+        response_format=None,
+        expected_payload_key="cards",
+        allow_json_fallback=False,
+    )
+    cards = envelope.get("data", {}).get("cards", [])
+    return cards if isinstance(cards, list) else []
+
+
+def _normalize_generated_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+
+    for raw_card in cards:
+        if not isinstance(raw_card, dict):
+            continue
+
+        front = str(raw_card.get("front") or "").strip()
+        back = str(raw_card.get("back") or "").strip()
+        cloze_text = str(raw_card.get("cloze_text") or "").strip() or None
+        raw_type = str(raw_card.get("type") or "basic").strip().lower()
+        is_cloze = raw_type == "cloze" or bool(cloze_text) or "{{c1::" in front
+        card_type = "CLOZE" if is_cloze else "BASIC"
+
+        if card_type == "CLOZE" and not cloze_text and "{{c1::" in front:
+            cloze_text = front
+        if card_type == "CLOZE" and not back and cloze_text:
+            back = cloze_text
+
+        tags = raw_card.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        clean_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+
+        importance = str(raw_card.get("importance") or "").strip().lower()
+        if importance in {"high", "medium", "low"}:
+            clean_tags.append(f"importance:{importance}")
+
+        concept_name = str(raw_card.get("concept_name") or "").strip()
+        if concept_name:
+            clean_tags.append(concept_name)
+
+        deduped_tags = list(dict.fromkeys(clean_tags))
+        if not front or not back:
+            continue
+
+        normalized.append(
+            {
+                "front": front,
+                "back": back,
+                "type": card_type,
+                "cloze_text": cloze_text,
+                "tags": deduped_tags,
+                "concept_name": concept_name or None,
+                "importance": importance or None,
+            }
+        )
+
+    return normalized
+
+
+def _dedupe_flashcards_exact(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    for card in cards:
+        front = str(card.get("front") or "").strip()
+        back = str(card.get("back") or "").strip()
+        pair = (front.lower(), back.lower())
+        if not front or not back or pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        deduped.append(card)
+
+    return deduped
+
+
+async def deduplicate_flashcards(cards: list[dict[str, Any]], subject: str) -> list[dict[str, Any]]:
+    exact_deduped = _dedupe_flashcards_exact(cards)
+    if len(exact_deduped) < 2:
+        return exact_deduped
+
+    deduped_batches: list[dict[str, Any]] = []
+    for start in range(0, len(exact_deduped), FLASHCARD_DEDUP_BATCH_SIZE):
+        batch = exact_deduped[start:start + FLASHCARD_DEDUP_BATCH_SIZE]
+        messages = _json_messages(
+            "You remove near-duplicate flashcards while keeping the most specific and useful wording.",
+            (
+                f"Subject area: {subject}\n"
+                "Return only a valid JSON array of flashcards to keep. Preserve the original structure. "
+                "Remove near-duplicates and trivial rewrites.\n\n"
+                f"Flashcards:\n{json.dumps(batch, ensure_ascii=False)}"
+            ),
+        )
+        try:
+            envelope = await _call_groq(
+                messages,
+                kind="flashcards",
+                model=settings.LLM_MODEL_FAST,
+                max_completion_tokens=min(settings.LLM_MAX_COMPLETION_TOKENS, 4096),
+                response_format=None,
+                expected_payload_key="cards",
+                allow_json_fallback=False,
+            )
+        except Exception as exc:
+            logger.warning("AI deduplication failed, keeping exact-deduped cards: %s", exc)
+            return exact_deduped
+
+        kept_cards = envelope.get("data", {}).get("cards", [])
+        if isinstance(kept_cards, list):
+            deduped_batches.extend(_normalize_generated_cards(kept_cards))
+
+    return _dedupe_flashcards_exact(deduped_batches or exact_deduped)
+
+
+def _build_synthesis_seed(cards: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for card in cards[:120]:
+        tags = ", ".join(card.get("tags") or [])
+        lines.append(f"- Q: {card.get('front', '')}\n  A: {card.get('back', '')}\n  Tags: {tags}")
+    return "\n".join(lines)
+
+
+async def _generate_synthesis_cards(
+    *,
+    cards: list[dict[str, Any]],
+    subject: str,
+    subject_mode: str,
+    source_name: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    if len(cards) < 10:
+        return []
+
+    source_line = f"Source document: {source_name}\n" if source_name else ""
+    messages = _json_messages(
+        SYSTEM_PROMPT_FLASHCARDS,
+        (
+            f"Subject area: {subject}\n"
+            f"Subject mode: {subject_mode}\n"
+            f"{source_line}"
+            f"Generate {SYNTHESIS_CARD_TARGET} synthesis flashcards that connect ideas across sections. "
+            "Focus on mechanisms, comparisons, and application links between concepts.\n\n"
+            "Return ONLY valid JSON array with the same schema used for normal flashcards.\n\n"
+            f"Existing flashcards:\n{_build_synthesis_seed(cards)}"
         ),
     )
 
     try:
         envelope = await _call_groq(
             messages,
-            kind="flashcards",
-            max_completion_tokens=16384,
-            response_format=_json_response_format(),
+            kind="synthesis_cards",
+            max_completion_tokens=min(settings.LLM_MAX_COMPLETION_TOKENS_BULK, 8192),
+            response_format=None,
             expected_payload_key="cards",
+            allow_json_fallback=False,
         )
-        cards = envelope.get("data", {}).get("cards", [])
-        return cards if isinstance(cards, list) else []
+    except Exception as exc:
+        logger.warning("Failed to generate synthesis flashcards: %s", exc)
+        return []
+
+    synthesis_cards = envelope.get("data", {}).get("cards", [])
+    return _normalize_generated_cards(synthesis_cards if isinstance(synthesis_cards, list) else [])
+
+
+async def generate_flashcards(
+    text: str,
+    num_cards: int,
+    subject: str,
+    subject_mode: Optional[str] = None,
+    source_name: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Generate exhaustive flashcards from text using routed Groq models."""
+    cleaned_text = (text or "").strip()
+    if not cleaned_text:
+        return []
+
+    resolved_subject_mode = _normalize_subject_mode(subject_mode)
+    if resolved_subject_mode == "default":
+        resolved_subject_mode = await detect_subject_mode(cleaned_text)
+
+    try:
+        if (
+            _estimate_tokens(cleaned_text) >= LARGE_DOCUMENT_TOKEN_THRESHOLD
+            or len(cleaned_text) > settings.MAX_PROMPT_CHARS
+        ):
+            chunks = semantic_chunk_document(cleaned_text)
+            if not chunks:
+                return []
+
+            chunk_cards: list[dict[str, Any]] = []
+            total_tokens = sum(max(1, _estimate_tokens(chunk["text"])) for chunk in chunks)
+
+            for chunk in chunks:
+                proportional_target = max(
+                    10,
+                    round(max(1, num_cards) * max(1, _estimate_tokens(chunk["text"])) / total_tokens),
+                )
+                cards = await _generate_flashcards_single_pass(
+                    text=chunk["text"],
+                    min_cards=proportional_target,
+                    subject=subject,
+                    subject_mode=resolved_subject_mode,
+                    section_title=chunk["title"],
+                    source_name=source_name,
+                )
+                chunk_cards.extend(_normalize_generated_cards(cards))
+
+            deduped_cards = await deduplicate_flashcards(chunk_cards, subject)
+            synthesis_cards = await _generate_synthesis_cards(
+                cards=deduped_cards,
+                subject=subject,
+                subject_mode=resolved_subject_mode,
+                source_name=source_name,
+            )
+            return _dedupe_flashcards_exact([*deduped_cards, *synthesis_cards])
+
+        cards = await _generate_flashcards_single_pass(
+            text=cleaned_text,
+            min_cards=num_cards,
+            subject=subject,
+            subject_mode=resolved_subject_mode,
+            source_name=source_name,
+        )
+        normalized_cards = _normalize_generated_cards(cards)
+        return await deduplicate_flashcards(normalized_cards, subject)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.error("Failed to parse flashcard response: %s", exc)
+        return []
+    except Exception as exc:
+        logger.error("Flashcard generation failed: %s", exc)
         return []
 
 
@@ -513,8 +1141,13 @@ async def generate_flashcards_chunked(
 
         try:
             requested_cards = cards_per_chunk if remaining_cards is None else min(cards_per_chunk, remaining_cards)
-            cards = await generate_flashcards(context, requested_cards, subject)
-            valid_cards: list[dict[str, Any]] = []
+            cards = await generate_flashcards(
+                context,
+                requested_cards,
+                subject,
+                source_name=filename or None,
+            )
+            valid_cards = []
             for card in cards:
                 if not isinstance(card, dict):
                     logger.warning(
@@ -523,9 +1156,13 @@ async def generate_flashcards_chunked(
                         card,
                     )
                     continue
-                card["source_document_id"] = chunk_info.get("document_id")
-                card["source_excerpt"] = chunk_text[:200]
-                valid_cards.append(card)
+                valid_cards.append(
+                    {
+                        **card,
+                        "source_document_id": chunk_info.get("document_id"),
+                        "source_excerpt": chunk_text[:200],
+                    }
+                )
             if remaining_cards is not None:
                 valid_cards = valid_cards[:remaining_cards]
             all_cards.extend(valid_cards)
@@ -533,7 +1170,7 @@ async def generate_flashcards_chunked(
             logger.warning("Failed to generate cards for chunk: %s", exc)
             continue
 
-    return all_cards
+    return _dedupe_flashcards_exact(all_cards)
 
 
 async def generate_quiz_questions(
@@ -714,37 +1351,16 @@ async def tutor_explain(
 
 async def generate_cards_from_topic(topic: str, num_cards: int = 30) -> list[dict[str, Any]]:
     """Generate flashcards from a topic name alone, with no source material."""
-    messages = _json_messages(
-        "You are an expert study card generator. You create comprehensive, exam-ready "
-        "cloze flashcards from your own knowledge. Be exhaustive and cover all important "
-        "aspects of the topic.",
-        (
-            f"Topic: {topic}\n\n"
-            f"Generate at least {num_cards} flashcards covering ALL key concepts, "
-            f"definitions, formulas, relationships, processes, and important facts "
-            f"about {topic}.\n\n"
-            "Requirements:\n"
-            "- Return a JSON object with a `cards` array.\n"
-            "- Each card must have `front`, `back`, `type`, `concept_name`, and `tags`.\n"
-            "- Every `front` must contain exactly one `___` blank.\n"
-            "- `back` is the missing word or phrase.\n"
-            "- `type` must always be `CLOZE`.\n"
-            "- Cover different angles: definitions, examples, comparisons, causes, effects, dates, formulas.\n"
-            "- Avoid duplicate or near-duplicate cards.\n"
-            "- Organise cards logically from foundational to advanced concepts.\n"
-        ),
-    )
-
     try:
-        envelope = await _call_groq(
-            messages,
-            kind="flashcards",
-            max_completion_tokens=16384,
-            response_format=_json_response_format(),
-            expected_payload_key="cards",
+        cards = await _generate_flashcards_single_pass(
+            text=f"Generate comprehensive study flashcards about {topic} from general subject knowledge.",
+            min_cards=num_cards,
+            subject=topic,
+            subject_mode="default",
+            source_name=topic,
         )
-        cards = envelope.get("data", {}).get("cards", [])
-        return cards if isinstance(cards, list) else []
+        normalized_cards = _normalize_generated_cards(cards)
+        return await deduplicate_flashcards(normalized_cards, topic)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.error("Failed to parse topic flashcard response: %s", exc)
         return []

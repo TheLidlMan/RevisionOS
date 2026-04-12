@@ -2,6 +2,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -11,7 +12,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import get_db
+from database import get_db, get_pool_snapshot, is_pool_under_pressure
 from models.user import User
 from models.auth_session import AuthSession
 
@@ -160,7 +161,27 @@ def get_current_user(
     # 1. Try session cookie
     session_token = request.cookies.get(SESSION_COOKIE_NAME)
     if session_token:
+        lookup_started = perf_counter()
         user = get_user_from_session_token(db, session_token)
+        lookup_duration_ms = (perf_counter() - lookup_started) * 1000
+        request_path = request.url.path
+        if settings.REQUEST_TIMING_LOG_ENABLED and (
+            request_path == "/api/auth/session"
+            or lookup_duration_ms >= settings.AUTH_SESSION_WARN_MS
+        ):
+            pool_snapshot = get_pool_snapshot()
+            level = logging.WARNING if (
+                lookup_duration_ms >= settings.AUTH_SESSION_WARN_MS
+                or is_pool_under_pressure(pool_snapshot, settings.POOL_PRESSURE_WARN_RATIO)
+            ) else logging.INFO
+            logger.log(
+                level,
+                "auth_session_lookup path=%s authenticated=%s duration_ms=%.1f pool=%s",
+                request_path,
+                bool(user),
+                lookup_duration_ms,
+                pool_snapshot,
+            )
         if user:
             return user
 

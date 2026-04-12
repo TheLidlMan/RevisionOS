@@ -1,11 +1,14 @@
+import logging
 import os
+from time import perf_counter
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings, get_cors_origins, get_cors_origin_regex
-from database import create_tables
+from database import create_tables, get_pool_snapshot, is_pool_under_pressure
 from services.auth_service import validate_auth_settings
+from services.pipeline_service import ensure_document_retry_worker_started, stop_document_retry_worker
 
 from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
 from routers import settings as settings_router
@@ -18,6 +21,68 @@ fastapi_app = FastAPI(
     description="AI-Powered Adaptive Study Platform Backend",
     version="1.0.0",
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _should_log_request_timing(path: str) -> bool:
+    interesting_fragments = (
+        "/auth/session",
+        "/generate-cards",
+        "/quizzes/generate",
+        "/quizzes/sessions/",
+        "/tutor/",
+        "/detect-gaps",
+        "/synthesis-cards",
+        "/elaborate",
+        "/free-recall",
+        "/documents/clip-url",
+        "/exam/",
+        "/writing-prompt",
+        "/writing/grade",
+        "/integrations/",
+        "/import-folder/",
+    )
+    return any(fragment in path for fragment in interesting_fragments)
+
+
+@fastapi_app.middleware("http")
+async def log_targeted_request_timing(request: Request, call_next):
+    path = request.url.path
+    if not settings.REQUEST_TIMING_LOG_ENABLED or not _should_log_request_timing(path):
+        return await call_next(request)
+
+    pool_before = get_pool_snapshot()
+    started = perf_counter()
+    status_code = 500
+    error_name = None
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception as exc:
+        error_name = type(exc).__name__
+        raise
+    finally:
+        duration_ms = (perf_counter() - started) * 1000
+        pool_after = get_pool_snapshot()
+        level = logging.WARNING if (
+            duration_ms >= settings.REQUEST_TIMING_WARN_MS
+            or is_pool_under_pressure(pool_before, settings.POOL_PRESSURE_WARN_RATIO)
+            or is_pool_under_pressure(pool_after, settings.POOL_PRESSURE_WARN_RATIO)
+        ) else logging.INFO
+        logger.log(
+            level,
+            "request_timing method=%s path=%s status=%s duration_ms=%.1f pool_before=%s pool_after=%s error=%s",
+            request.method,
+            path,
+            status_code,
+            duration_ms,
+            pool_before,
+            pool_after,
+            error_name,
+        )
 
 # Include routers
 fastapi_app.include_router(auth.router)
@@ -42,10 +107,16 @@ fastapi_app.include_router(tutor.router)
 
 
 @fastapi_app.on_event("startup")
-def on_startup():
+async def on_startup():
     validate_auth_settings()
     create_tables()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    await ensure_document_retry_worker_started()
+
+
+@fastapi_app.on_event("shutdown")
+async def on_shutdown():
+    await stop_document_retry_worker()
 
 
 @fastapi_app.get("/")

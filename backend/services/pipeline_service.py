@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -27,6 +28,17 @@ logger = logging.getLogger(__name__)
 PIPELINE_TOTAL_STEPS = 5
 ACTIVE_JOB_STATUSES = {"queued", "running", "cancelling"}
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
+MAX_DOCUMENT_RETRIES = 3
+MAX_PROCESSING_ATTEMPTS = 1 + MAX_DOCUMENT_RETRIES
+RETRY_DELAYS = (
+    timedelta(minutes=5),
+    timedelta(minutes=10),
+    timedelta(minutes=10),
+)
+RETRY_POLL_INTERVAL_SECONDS = 60
+STALE_PIPELINE_WINDOW = timedelta(minutes=15)
+_retry_worker_task: Optional[asyncio.Task] = None
+_active_retry_documents: set[str] = set()
 
 
 async def _emit_pipeline_event(
@@ -74,6 +86,24 @@ def _set_document_state(
     doc.processing_total = total
     doc.processing_error = error
     doc.last_pipeline_updated_at = _now()
+
+
+def _begin_processing_attempt(doc: Document) -> None:
+    doc.processing_attempts = int(doc.processing_attempts or 0) + 1
+    doc.next_retry_at = None
+    doc.processing_error = None
+
+
+def _remaining_retry_slots(doc: Document) -> int:
+    attempts = max(1, int(doc.processing_attempts or 1))
+    retries_used = max(0, attempts - 1)
+    return max(0, MAX_DOCUMENT_RETRIES - retries_used)
+
+
+def _retry_delay(doc: Document) -> timedelta:
+    attempts = max(1, int(doc.processing_attempts or 1))
+    delay_index = min(max(attempts - 1, 0), len(RETRY_DELAYS) - 1)
+    return RETRY_DELAYS[delay_index]
 
 
 def sync_module_pipeline_state(db: Session, module_id: str) -> None:
@@ -212,6 +242,11 @@ def _target_cards_for_concept(concept: Concept) -> int:
     return max(1, min(5, ceil(weight * 1.5)))
 
 
+def _target_cards_for_weight(study_weight: Optional[float]) -> int:
+    weight = study_weight or 1.0
+    return max(1, min(5, ceil(weight * 1.5)))
+
+
 async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]:
     if not settings.GROQ_API_KEY:
         return []
@@ -220,14 +255,25 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
     module_name = module.name
     module_user_id = module.user_id
 
-    concepts = (
+    concept_rows = (
         db.query(Concept)
         .filter(Concept.module_id == module_id)
         .order_by(Concept.parent_concept_id.is_(None).desc(), Concept.order_index.asc(), Concept.importance_score.desc())
         .all()
     )
-    if not concepts:
+    if not concept_rows:
         return []
+
+    concepts = [
+        {
+            "id": concept.id,
+            "name": concept.name,
+            "definition": concept.definition,
+            "explanation": concept.explanation,
+            "study_weight": concept.study_weight,
+        }
+        for concept in concept_rows
+    ]
 
     existing_cards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     cards_by_concept: dict[str, list[Flashcard]] = defaultdict(list)
@@ -246,28 +292,34 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
     created_ids: list[str] = []
 
     for concept in concepts:
-        current_count = len(cards_by_concept.get(concept.id, []))
-        missing = _target_cards_for_concept(concept) - current_count
+        concept_id = concept["id"]
+        concept_name = concept["name"]
+        concept_definition = concept.get("definition") or concept.get("explanation") or ""
+        current_count = len(cards_by_concept.get(concept_id, []))
+        missing = _target_cards_for_weight(concept.get("study_weight")) - current_count
         if missing <= 0:
             continue
 
         rag_context = build_rag_context(
             db,
             module_id,
-            query=f"{concept.name}\n{concept.definition or ''}\n{concept.explanation or ''}",
+            query=f"{concept_name}\n{concept.get('definition') or ''}\n{concept.get('explanation') or ''}",
             max_chars=18000,
             user_id=module_user_id,
         )
+        db.close()
         if not rag_context.strip():
             continue
 
         generated_cards = await ai_service.generate_flashcards_for_concept(
-            concept_name=concept.name,
-            concept_definition=concept.definition or concept.explanation or "",
+            concept_name=concept_name,
+            concept_definition=concept_definition,
             context=rag_context,
             num_cards=missing,
             subject=module_name,
         )
+
+        new_cards: list[Flashcard] = []
 
         for payload in generated_cards:
             if not isinstance(payload, dict):
@@ -284,13 +336,13 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
             tags = payload.get("tags", [])
             if not isinstance(tags, list):
                 tags = []
-            if concept.name not in tags:
-                tags = [concept.name, *tags]
+            if concept_name not in tags:
+                tags = [concept_name, *tags]
 
             card = Flashcard(
                 user_id=module_user_id,
                 module_id=module_id,
-                concept_id=concept.id,
+                concept_id=concept_id,
                 front=front,
                 back=back,
                 card_type="CLOZE",
@@ -303,11 +355,13 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
                 generation_source="AUTO",
             )
             db.add(card)
-            cards_by_concept[concept.id].append(card)
+            cards_by_concept[concept_id].append(card)
             existing_pairs.add(pair)
-            created_ids.append(card.id)
+            new_cards.append(card)
 
         db.flush()
+        created_ids.extend(card.id for card in new_cards if card.id)
+        db.commit()
 
     return created_ids
 
@@ -441,6 +495,298 @@ async def _finalize_cancellation(
     )
 
 
+async def _schedule_retry_or_fail(
+    db: Session,
+    *,
+    module: Optional[Module],
+    doc: Optional[Document],
+    job: Optional[ModuleJob],
+    stage: str,
+    completed: int,
+    message: str,
+    event_handler: Optional[Callable[[dict], Awaitable[None] | None]],
+) -> None:
+    if not doc:
+        return
+
+    remaining_slots = _remaining_retry_slots(doc)
+    if remaining_slots > 0:
+        next_retry_at = _now() + _retry_delay(doc)
+        doc.next_retry_at = next_retry_at
+        _set_document_state(
+            doc,
+            status="pending",
+            stage="queued",
+            completed=completed,
+            total=doc.processing_total or PIPELINE_TOTAL_STEPS,
+            error=None,
+        )
+
+        if module and job:
+            _set_pipeline_state(
+                module,
+                job,
+                status="queued",
+                stage="queued",
+                completed=completed,
+                total=job.total or PIPELINE_TOTAL_STEPS,
+                error=None,
+            )
+        elif job:
+            now = _now()
+            job.status = "queued"
+            job.stage = "queued"
+            job.error = None
+            job.updated_at = now
+            job.finished_at = None
+
+        if module:
+            sync_module_pipeline_state(db, module.id)
+
+        db.commit()
+        logger.warning(
+            "Retry scheduled for document %s after stage=%s failure attempt=%s next_retry_at=%s error=%s",
+            doc.id,
+            stage,
+            doc.processing_attempts,
+            next_retry_at.isoformat(),
+            message,
+        )
+        await _emit_pipeline_event(
+            event_handler,
+            {
+                "event": "status",
+                "stage": "queued",
+                "document_id": doc.id,
+                "completed": completed,
+                "total": doc.processing_total or PIPELINE_TOTAL_STEPS,
+                "retry_attempt": doc.processing_attempts,
+                "retry_at": next_retry_at.isoformat(),
+            },
+        )
+        return
+
+    _set_document_state(
+        doc,
+        status="failed",
+        stage=stage or "failed",
+        completed=completed,
+        total=doc.processing_total or PIPELINE_TOTAL_STEPS,
+        error=message,
+    )
+    doc.next_retry_at = None
+
+    if module and job:
+        _set_pipeline_state(
+            module,
+            job,
+            status="failed",
+            stage=stage or "failed",
+            completed=completed,
+            total=job.total or PIPELINE_TOTAL_STEPS,
+            error=message,
+        )
+    elif job:
+        now = _now()
+        job.status = "failed"
+        job.stage = stage or "failed"
+        job.error = message
+        job.updated_at = now
+        job.finished_at = now
+
+    if module:
+        sync_module_pipeline_state(db, module.id)
+
+    db.commit()
+    await _emit_pipeline_event(
+        event_handler,
+        {"event": "error", "stage": stage or "failed", "message": message, "document_id": doc.id},
+    )
+
+
+def _document_stale_since(doc: Document) -> datetime:
+    return doc.last_pipeline_updated_at or doc.updated_at or doc.created_at or _now()
+
+
+def _document_needs_summary_repair(doc: Document) -> bool:
+    return doc.processing_status == "done" and bool((doc.raw_text or "").strip()) and not bool((doc.summary or "").strip())
+
+
+def _document_due_for_retry(doc: Document, active_job: Optional[ModuleJob], now: datetime) -> bool:
+    if doc.delete_requested_at or doc.cancel_requested_at or doc.cancelled_at:
+        return False
+
+    if _document_needs_summary_repair(doc):
+        if int(doc.processing_attempts or 0) >= MAX_PROCESSING_ATTEMPTS:
+            return False
+        return doc.next_retry_at is None or doc.next_retry_at <= now
+
+    status = doc.processing_status or "pending"
+    attempts = int(doc.processing_attempts or 0)
+    stale = _document_stale_since(doc) <= now - STALE_PIPELINE_WINDOW
+
+    if status == "processing":
+        return stale
+    if status == "pending":
+        if doc.next_retry_at is not None:
+            return doc.next_retry_at is not None and doc.next_retry_at <= now
+        return attempts == 0 and (active_job is None or stale)
+    if status == "failed":
+        return attempts < MAX_PROCESSING_ATTEMPTS and doc.next_retry_at is not None and doc.next_retry_at <= now
+
+    return False
+
+
+async def repair_document_summary(document_id: str) -> None:
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc or not _document_needs_summary_repair(doc):
+            return
+
+        doc.processing_attempts = int(doc.processing_attempts or 0) + 1
+        doc.next_retry_at = None
+        doc.last_pipeline_updated_at = _now()
+        db.commit()
+
+        module = db.query(Module).filter(Module.id == doc.module_id).first()
+        try:
+            if settings.GROQ_API_KEY:
+                with ai_quota_scope(module.user_id if module else None):
+                    summary = await summarize_document(document_id, db)
+                    if summary is None and not doc.summary:
+                        doc.summary = _fallback_summary(doc.raw_text or "")
+                        db.commit()
+            elif not doc.summary:
+                doc.summary = _fallback_summary(doc.raw_text or "")
+                db.commit()
+
+            doc.next_retry_at = None
+            doc.last_pipeline_updated_at = _now()
+            db.commit()
+        except Exception as exc:
+            await _schedule_retry_or_fail(
+                db,
+                module=module,
+                doc=doc,
+                job=None,
+                stage="repairing_summary",
+                completed=doc.processing_completed or PIPELINE_TOTAL_STEPS,
+                message=str(exc),
+                event_handler=None,
+            )
+    finally:
+        db.close()
+
+
+def _run_document_pipeline_retry(document_id: str, module_id: str, job_id: Optional[str]) -> None:
+    asyncio.run(process_document_pipeline(document_id, module_id, job_id))
+
+
+def _run_document_summary_repair(document_id: str) -> None:
+    asyncio.run(repair_document_summary(document_id))
+
+
+async def _launch_document_retry(document_id: str, module_id: str, job_id: Optional[str]) -> None:
+    if document_id in _active_retry_documents:
+        return
+
+    _active_retry_documents.add(document_id)
+    try:
+        await asyncio.to_thread(_run_document_pipeline_retry, document_id, module_id, job_id)
+    finally:
+        _active_retry_documents.discard(document_id)
+
+
+async def _launch_summary_repair(document_id: str) -> None:
+    if document_id in _active_retry_documents:
+        return
+
+    _active_retry_documents.add(document_id)
+    try:
+        await asyncio.to_thread(_run_document_summary_repair, document_id)
+    finally:
+        _active_retry_documents.discard(document_id)
+
+
+async def _retry_due_documents_once() -> None:
+    db = SessionLocal()
+    try:
+        now = _now()
+        docs = (
+            db.query(Document)
+            .filter(Document.delete_requested_at.is_(None))
+            .all()
+        )
+        tasks: list[asyncio.Task] = []
+
+        for doc in docs:
+            active_job = (
+                db.query(ModuleJob)
+                .filter(ModuleJob.document_id == doc.id, ModuleJob.status.in_(ACTIVE_JOB_STATUSES))
+                .order_by(ModuleJob.created_at.desc())
+                .first()
+            )
+            if not _document_due_for_retry(doc, active_job, now):
+                continue
+
+            if _document_needs_summary_repair(doc):
+                tasks.append(asyncio.create_task(_launch_summary_repair(doc.id)))
+                continue
+
+            job = active_job or create_module_job(db, module_id=doc.module_id, document_id=doc.id)
+            if active_job:
+                job.status = "queued"
+                job.stage = "queued"
+                job.error = None
+                job.updated_at = now
+                job.finished_at = None
+
+            doc.processing_status = "pending"
+            doc.processing_stage = "queued"
+            doc.processing_error = None
+            doc.next_retry_at = None
+            doc.last_pipeline_updated_at = now
+            db.commit()
+
+            tasks.append(asyncio.create_task(_launch_document_retry(doc.id, doc.module_id, job.id)))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        db.close()
+
+
+async def _document_retry_worker() -> None:
+    while True:
+        try:
+            await _retry_due_documents_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Document retry worker error: %s", exc)
+        await asyncio.sleep(RETRY_POLL_INTERVAL_SECONDS)
+
+
+async def ensure_document_retry_worker_started() -> None:
+    global _retry_worker_task
+    if _retry_worker_task and not _retry_worker_task.done():
+        return
+    _retry_worker_task = asyncio.create_task(_document_retry_worker(), name="document-retry-worker")
+
+
+async def stop_document_retry_worker() -> None:
+    global _retry_worker_task
+    if not _retry_worker_task:
+        return
+    _retry_worker_task.cancel()
+    try:
+        await _retry_worker_task
+    except asyncio.CancelledError:
+        pass
+    _retry_worker_task = None
+
+
 def _build_study_plan(module: Module, db: Session) -> Optional[dict]:
     if not module.exam_date:
         module.study_plan_json = None
@@ -556,6 +902,7 @@ async def process_document_pipeline(
             return
 
         with ai_quota_scope(module.user_id):
+            _begin_processing_attempt(doc)
             _set_pipeline_state(module, job, status="running", stage="extracting", completed=0)
             _set_document_state(doc, status="processing", stage="extracting", completed=0, total=PIPELINE_TOTAL_STEPS)
             sync_module_pipeline_state(db, module.id)
@@ -594,11 +941,16 @@ async def process_document_pipeline(
                 )
             except Exception as exc:
                 doc.processed = False
-                _set_document_state(doc, status="failed", stage="extracting", completed=0, total=PIPELINE_TOTAL_STEPS, error=str(exc))
-                _set_pipeline_state(module, job, status="failed", stage="extracting", completed=0, error=str(exc))
-                sync_module_pipeline_state(db, module.id)
-                db.commit()
-                await _emit_pipeline_event(event_handler, {"event": "error", "stage": "extracting", "message": str(exc)})
+                await _schedule_retry_or_fail(
+                    db,
+                    module=module,
+                    doc=doc,
+                    job=job,
+                    stage="extracting",
+                    completed=0,
+                    message=str(exc),
+                    event_handler=event_handler,
+                )
                 return
 
             doc, module, job = _current_entities(db, document_id, module_id, job_id)
@@ -630,12 +982,19 @@ async def process_document_pipeline(
                 doc.summary = _fallback_summary(doc.raw_text or "")
                 db.commit()
             clear_summary_on_cancel = bool(doc.summary)
+            summary_text, summary_data = ai_service.normalize_summary_content(doc.summary)
             _set_document_state(doc, status="processing", stage="summarizing", completed=2, total=PIPELINE_TOTAL_STEPS)
             sync_module_pipeline_state(db, module.id)
             db.commit()
             await _emit_pipeline_event(
                 event_handler,
-                {"event": "partial", "stage": "summarizing", "summary": doc.summary or "", "document_id": doc.id},
+                {
+                    "event": "partial",
+                    "stage": "summarizing",
+                    "summary": summary_text,
+                    "summary_data": summary_data,
+                    "document_id": doc.id,
+                },
             )
 
             doc, module, job = _current_entities(db, document_id, module_id, job_id)
@@ -738,7 +1097,8 @@ async def process_document_pipeline(
                     "stage": "ready",
                     "document_id": doc.id,
                     "module_id": module.id,
-                    "summary": doc.summary or "",
+                    "summary": summary_text,
+                    "summary_data": summary_data,
                     "completed": PIPELINE_TOTAL_STEPS,
                     "total": PIPELINE_TOTAL_STEPS,
                 },
@@ -748,14 +1108,27 @@ async def process_document_pipeline(
         try:
             module = db.query(Module).filter(Module.id == module_id).first()
             job = db.query(ModuleJob).filter(ModuleJob.id == job_id).first() if job_id else None
-            if module:
-                _set_pipeline_state(module, job, status="failed", stage="failed", completed=0, error=str(exc))
-            if doc := db.query(Document).filter(Document.id == document_id).first():
-                _set_document_state(doc, status="failed", stage=doc.processing_stage or "failed", completed=doc.processing_completed, total=doc.processing_total or PIPELINE_TOTAL_STEPS, error=str(exc))
-            if module:
-                sync_module_pipeline_state(db, module.id)
-            db.commit()
-            await _emit_pipeline_event(event_handler, {"event": "error", "stage": "failed", "message": str(exc)})
+            doc = db.query(Document).filter(Document.id == document_id).first()
+            _rollback_pipeline_run(
+                db,
+                module_id=module_id,
+                document_id=document_id,
+                created_concept_ids=created_concept_ids,
+                created_flashcard_ids=created_flashcard_ids,
+                clear_summary=False,
+                clear_raw_text=False,
+            )
+            if doc:
+                await _schedule_retry_or_fail(
+                    db,
+                    module=module,
+                    doc=doc,
+                    job=job,
+                    stage=(doc.processing_stage or "failed"),
+                    completed=doc.processing_completed,
+                    message=str(exc),
+                    event_handler=event_handler,
+                )
         except Exception:
             db.rollback()
     finally:

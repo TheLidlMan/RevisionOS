@@ -25,12 +25,14 @@ class Document(Base):
     processing_error = Column(Text, nullable=True)
     processing_completed = Column(Integer, default=0)
     processing_total = Column(Integer, default=0)
+    processing_attempts = Column(Integer, default=0)
     word_count = Column(Integer, default=0)
     transcript = Column(Text, nullable=True)  # Whisper transcription output
     summary = Column(Text, nullable=True)  # AI-generated document summary
     slide_count = Column(Integer, nullable=True)  # For PPTX files
     embedding = Column(Text, nullable=True)  # Base64-encoded embedding vector
     last_pipeline_updated_at = Column(DateTime, nullable=True)
+    next_retry_at = Column(DateTime, nullable=True)
     cancel_requested_at = Column(DateTime, nullable=True)
     cancelled_at = Column(DateTime, nullable=True)
     delete_requested_at = Column(DateTime, nullable=True)

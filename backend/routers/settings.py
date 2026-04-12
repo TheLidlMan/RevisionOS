@@ -16,16 +16,16 @@ SETTINGS_FILE = Path(__file__).resolve().parent.parent / "settings.json"
 DEFAULT_SETTINGS = {
     "groq_api_key": "",
     "llm_model_fast": "llama-3.1-8b-instant",
-    "llm_model": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "llm_model_quality": "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "llm_fallback_model": "llama-3.1-8b-instant",
+    "llm_model": "openai/gpt-oss-120b",
+    "llm_model_quality": "openai/gpt-oss-20b",
+    "llm_fallback_model": "llama-3.3-70b-versatile",
     "llm_temperature": 0.1,
     "llm_top_p": 1.0,
     "llm_max_completion_tokens": 4096,
     "llm_json_mode_enabled": True,
     "llm_streaming_enabled": True,
     "daily_new_cards_limit": 20,
-    "cards_per_document": 20,
+    "cards_per_document": 200,
     "questions_per_document": 10,
     "weakness_threshold": 0.7,
     "desired_retention": 0.9,
@@ -38,16 +38,16 @@ DEFAULT_SETTINGS = {
 class SettingsResponse(BaseModel):
     groq_api_key: str = ""
     llm_model_fast: str = "llama-3.1-8b-instant"
-    llm_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
-    llm_model_quality: str = "meta-llama/llama-4-maverick-17b-128e-instruct"
-    llm_fallback_model: str = "llama-3.1-8b-instant"
+    llm_model: str = "openai/gpt-oss-120b"
+    llm_model_quality: str = "openai/gpt-oss-20b"
+    llm_fallback_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.1
     llm_top_p: float = 1.0
     llm_max_completion_tokens: int = 4096
     llm_json_mode_enabled: bool = True
     llm_streaming_enabled: bool = True
     daily_new_cards_limit: int = 20
-    cards_per_document: int = 20
+    cards_per_document: int = 200
     questions_per_document: int = 10
     weakness_threshold: float = 0.7
     desired_retention: float = 0.9

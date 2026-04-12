@@ -5,7 +5,7 @@ Revise OS transforms folders of lecture transcripts, PDFs, and slides into an in
 ## Features
 
 - **Smart File Processing** — Upload PDFs and text files; AI extracts key concepts automatically
-- **AI Flashcard Generation** — Generates high-quality flashcards from your study materials using Groq (Llama 4 Scout)
+- **AI Flashcard Generation** — Generates high-quality flashcards from your study materials using Groq with production-stable model routing
 - **FSRS Spaced Repetition** — Industry-standard scheduling algorithm ensures you review cards at optimal intervals
 - **Quiz Mode** — Multiple choice questions with instant feedback and explanations
 - **Module Organisation** — Organise materials by course/subject with colour coding
@@ -20,7 +20,7 @@ Revise OS transforms folders of lecture transcripts, PDFs, and slides into an in
 | Styling | Tailwind CSS v4 |
 | Backend | FastAPI (Python 3.11+) |
 | Database | SQLite via SQLAlchemy |
-| AI/LLM | Groq API (Llama 4 Scout) |
+| AI/LLM | Groq API (`openai/gpt-oss-120b` primary, routed by task) |
 | Spaced Repetition | py-fsrs v4 |
 
 ## Quick Start
@@ -143,10 +143,13 @@ ReviseOS/
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,https://revisionos-frontend.pages.dev,https://reviseos.co.uk,https://login.reviseos.co.uk,https://app.reviseos.co.uk,https://api.reviseos.co.uk` | Comma-separated allowed frontend origins |
 | `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)` | Optional regex for Cloudflare Pages previews and ReviseOS subdomains |
-| `LLM_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Primary LLM model |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | Primary high-quality LLM model |
+| `LLM_MODEL_QUALITY` | `openai/gpt-oss-20b` | Mid-tier model for cheaper structured tasks |
+| `LLM_MODEL_FAST` | `llama-3.1-8b-instant` | Fast low-cost model for simple tasks |
+| `LLM_FALLBACK_MODEL` | `llama-3.3-70b-versatile` | Fallback when the primary model fails |
 | `UPLOAD_DIR` | `./uploads` | File upload directory |
 | `DAILY_NEW_CARDS_LIMIT` | `20` | Max new cards per day |
-| `CARDS_PER_DOCUMENT` | `20` | Flashcards generated per doc |
+| `CARDS_PER_DOCUMENT` | `200` | Flashcards generated per doc |
 | `QUESTIONS_PER_DOCUMENT` | `10` | Quiz questions per doc |
 | `DESIRED_RETENTION` | `0.9` | FSRS target retention rate |
 

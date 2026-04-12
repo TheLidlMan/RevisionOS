@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.schema import CreateColumn
@@ -13,6 +15,44 @@ engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+
+def get_pool_snapshot() -> dict[str, Any]:
+    pool = getattr(engine, "pool", None)
+    snapshot: dict[str, Any] = {
+        "status": "unavailable",
+        "checked_out": None,
+        "size": None,
+        "overflow": None,
+    }
+    if pool is None:
+        return snapshot
+
+    status_method = getattr(pool, "status", None)
+    if callable(status_method):
+        try:
+            snapshot["status"] = status_method()
+        except Exception:
+            snapshot["status"] = "unavailable"
+
+    for attr_name, key in (("checkedout", "checked_out"), ("size", "size"), ("overflow", "overflow")):
+        method = getattr(pool, attr_name, None)
+        if not callable(method):
+            continue
+        try:
+            snapshot[key] = int(method())
+        except Exception:
+            snapshot[key] = None
+
+    return snapshot
+
+
+def is_pool_under_pressure(snapshot: dict[str, Any], warn_ratio: float) -> bool:
+    checked_out = snapshot.get("checked_out")
+    size = snapshot.get("size")
+    if not isinstance(checked_out, int) or not isinstance(size, int) or size <= 0:
+        return False
+    return (checked_out / size) >= warn_ratio
 
 
 def get_db():
@@ -57,7 +97,9 @@ def _ensure_runtime_schema():
             "processing_error",
             "processing_completed",
             "processing_total",
+            "processing_attempts",
             "last_pipeline_updated_at",
+            "next_retry_at",
             "cancel_requested_at",
             "cancelled_at",
             "delete_requested_at",
@@ -109,6 +151,7 @@ def _ensure_runtime_schema():
             conn.execute(text("UPDATE documents SET processing_stage = COALESCE(processing_stage, 'uploaded')"))
             conn.execute(text("UPDATE documents SET processing_completed = COALESCE(processing_completed, 0)"))
             conn.execute(text("UPDATE documents SET processing_total = COALESCE(processing_total, 0)"))
+            conn.execute(text("UPDATE documents SET processing_attempts = COALESCE(processing_attempts, 0)"))
             conn.execute(text("UPDATE documents SET updated_at = COALESCE(updated_at, created_at)"))
 
         if "concepts" in existing_tables:

@@ -41,6 +41,10 @@ async def import_from_notion(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    module_id = module.id
+    user_id = user.id if user else None
+    db.close()
+
     headers = {
         "Authorization": f"Bearer {body.notion_token}",
         "Notion-Version": "2022-06-28",
@@ -93,7 +97,7 @@ async def import_from_notion(
 
         doc = Document(
             id=str(uuid.uuid4()),
-            module_id=body.module_id,
+            module_id=module_id,
             filename=f"{title}.notion",
             file_type="TXT",
             file_path="",
@@ -101,7 +105,7 @@ async def import_from_notion(
             processed=True,
             processing_status="done",
             word_count=len(raw_text.split()),
-            user_id=user.id if user else None,
+            user_id=user_id,
         )
         db.add(doc)
         db.commit()
@@ -141,6 +145,10 @@ async def import_from_google_drive(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    module_id = module.id
+    user_id = user.id if user else None
+    db.close()
+
     headers = {"Authorization": f"Bearer {body.access_token}"}
 
     try:
@@ -176,7 +184,7 @@ async def import_from_google_drive(
 
         # Save file and extract text
         base_upload = os.path.realpath(settings.UPLOAD_DIR)
-        upload_dir = os.path.join(base_upload, module.id)
+        upload_dir = os.path.join(base_upload, module_id)
         os.makedirs(upload_dir, exist_ok=True)
 
         file_id = str(uuid.uuid4())
@@ -200,7 +208,7 @@ async def import_from_google_drive(
 
         doc = Document(
             id=file_id,
-            module_id=body.module_id,
+            module_id=module_id,
             filename=filename,
             file_type=file_type,
             file_path=saved_path,
@@ -208,7 +216,7 @@ async def import_from_google_drive(
             processed=bool(raw_text),
             processing_status="done" if raw_text else "failed",
             word_count=len(raw_text.split()) if raw_text else 0,
-            user_id=user.id if user else None,
+            user_id=user_id,
         )
         db.add(doc)
         db.commit()

@@ -34,6 +34,7 @@ import {
   updateModule,
   generateCardsFromTopic,
 } from '../api/client';
+import DocumentSummary from '../components/DocumentSummary';
 import ShowMoreText from '../components/ShowMoreText';
 import Skeleton from '../components/Skeleton';
 import { useToast } from '../hooks/useToast';
@@ -404,170 +405,178 @@ export default function ModuleView() {
         Back to Dashboard
       </button>
 
-      <div className="sticky top-0 z-20 -mx-2 px-2 pb-4 mb-8" style={{ background: 'linear-gradient(to bottom, var(--bg) 78%, rgba(15,15,15,0))' }}>
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 p-5" style={glass}>
+      <div className="sticky top-0 z-20 -mx-2 px-2 pb-4 mb-6" style={{ background: 'linear-gradient(to bottom, var(--bg) 80%, rgba(15,15,15,0))' }}>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4" style={glass}>
           <div className="min-w-0">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3">
               <span style={{ width: 12, height: 12, borderRadius: 999, background: mod.color, flexShrink: 0 }} />
-              <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '2rem' }}>{mod.name}</h1>
+              <h1 className="truncate" style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: 'clamp(1.35rem, 3vw, 1.85rem)' }}>
+                {mod.name}
+              </h1>
             </div>
-            {mod.description ? (
-              <ShowMoreText text={mod.description} collapsedLines={2} color="var(--text-secondary)" fontSize="0.95rem" />
-            ) : (
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>Add source material and let the backend keep this module up to date.</p>
-            )}
-            <div className="flex flex-wrap gap-3 mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-              <span>{mod.total_documents} documents</span>
-              <span>{mod.total_cards} cards</span>
-              <span>{mod.due_cards} due</span>
-              <span>{Math.round(mod.mastery_pct)}% mastery</span>
-              <span title={formatDateTime(mod.updated_at)}>Updated {formatRelativeTime(mod.updated_at)}</span>
-            </div>
+            <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {mod.due_cards} due · {Math.round(mod.mastery_pct)}% mastery
+            </p>
           </div>
 
-          <div className="w-full lg:max-w-sm space-y-3">
-            <div>
-              <p style={{ color: 'var(--text-tertiary)', fontSize: '0.76rem', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-                Study actions
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className="scholar-btn"
-                  style={{ background: 'rgba(196,149,106,0.28)', color: 'var(--text)' }}
-                  onClick={() => navigate(`/flashcards/${mod.id}`)}
-                >
-                  <PlayCircle size={18} />
-                  Start Review
-                </button>
-                <button
-                  type="button"
-                  className="scholar-btn-secondary"
-                  onClick={() => navigate(`/quiz?module=${mod.id}`)}
-                >
-                  <BookOpen size={18} />
-                  Take Quiz
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <p style={{ color: 'var(--text-tertiary)', fontSize: '0.76rem', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-                Module tools
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button type="button" className="scholar-btn-secondary" onClick={() => setUploadOpen(true)}>
-                  <UploadSimple size={18} />
-                  Upload
-                </button>
-                <button
-                  type="button"
-                  className="scholar-btn-secondary"
-                  onClick={() => generateCardsMutation.mutate()}
-                  disabled={generateCardsMutation.isPending}
-                >
-                  {generateCardsMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <CardsThree size={18} />}
-                  {generateCardsMutation.isPending ? 'Generating Cards' : 'Generate Cards'}
-                </button>
-                <button
-                  type="button"
-                  className="scholar-btn-secondary"
-                  onClick={() => setTopicGenOpen(!topicGenOpen)}
-                >
-                  <BookOpen size={18} />
-                  From Topic
-                </button>
-                <details className="relative">
-                  <summary
-                    className="list-none cursor-pointer px-4 py-2.5 inline-flex items-center justify-center gap-2 w-full"
-                    style={{ ...glass, color: 'var(--text)', fontSize: '0.9rem', minHeight: 44 }}
-                  >
-                    <Export size={18} />
-                    Export
-                  </summary>
-                  <div className="mt-2 p-2 space-y-1 absolute left-0 right-0 sm:right-auto" style={{ ...glass, minWidth: 180 }}>
-                    <button
-                      type="button"
-                      className="w-full text-left px-3 py-2 rounded-xl"
-                      style={{ color: 'var(--text)' }}
-                      onClick={async () => {
-                        const blob = await exportAnki(mod.id);
-                        const url = URL.createObjectURL(blob);
-                        const anchor = document.createElement('a');
-                        anchor.href = url;
-                        anchor.download = `${mod.name}.apkg`;
-                        anchor.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                    >
-                      Export Anki
-                    </button>
-                    <button
-                      type="button"
-                      className="w-full text-left px-3 py-2 rounded-xl"
-                      style={{ color: 'var(--text)' }}
-                      onClick={async () => {
-                        const blob = await exportJson(mod.id);
-                        const url = URL.createObjectURL(blob);
-                        const anchor = document.createElement('a');
-                        anchor.href = url;
-                        anchor.download = `${mod.name}.json`;
-                        anchor.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                    >
-                      Export JSON
-                    </button>
-                  </div>
-                </details>
-                <button
-                  type="button"
-                  onClick={queueModuleDelete}
-                  className="px-4 py-2.5 inline-flex items-center justify-center gap-2 rounded-[var(--radius)]"
-                  style={{ ...glass, color: 'var(--danger)', minHeight: 44 }}
-                >
-                  <Trash size={18} />
-                  Delete Module
-                </button>
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-2 md:w-auto">
+            <button
+              type="button"
+              className="scholar-btn"
+              style={{ background: 'rgba(196,149,106,0.28)', color: 'var(--text)' }}
+              onClick={() => navigate(`/flashcards/${mod.id}`)}
+            >
+              <PlayCircle size={18} />
+              Start Review
+            </button>
+            <button
+              type="button"
+              className="scholar-btn-secondary"
+              onClick={() => navigate(`/quiz?module=${mod.id}`)}
+            >
+              <BookOpen size={18} />
+              Take Quiz
+            </button>
           </div>
         </div>
-        {flashcardStatus && (
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>{flashcardStatus}</p>
-        )}
-        {topicGenOpen && (
-          <div className="mt-3 p-4" style={glass}>
-            <p style={{ color: 'var(--text)', fontWeight: 500, fontSize: '0.9rem', marginBottom: 8 }}>
-              Generate Cards from Topic
-            </p>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: 12 }}>
-              Enter a topic name and AI will generate flashcards from scratch — no upload needed.
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={topicInput}
-                onChange={(e) => setTopicInput(e.target.value)}
-                placeholder="e.g. Black-Scholes model, Krebs cycle, Treaty of Versailles"
-                className="flex-1 px-3 py-2 rounded-lg"
-                style={{ background: 'rgba(139,115,85,0.1)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.9rem' }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && topicInput.trim()) {
-                    topicGenerateMutation.mutate(topicInput.trim());
-                  }
-                }}
-              />
-              <button
-                onClick={() => topicGenerateMutation.mutate(topicInput.trim())}
-                disabled={!topicInput.trim() || topicGenerateMutation.isPending}
-                className="scholar-btn px-4 py-2"
-              >
-                {topicGenerateMutation.isPending ? <SpinnerGap size={16} className="animate-spin" /> : 'Generate'}
-              </button>
-            </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-6 mb-6">
+        <section className="p-5" style={glass}>
+          <p style={{ color: 'var(--text-tertiary)', fontSize: '0.76rem', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>
+            Overview
+          </p>
+          {mod.description ? (
+            <ShowMoreText text={mod.description} collapsedLines={2} color="var(--text-secondary)" fontSize="0.95rem" />
+          ) : (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>Add source material and let the backend keep this module up to date.</p>
+          )}
+          <div className="flex flex-wrap gap-3 mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <span>{mod.total_documents} documents</span>
+            <span>{mod.total_cards} cards</span>
+            <span>{mod.due_cards} due</span>
+            <span>{Math.round(mod.mastery_pct)}% mastery</span>
+            <span title={formatDateTime(mod.updated_at)}>Updated {formatRelativeTime(mod.updated_at)}</span>
           </div>
-        )}
+        </section>
+
+        <aside className="p-5" style={glass}>
+          <p style={{ color: 'var(--text-tertiary)', fontSize: '0.76rem', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+            Module tools
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button type="button" className="scholar-btn-secondary" onClick={() => setUploadOpen(true)}>
+              <UploadSimple size={18} />
+              Upload
+            </button>
+            <button
+              type="button"
+              className="scholar-btn-secondary"
+              onClick={() => generateCardsMutation.mutate()}
+              disabled={generateCardsMutation.isPending}
+            >
+              {generateCardsMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <CardsThree size={18} />}
+              {generateCardsMutation.isPending ? 'Generating Cards' : 'Generate Cards'}
+            </button>
+            <button
+              type="button"
+              className="scholar-btn-secondary"
+              onClick={() => setTopicGenOpen(!topicGenOpen)}
+            >
+              <BookOpen size={18} />
+              {topicGenOpen ? 'Close Topic Tool' : 'From Topic'}
+            </button>
+            <details className="relative">
+              <summary
+                className="list-none cursor-pointer px-4 py-2.5 inline-flex items-center justify-center gap-2 w-full"
+                style={{ ...glass, color: 'var(--text)', fontSize: '0.9rem', minHeight: 44 }}
+              >
+                <Export size={18} />
+                Export
+              </summary>
+              <div className="mt-2 p-2 space-y-1 absolute left-0 right-0 sm:right-auto z-10" style={{ ...glass, minWidth: 180 }}>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 rounded-xl"
+                  style={{ color: 'var(--text)' }}
+                  onClick={async () => {
+                    const blob = await exportAnki(mod.id);
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `${mod.name}.apkg`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export Anki
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 rounded-xl"
+                  style={{ color: 'var(--text)' }}
+                  onClick={async () => {
+                    const blob = await exportJson(mod.id);
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `${mod.name}.json`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export JSON
+                </button>
+              </div>
+            </details>
+            <button
+              type="button"
+              onClick={queueModuleDelete}
+              className="px-4 py-2.5 inline-flex items-center justify-center gap-2 rounded-[var(--radius)] sm:col-span-2"
+              style={{ ...glass, color: 'var(--danger)', minHeight: 44 }}
+            >
+              <Trash size={18} />
+              Delete Module
+            </button>
+          </div>
+
+          {flashcardStatus && (
+            <p className="mt-3" style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>{flashcardStatus}</p>
+          )}
+
+          {topicGenOpen && (
+            <div className="mt-3 p-4" style={{ ...glass, borderRadius: '12px' }}>
+              <p style={{ color: 'var(--text)', fontWeight: 500, fontSize: '0.9rem', marginBottom: 8 }}>
+                Generate Cards from Topic
+              </p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: 12 }}>
+                Enter a topic name and AI will generate flashcards from scratch — no upload needed.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={topicInput}
+                  onChange={(e) => setTopicInput(e.target.value)}
+                  placeholder="e.g. Black-Scholes model, Krebs cycle, Treaty of Versailles"
+                  className="flex-1 px-3 py-2 rounded-lg"
+                  style={{ background: 'rgba(139,115,85,0.1)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: '0.9rem' }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && topicInput.trim()) {
+                      topicGenerateMutation.mutate(topicInput.trim());
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => topicGenerateMutation.mutate(topicInput.trim())}
+                  disabled={!topicInput.trim() || topicGenerateMutation.isPending}
+                  className="scholar-btn px-4 py-2"
+                >
+                  {topicGenerateMutation.isPending ? <SpinnerGap size={16} className="animate-spin" /> : 'Generate'}
+                </button>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
 
       {pipelineActive && (
@@ -678,8 +687,8 @@ export default function ModuleView() {
                           </div>
                         </div>
                       ) : null}
-                      {doc.summary ? (
-                        <ShowMoreText text={doc.summary} collapsedLines={3} color="var(--text-secondary)" fontSize="0.88rem" />
+                      {doc.summary || doc.summary_data ? (
+                        <DocumentSummary summary={doc.summary} summaryData={doc.summary_data} />
                       ) : doc.processing_error ? (
                         <p style={{ color: 'var(--danger)', fontSize: '0.84rem', marginTop: 10 }}>
                           {doc.processing_error}

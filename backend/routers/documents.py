@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Response, status
 from fastapi.responses import StreamingResponse
@@ -16,6 +16,7 @@ from database import get_db
 from models.document import Document
 from models.module import Module
 from models.module_job import ModuleJob
+from services.content_indexer import backfill_document_summaries
 from services.pipeline_service import ACTIVE_JOB_STATUSES, PIPELINE_TOTAL_STEPS, create_module_job, process_document_pipeline, sync_module_pipeline_state
 from services import ai_service
 from typing import Optional as OptionalType
@@ -45,6 +46,7 @@ class DocumentResponse(BaseModel):
     file_size_bytes: int = 0
     file_sha256: Optional[str] = None
     summary: Optional[str] = None
+    summary_data: dict[str, Any] | list[Any] | None = None
     last_pipeline_updated_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     created_at: datetime
@@ -81,6 +83,7 @@ def _get_file_type(filename: str) -> str:
 
 
 def _document_to_response(doc: Document) -> DocumentResponse:
+    summary, summary_data = ai_service.normalize_summary_content(doc.summary)
     return DocumentResponse(
         id=doc.id,
         module_id=doc.module_id,
@@ -96,7 +99,8 @@ def _document_to_response(doc: Document) -> DocumentResponse:
         word_count=doc.word_count,
         file_size_bytes=doc.file_size_bytes or 0,
         file_sha256=doc.file_sha256,
-        summary=doc.summary,
+        summary=summary or None,
+        summary_data=summary_data,
         last_pipeline_updated_at=doc.last_pipeline_updated_at,
         cancelled_at=doc.cancelled_at,
         created_at=doc.created_at,
@@ -113,9 +117,9 @@ def _get_active_job(db: Session, document_id: str) -> Optional[ModuleJob]:
     )
 
 
-def _save_uploaded_file(module: Module, file: UploadFile) -> tuple[str, str, str, int, str]:
+def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str, int, str]:
     base_upload = os.path.realpath(settings.UPLOAD_DIR)
-    upload_dir = os.path.join(base_upload, module.id)
+    upload_dir = os.path.join(base_upload, module_id)
     os.makedirs(upload_dir, exist_ok=True)
 
     file_id = str(uuid.uuid4())
@@ -187,12 +191,16 @@ async def upload_document(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(module, file)
+    resolved_module_id = module.id
+    resolved_user_id = user.id if user else None
+    db.close()
+
+    file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
     # Create document record
     doc = Document(
         id=file_id,
-        module_id=module_id,
+        module_id=resolved_module_id,
         filename=file.filename or "unknown",
         file_type=file_type,
         file_path=file_path,
@@ -203,14 +211,13 @@ async def upload_document(
         processing_completed=0,
         processing_total=PIPELINE_TOTAL_STEPS,
         last_pipeline_updated_at=datetime.utcnow(),
-        user_id=user.id if user else None,
+        user_id=resolved_user_id,
     )
     db.add(doc)
     db.commit()
     db.refresh(doc)
-    job = create_module_job(db, module_id=module.id, document_id=doc.id)
+    job = create_module_job(db, module_id=resolved_module_id, document_id=doc.id)
     document_id = doc.id
-    resolved_module_id = module.id
     job_id = job.id
     module.pipeline_status = "queued"
     module.pipeline_stage = "queued"
@@ -242,11 +249,15 @@ async def upload_document_stream(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(module, file)
+    resolved_module_id = module.id
+    resolved_user_id = user.id if user else None
+    db.close()
+
+    file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
     doc = Document(
         id=file_id,
-        module_id=module_id,
+        module_id=resolved_module_id,
         filename=file.filename or "unknown",
         file_type=file_type,
         file_path=file_path,
@@ -257,14 +268,13 @@ async def upload_document_stream(
         processing_completed=0,
         processing_total=PIPELINE_TOTAL_STEPS,
         last_pipeline_updated_at=datetime.utcnow(),
-        user_id=user.id if user else None,
+        user_id=resolved_user_id,
     )
     db.add(doc)
     db.commit()
     db.refresh(doc)
-    job = create_module_job(db, module_id=module.id, document_id=doc.id)
+    job = create_module_job(db, module_id=resolved_module_id, document_id=doc.id)
     document_id = doc.id
-    resolved_module_id = module.id
     job_id = job.id
     document_snapshot = {
         "id": doc.id,
@@ -378,6 +388,7 @@ def get_document(document_id: str, db: Session = Depends(get_db), user: Optional
     doc = query.first()
     if not doc or doc.delete_requested_at:
         raise HTTPException(status_code=404, detail="Document not found")
+    backfill_document_summaries([doc], db)
     return _document_to_response(doc)
 
 
@@ -527,6 +538,10 @@ def import_folder(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    resolved_module_id = module.id
+    resolved_user_id = user.id if user else None
+    db.close()
+
     # Validate and resolve the folder path
     folder_path = os.path.realpath(body.path)
 
@@ -542,7 +557,7 @@ def import_folder(
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
     base_upload = os.path.realpath(settings.UPLOAD_DIR)
-    upload_dir = os.path.join(base_upload, module.id)
+    upload_dir = os.path.join(base_upload, resolved_module_id)
     os.makedirs(upload_dir, exist_ok=True)
 
     imported = 0
@@ -569,44 +584,47 @@ def import_folder(
                 import shutil
                 shutil.copy2(src_path, dest_path)  # noqa: S202  src_path validated above
 
+                # Extract text
+                raw_text = ""
+                word_count = 0
+                processed = False
+                processing_status = "pending"
+                if file_type in ("PDF", "TXT", "MD", "PPTX", "DOCX"):
+                    raw_text = extract_text(dest_path, file_type)
+                    word_count = len(raw_text.split())
+                    processed = True
+                    processing_status = "done"
+                elif file_type in ("MP3", "MP4"):
+                    raw_text = transcribe_audio(dest_path)
+                    word_count = len(raw_text.split())
+                    processed = True
+                    processing_status = "done"
+                elif file_type == "IMAGE":
+                    raw_text = extract_image_text(dest_path)
+                    word_count = len(raw_text.split())
+                    processed = True
+                    processing_status = "done"
+
                 doc = Document(
                     id=file_id,
-                    module_id=module_id,
+                    module_id=resolved_module_id,
                     filename=fname,
                     file_type=file_type,
                     file_path=dest_path,
-                    processing_status="pending",
-                    user_id=user.id if user else None,
+                    raw_text=raw_text,
+                    word_count=word_count,
+                    processed=processed,
+                    processing_status=processing_status,
+                    user_id=resolved_user_id,
                 )
                 db.add(doc)
-                db.flush()
-
-                # Extract text
-                if file_type in ("PDF", "TXT", "MD", "PPTX", "DOCX"):
-                    raw_text = extract_text(dest_path, file_type)
-                    doc.raw_text = raw_text
-                    doc.word_count = len(raw_text.split())
-                    doc.processed = True
-                    doc.processing_status = "done"
-                elif file_type in ("MP3", "MP4"):
-                    raw_text = transcribe_audio(dest_path)
-                    doc.raw_text = raw_text
-                    doc.word_count = len(raw_text.split())
-                    doc.processed = True
-                    doc.processing_status = "done"
-                elif file_type == "IMAGE":
-                    raw_text = extract_image_text(dest_path)
-                    doc.raw_text = raw_text
-                    doc.word_count = len(raw_text.split())
-                    doc.processed = True
-                    doc.processing_status = "done"
+                db.commit()
 
                 imported += 1
                 files_result.append({"filename": fname, "status": "ok", "id": file_id})
             except Exception as e:
+                db.rollback()
                 failed += 1
                 files_result.append({"filename": fname, "status": "failed", "error": str(e)})
-
-    db.commit()
 
     return FolderImportResult(imported=imported, failed=failed, files=files_result)

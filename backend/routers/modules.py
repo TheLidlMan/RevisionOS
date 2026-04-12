@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -13,7 +13,9 @@ from models.module import Module
 from models.module_job import ModuleJob
 from models.quiz_question import QuizQuestion
 from models.user import User
+from services import ai_service
 from services.auth_service import get_current_user
+from services.content_indexer import backfill_document_summaries
 from services.pipeline_service import ACTIVE_JOB_STATUSES, rebuild_module_outputs, sync_module_pipeline_state
 from typing import Optional as OptionalType
 
@@ -146,6 +148,14 @@ def _module_to_response(module: Module, stats: dict) -> ModuleResponse:
     )
 
 
+def _serialize_document_summary(document: Document) -> dict[str, Any]:
+    summary, summary_data = ai_service.normalize_summary_content(document.summary)
+    return {
+        "summary": summary or None,
+        "summary_data": summary_data,
+    }
+
+
 @router.get("", response_model=list[ModuleResponse])
 def list_modules(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     modules = _apply_module_scope(db.query(Module), user).order_by(Module.created_at.desc()).all()
@@ -178,9 +188,11 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
         Document.module_id == module_id,
         Document.delete_requested_at.is_(None),
     ).order_by(Document.created_at.desc()).all()
+    backfill_document_summaries(docs, db)
     base = _module_to_response(module, stats).model_dump()
     base["documents"] = [
         {
+            **_serialize_document_summary(d),
             "id": d.id,
             "module_id": d.module_id,
             "filename": d.filename,
@@ -195,7 +207,6 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
             "word_count": d.word_count,
             "file_size_bytes": d.file_size_bytes,
             "file_sha256": d.file_sha256,
-            "summary": d.summary,
             "last_pipeline_updated_at": d.last_pipeline_updated_at.isoformat() if d.last_pipeline_updated_at else None,
             "cancelled_at": d.cancelled_at.isoformat() if d.cancelled_at else None,
             "created_at": d.created_at.isoformat() if d.created_at else None,
