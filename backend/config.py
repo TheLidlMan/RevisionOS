@@ -63,8 +63,6 @@ class Settings(BaseSettings):
     MAX_QUESTIONS_PER_REQUEST: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
-    AI_REQUESTS_DAILY_LIMIT: int = 100
-    AI_REQUESTS_MONTHLY_LIMIT: int = 1000
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str = ""

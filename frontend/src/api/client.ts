@@ -463,16 +463,10 @@ export const importJson = (file: File) => {
 };
 
 // ---- Auth ----
-export const authRegister = (email: string, password: string, display_name: string) =>
-  client.post('/auth/register', { email, password, display_name }).then((r) => r.data);
-
-export const authLogin = (email: string, password: string) =>
-  client.post('/auth/login', { email, password }).then((r) => r.data);
-
 export const authMe = () =>
   client.get('/auth/me').then((r) => r.data);
 
-export const updateProfile = (data: { display_name?: string; password?: string }) =>
+export const updateProfile = (data: { display_name?: string }) =>
   client.patch('/auth/me', data).then((r) => r.data);
 
 export const authSession = () =>

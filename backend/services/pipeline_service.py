@@ -216,16 +216,20 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
     if not settings.GROQ_API_KEY:
         return []
 
+    module_id = module.id
+    module_name = module.name
+    module_user_id = module.user_id
+
     concepts = (
         db.query(Concept)
-        .filter(Concept.module_id == module.id)
+        .filter(Concept.module_id == module_id)
         .order_by(Concept.parent_concept_id.is_(None).desc(), Concept.order_index.asc(), Concept.importance_score.desc())
         .all()
     )
     if not concepts:
         return []
 
-    existing_cards = db.query(Flashcard).filter(Flashcard.module_id == module.id).all()
+    existing_cards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     cards_by_concept: dict[str, list[Flashcard]] = defaultdict(list)
     existing_pairs = set()
     for card in existing_cards:
@@ -235,7 +239,7 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
 
     docs = (
         db.query(Document)
-        .filter(Document.module_id == module.id, Document.processing_status == "done")
+        .filter(Document.module_id == module_id, Document.processing_status == "done")
         .all()
     )
     default_doc_id = docs[0].id if docs else None
@@ -249,10 +253,10 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
 
         rag_context = build_rag_context(
             db,
-            module.id,
+            module_id,
             query=f"{concept.name}\n{concept.definition or ''}\n{concept.explanation or ''}",
             max_chars=18000,
-            user_id=module.user_id,
+            user_id=module_user_id,
         )
         if not rag_context.strip():
             continue
@@ -262,7 +266,7 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
             concept_definition=concept.definition or concept.explanation or "",
             context=rag_context,
             num_cards=missing,
-            subject=module.name,
+            subject=module_name,
         )
 
         for payload in generated_cards:
@@ -284,8 +288,8 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
                 tags = [concept.name, *tags]
 
             card = Flashcard(
-                user_id=module.user_id,
-                module_id=module.id,
+                user_id=module_user_id,
+                module_id=module_id,
                 concept_id=concept.id,
                 front=front,
                 back=back,

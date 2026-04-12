@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { authLogin, authRegister, authSession, authLogout } from '../api/client';
+import { authSession, authLogout } from '../api/client';
 import type { AuthUser } from '../types';
 
 const AUTH_TOKEN_KEY = 'reviseos_token';
@@ -10,8 +10,6 @@ interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
   /** @deprecated kept for backward compat — prefer checkSession */
@@ -23,23 +21,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   loading: true,
-
-  login: async (email, password) => {
-    const data = await authLogin(email, password);
-    // Server sets session cookie; store token as backward-compat fallback
-    if (data.access_token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
-    }
-    set({ token: data.access_token ?? null, user: data.user, isAuthenticated: true });
-  },
-
-  register: async (email, password, displayName) => {
-    const data = await authRegister(email, password, displayName);
-    if (data.access_token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
-    }
-    set({ token: data.access_token ?? null, user: data.user, isAuthenticated: true });
-  },
 
   logout: async () => {
     try { await authLogout(); } catch { /* best-effort */ }

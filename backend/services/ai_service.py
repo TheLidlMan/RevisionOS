@@ -5,6 +5,7 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from config import settings
+from services.ai_request_lock_service import serialized_ai_request
 from services import quota_service
 
 logger = logging.getLogger(__name__)
@@ -153,8 +154,6 @@ def _build_payload(
     if stream:
         payload["stream"] = True
     return payload
-
-
 def _should_add_max_tokens_fallback(token_field: str, status: int, body_lower: str) -> bool:
     return (
         token_field == "max_completion_tokens"
@@ -201,65 +200,63 @@ async def _request_groq_completion(
     primary_model = _resolve_primary_model(kind, model)
     models_to_try = _build_model_candidates(primary_model)
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        errors: list[str] = []
-        quota_checked = False
+    async with serialized_ai_request():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            errors: list[str] = []
 
-        for candidate_model in models_to_try:
-            token_fields = ["max_completion_tokens"]
-            response_formats = [response_format]
+            for candidate_model in models_to_try:
+                token_fields = ["max_completion_tokens"]
+                response_formats = [response_format]
 
-            for token_field in token_fields:
-                for candidate_response_format in response_formats:
-                    payload = _build_payload(
-                        candidate_model=candidate_model,
-                        messages=messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                        max_completion_tokens=max_completion_tokens,
-                        token_field=token_field,
-                        response_format=candidate_response_format,
-                        stream=False,
-                    )
-                    try:
-                        if not quota_checked:
-                            quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
-                            quota_checked = True
-                        response = await client.post(GROQ_API_URL, headers=headers, json=payload)
-                        response.raise_for_status()
-                        quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
-                        return _extract_message_content(response.json()), candidate_model
-                    except httpx.HTTPStatusError as exc:
-                        status = exc.response.status_code
-                        response_body = (exc.response.text or "")[:500]
-                        body_lower = response_body.lower()
-
-                        if _should_add_max_tokens_fallback(token_field, status, body_lower) and "max_tokens" not in token_fields:
-                            token_fields.append("max_tokens")
-
-                        if _should_disable_response_format(candidate_response_format, status, body_lower, allow_json_fallback) and None not in response_formats:
-                            response_formats.append(None)
-
-                        error_msg = (
-                            f"model={candidate_model}, status={status}, token_field={token_field}, "
-                            f"response_format={'json_object' if candidate_response_format else 'none'}, "
-                            f"response={response_body}"
+                for token_field in token_fields:
+                    for candidate_response_format in response_formats:
+                        payload = _build_payload(
+                            candidate_model=candidate_model,
+                            messages=messages,
+                            temperature=temperature,
+                            top_p=top_p,
+                            max_completion_tokens=max_completion_tokens,
+                            token_field=token_field,
+                            response_format=candidate_response_format,
+                            stream=False,
                         )
-                        logger.warning("Groq API call failed: %s", error_msg)
-                        errors.append(error_msg)
-                    except httpx.RequestError as exc:
-                        error_msg = f"model={candidate_model}, request_error={exc}"
-                        logger.warning("Groq API request error: %s", error_msg)
-                        errors.append(error_msg)
-                        break
-                    except KeyError as exc:
-                        error_msg = f"model={candidate_model}, malformed_response={exc}"
-                        logger.warning("Groq API malformed response: %s", error_msg)
-                        errors.append(error_msg)
-                        break
+                        try:
+                            quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
+                            response = await client.post(GROQ_API_URL, headers=headers, json=payload)
+                            response.raise_for_status()
+                            quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
+                            return _extract_message_content(response.json()), candidate_model
+                        except httpx.HTTPStatusError as exc:
+                            status = exc.response.status_code
+                            response_body = (exc.response.text or "")[:500]
+                            body_lower = response_body.lower()
 
-        joined = " | ".join(errors[-3:]) if errors else "Unknown error"
-        raise RuntimeError(f"Groq API call failed after trying available models: {joined}")
+                            if _should_add_max_tokens_fallback(token_field, status, body_lower) and "max_tokens" not in token_fields:
+                                token_fields.append("max_tokens")
+
+                            if _should_disable_response_format(candidate_response_format, status, body_lower, allow_json_fallback) and None not in response_formats:
+                                response_formats.append(None)
+
+                            error_msg = (
+                                f"model={candidate_model}, status={status}, token_field={token_field}, "
+                                f"response_format={'json_object' if candidate_response_format else 'none'}, "
+                                f"response={response_body}"
+                            )
+                            logger.warning("Groq API call failed: %s", error_msg)
+                            errors.append(error_msg)
+                        except httpx.RequestError as exc:
+                            error_msg = f"model={candidate_model}, request_error={exc}"
+                            logger.warning("Groq API request error: %s", error_msg)
+                            errors.append(error_msg)
+                            break
+                        except KeyError as exc:
+                            error_msg = f"model={candidate_model}, malformed_response={exc}"
+                            logger.warning("Groq API malformed response: %s", error_msg)
+                            errors.append(error_msg)
+                            break
+
+            joined = " | ".join(errors[-3:]) if errors else "Unknown error"
+            raise RuntimeError(f"Groq API call failed after trying available models: {joined}")
 
 
 async def stream_groq_completion(
@@ -310,41 +307,42 @@ async def stream_groq_completion(
     buffer = ""
     last_partial: Optional[str] = None
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        try:
-            quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
-            async with client.stream("POST", GROQ_API_URL, headers=headers, json=payload) as response:
-                response.raise_for_status()
-                quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
-                yield {"event": "status", "kind": kind, "message": "Streaming response"}
-                async for line in response.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data_line = line[5:].strip()
-                    if not data_line or data_line == "[DONE]":
-                        continue
+    async with serialized_ai_request():
+        async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
+                async with client.stream("POST", GROQ_API_URL, headers=headers, json=payload) as response:
+                    response.raise_for_status()
+                    quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
+                    yield {"event": "status", "kind": kind, "message": "Streaming response"}
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_line = line[5:].strip()
+                        if not data_line or data_line == "[DONE]":
+                            continue
 
-                    chunk = json.loads(data_line)
-                    delta_text = _extract_delta_text(chunk)
-                    if not delta_text:
-                        continue
+                        chunk = json.loads(data_line)
+                        delta_text = _extract_delta_text(chunk)
+                        if not delta_text:
+                            continue
 
-                    buffer += delta_text
-                    yield {"event": "delta", "kind": kind, "delta": delta_text}
+                        buffer += delta_text
+                        yield {"event": "delta", "kind": kind, "delta": delta_text}
 
-                    try:
-                        partial = _normalize_json_object(buffer, expected_payload_key)
-                    except (json.JSONDecodeError, ValueError):
-                        partial = None
+                        try:
+                            partial = _normalize_json_object(buffer, expected_payload_key)
+                        except (json.JSONDecodeError, ValueError):
+                            partial = None
 
-                    if partial is not None:
-                        partial_signature = json.dumps(partial, sort_keys=True)
-                        if partial_signature != last_partial:
-                            last_partial = partial_signature
-                            yield {"event": "partial", "kind": kind, "data": partial}
-        except Exception as exc:
-            yield {"event": "error", "kind": kind, "message": str(exc)}
-            raise
+                        if partial is not None:
+                            partial_signature = json.dumps(partial, sort_keys=True)
+                            if partial_signature != last_partial:
+                                last_partial = partial_signature
+                                yield {"event": "partial", "kind": kind, "data": partial}
+            except Exception as exc:
+                yield {"event": "error", "kind": kind, "message": str(exc)}
+                raise
 
     parsed = _normalize_json_object(buffer, expected_payload_key)
     envelope = _build_envelope(kind, parsed, model=resolved_model)

@@ -150,6 +150,9 @@ export default function SettingsPage() {
           <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem', marginBottom: 12 }}>
             Groq Request Controls
           </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>
+            AI requests are processed globally one at a time across backend workers, so uploads queue instead of tripping local rate limits.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label>
               <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>LLM model</span>

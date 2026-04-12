@@ -4,10 +4,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from passlib.context import CryptContext
 from jose import JWTError, jwt
-from fastapi import Cookie, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -21,8 +20,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 SESSION_COOKIE_NAME = "reviseos_session"
 
 logger = logging.getLogger(__name__)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _get_secret_key() -> str:
@@ -34,14 +32,6 @@ def _get_secret_key() -> str:
 
 def validate_auth_settings() -> None:
     _get_secret_key()
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -158,7 +148,7 @@ def validate_return_to(url: Optional[str]) -> Optional[str]:
 
 def get_current_user(
     request: Request,
-    token: Optional[str] = Depends(oauth2_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
     """Resolve the current user.
@@ -175,6 +165,7 @@ def get_current_user(
             return user
 
     # 2. Fallback to Bearer JWT
+    token = credentials.credentials if credentials else None
     if not token:
         return None
     try:

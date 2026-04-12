@@ -209,6 +209,9 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
     job = create_module_job(db, module_id=module.id, document_id=doc.id)
+    document_id = doc.id
+    resolved_module_id = module.id
+    job_id = job.id
     module.pipeline_status = "queued"
     module.pipeline_stage = "queued"
     module.pipeline_completed = 0
@@ -220,7 +223,7 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(_run_document_pipeline_background, doc.id, module.id, job.id)
+    background_tasks.add_task(_run_document_pipeline_background, document_id, resolved_module_id, job_id)
 
     return _document_to_response(doc)
 
@@ -260,6 +263,15 @@ async def upload_document_stream(
     db.commit()
     db.refresh(doc)
     job = create_module_job(db, module_id=module.id, document_id=doc.id)
+    document_id = doc.id
+    resolved_module_id = module.id
+    job_id = job.id
+    document_snapshot = {
+        "id": doc.id,
+        "module_id": doc.module_id,
+        "filename": doc.filename,
+        "processing_status": doc.processing_status,
+    }
     module.pipeline_status = "queued"
     module.pipeline_stage = "queued"
     module.pipeline_completed = 0
@@ -278,19 +290,14 @@ async def upload_document_stream(
             {
                 "event": "status",
                 "stage": "uploaded",
-                "document": {
-                    "id": doc.id,
-                    "module_id": doc.module_id,
-                    "filename": doc.filename,
-                    "processing_status": doc.processing_status,
-                },
+                "document": document_snapshot,
             }
         )
 
         async def emit(event: dict):
             if event.get("event") == "final":
                 db.expire_all()
-                final_doc = db.query(Document).filter(Document.id == doc.id).first()
+                final_doc = db.query(Document).filter(Document.id == document_id).first()
                 if not final_doc:
                     event["result"] = None
                 else:
@@ -311,9 +318,9 @@ async def upload_document_stream(
 
         def run_pipeline_in_thread() -> None:
             try:
-                asyncio.run(process_document_pipeline(doc.id, module.id, job.id, event_handler=emit_threadsafe))
+                asyncio.run(process_document_pipeline(document_id, resolved_module_id, job_id, event_handler=emit_threadsafe))
             except Exception as exc:
-                logger.exception("Streaming document pipeline failed for %s: %s", doc.id, exc)
+                logger.exception("Streaming document pipeline failed for %s: %s", document_id, exc)
                 loop.call_soon_threadsafe(
                     queue.put_nowait,
                     ai_service.encode_sse_event({"event": "error", "stage": "failed", "message": str(exc)}),

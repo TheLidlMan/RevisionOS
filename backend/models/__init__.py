@@ -8,6 +8,7 @@ from models.quiz_question import QuizQuestion
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
 from models.module_job import ModuleJob
+from models.ai_request_lock import AiRequestLock
 from models.ai_usage_event import AiUsageEvent
 from models.user_stats import UserStats, Achievement
 
@@ -22,6 +23,7 @@ __all__ = [
     "StudySession",
     "ReviewLog",
     "ModuleJob",
+    "AiRequestLock",
     "AiUsageEvent",
     "UserStats",
     "Achievement",

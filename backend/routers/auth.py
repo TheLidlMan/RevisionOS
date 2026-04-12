@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -13,14 +13,10 @@ from config import settings
 from database import get_db
 from models.user import User
 from services.auth_service import (
-    get_password_hash,
-    verify_password,
-    create_access_token,
     get_current_user,
     create_session,
     revoke_session,
     validate_return_to,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
     SESSION_COOKIE_NAME,
 )
 
@@ -64,28 +60,12 @@ def _user_dict(user: User) -> dict:
         "email": user.email,
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
-        "auth_provider": user.auth_provider or "local",
+        "auth_provider": user.auth_provider or "google",
         "created_at": user.created_at.isoformat() if user.created_at else "",
     }
 
 
 # ---------- Pydantic models ----------
-
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    display_name: str
-
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: dict
 
 
 class UserResponse(BaseModel):
@@ -93,7 +73,7 @@ class UserResponse(BaseModel):
     email: str
     display_name: str
     avatar_url: Optional[str] = None
-    auth_provider: str = "local"
+    auth_provider: str = "google"
     created_at: str
 
     model_config = {"from_attributes": True}
@@ -102,48 +82,6 @@ class UserResponse(BaseModel):
 class SessionResponse(BaseModel):
     authenticated: bool
     user: Optional[dict] = None
-
-
-# ---------- Legacy email/password endpoints ----------
-
-@router.post("/register", response_model=TokenResponse, status_code=201)
-def register(body: RegisterRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == body.email).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    if len(body.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-
-    user = User(
-        email=body.email,
-        display_name=body.display_name,
-        hashed_password=get_password_hash(body.password),
-        auth_provider="local",
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    # Create session cookie + JWT for backward compat
-    raw_token = create_session(db, user, request)
-    _set_session_cookie(response, raw_token)
-
-    token = create_access_token(data={"sub": user.id})
-    return TokenResponse(access_token=token, user=_user_dict(user))
-
-
-@router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email).first()
-    if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    raw_token = create_session(db, user, request)
-    _set_session_cookie(response, raw_token)
-
-    token = create_access_token(data={"sub": user.id})
-    return TokenResponse(access_token=token, user=_user_dict(user))
 
 
 # ---------- Session endpoints ----------
@@ -179,7 +117,7 @@ def get_me(user: User = Depends(get_current_user)):
         email=user.email,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
-        auth_provider=user.auth_provider or "local",
+        auth_provider=user.auth_provider or "google",
         created_at=user.created_at.isoformat() if user.created_at else "",
     )
 
@@ -194,8 +132,6 @@ def update_profile(
         raise HTTPException(status_code=401, detail="Not authenticated")
     if "display_name" in body:
         user.display_name = body["display_name"]
-    if "password" in body and len(body["password"]) >= 6:
-        user.hashed_password = get_password_hash(body["password"])
     db.commit()
     db.refresh(user)
     return {"id": user.id, "email": user.email, "display_name": user.display_name}
