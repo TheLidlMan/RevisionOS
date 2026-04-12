@@ -232,7 +232,7 @@ def list_flashcards(
     elif sort == "front_asc":
         query = query.order_by(Flashcard.front.asc(), Flashcard.created_at.asc(), Flashcard.id.asc())
     else:
-        query = query.order_by(Flashcard.updated_at.desc(), Flashcard.created_at.desc(), Flashcard.id.desc())
+        query = query.order_by(Flashcard.updated_at.desc(), Flashcard.id.desc())
 
     cards = query.offset(offset).limit(limit).all()
     items = [_card_to_response(card) for card in cards]

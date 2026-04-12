@@ -235,7 +235,7 @@ export default function ModuleFlashcards() {
   const editCanSave = editDraft.front.trim().length > 0 && editDraft.back.trim().length > 0 && !updateMutation.isPending;
   const pendingLoadedCount = loadedCards.filter((card) => pendingDeleteIds.includes(card.id)).length;
   const firstPage = cardsQuery.data?.pages[0];
-  const totalCards = Math.max(0, (firstPage?.total ?? loadedCards.length) - pendingLoadedCount);
+  const totalCards = (firstPage?.total ?? 0) - pendingLoadedCount;
   const hasMore = cardsQuery.hasNextPage;
   const initialLoading = (moduleQuery.isLoading || cardsQuery.isLoading) && loadedCards.length === 0;
 
