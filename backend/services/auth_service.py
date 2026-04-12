@@ -120,10 +120,30 @@ def revoke_session(db: Session, raw_token: str) -> bool:
 
 def get_user_from_session_token(db: Session, raw_token: str) -> Optional[User]:
     """Look up a valid (non-revoked, non-expired) session and return its user."""
-    session = _query_session(db, raw_token, require_unexpired=True)
-    if not session:
+    try:
+        return (
+            db.query(User)
+            .join(AuthSession, AuthSession.user_id == User.id)
+            .filter(
+                AuthSession.token_hash == _hash_token(raw_token),
+                AuthSession.revoked.is_(False),
+                AuthSession.expires_at > datetime.now(timezone.utc),
+                User.is_active.is_(True),
+            )
+            .first()
+        )
+    except (OperationalError, ProgrammingError) as exc:
+        if not _is_missing_auth_sessions_table(exc):
+            raise
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            logger.warning("Rollback failed after auth session lookup error", exc_info=True)
+        logger.warning(
+            "Skipping session lookup because auth_sessions is unavailable: %s",
+            getattr(exc, "orig", exc),
+        )
         return None
-    return db.query(User).filter(User.id == session.user_id, User.is_active.is_(True)).first()
 
 
 # --------------- Allowed redirect origins ---------------
