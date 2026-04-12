@@ -470,7 +470,7 @@ export interface AuthState {
   loading: boolean;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
-  loadFromStorage: () => void;
+  loadFromStorage: () => Promise<void>;
 }
 
 // ---- Social / Leaderboard ----

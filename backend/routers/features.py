@@ -8,6 +8,7 @@ retention forecasting, exam revision timelines, session replay,
 mastery heatmaps, and image-occlusion cards.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -35,6 +36,7 @@ from models.review_log import ReviewLog
 from models.user import User
 from services import ai_service
 from services.auth_service import get_current_user
+from services.ownership import require_owned_module, scope_modules, scope_study_sessions
 from services.quota_service import ai_quota_scope
 
 logger = logging.getLogger(__name__)
@@ -71,8 +73,11 @@ def _stream_ai_route(
                         envelope = event.get("envelope", {})
                         event["result"] = final_mapper(envelope)
                     yield ai_service.encode_sse_event(event)
-        except Exception:
-            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Streaming AI route failed for kind=%s: %s", kind, exc)
+            yield ai_service.encode_sse_event({"event": "error", "kind": kind, "message": "Streaming request failed"})
         finally:
             if settings.REQUEST_TIMING_LOG_ENABLED:
                 duration_ms = (perf_counter() - started) * 1000
@@ -635,17 +640,11 @@ def _validate_external_url(url: str) -> str:
 
 
 def _scope_module_query(db: Session, module_id: str, user: OptionalType[User]):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        return query.filter(Module.user_id == user.id)
-    return query.filter(Module.user_id.is_(None))
+    return scope_modules(db.query(Module).filter(Module.id == module_id), user)
 
 
 def _scope_session_query(db: Session, session_id: str, user: OptionalType[User]):
-    query = db.query(StudySession).filter(StudySession.id == session_id)
-    if user:
-        return query.filter(StudySession.user_id == user.id)
-    return query.filter(StudySession.user_id.is_(None))
+    return scope_study_sessions(db.query(StudySession).filter(StudySession.id == session_id), user)
 
 
 def _parse_tags_json(tags_str: OptionalType[str]) -> list[str]:
@@ -1006,9 +1005,7 @@ async def free_recall(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -1028,7 +1025,6 @@ async def free_recall(
 
     messages = _free_recall_messages(body.topic, concept_list, source_material, body.user_text)
     module_user_id = module.user_id
-    db.close()
     try:
         with ai_quota_scope(module_user_id):
             envelope = await ai_service._call_groq(
@@ -1071,9 +1067,7 @@ async def free_recall_stream(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -1086,7 +1080,6 @@ async def free_recall_stream(
     if len(source_material) > settings.MAX_PROMPT_CHARS:
         source_material = source_material[: settings.MAX_PROMPT_CHARS]
     module_user_id = module.user_id
-    db.close()
 
     return _stream_ai_route(
         _free_recall_messages(body.topic, concept_list, source_material, body.user_text),
@@ -1143,13 +1136,10 @@ async def clip_url(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, body.module_id, user)
 
     module_id = module.id
-    user_id = user.id if user else None
-    db.close()
+    user_id = module.user_id
 
     validated_url = _validate_external_url(body.url)
 
@@ -1515,9 +1505,7 @@ async def writing_prompt(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -1536,7 +1524,6 @@ async def writing_prompt(
     module_name = module.name
     module_user_id = module.user_id
     messages = _writing_prompt_messages(module_name, material, doc_excerpt)
-    db.close()
     try:
         with ai_quota_scope(module_user_id):
             envelope = await ai_service._call_groq(
@@ -1566,9 +1553,7 @@ async def writing_prompt_stream(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=400, detail="Groq API key not configured")
 
@@ -1580,7 +1565,6 @@ async def writing_prompt_stream(
     doc_excerpt = "\n\n".join((d.raw_text or "")[:2000] for d in docs if d.raw_text)[:6000]
     module_name = module.name
     module_user_id = module.user_id
-    db.close()
 
     return _stream_ai_route(
         _writing_prompt_messages(module_name, material, doc_excerpt),
@@ -1705,9 +1689,7 @@ def exam_timeline(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
 
     try:
         exam_date = datetime.fromisoformat(body.exam_date).date()
@@ -1925,9 +1907,7 @@ def image_occlusion(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, body.module_id, user)
 
     if not body.occlusions:
         raise HTTPException(status_code=400, detail="At least one occlusion zone is required")
@@ -1945,7 +1925,7 @@ def image_occlusion(
 
         card = Flashcard(
             id=str(uuid.uuid4()),
-            user_id=user.id if user else None,
+            user_id=module.user_id,
             module_id=body.module_id,
             front=f"[Image Occlusion] What is hidden at region ({occ.x}, {occ.y})? "
                   f"Image: {body.image_url}",

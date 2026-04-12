@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Target, Pencil, Check } from 'lucide-react';
+import { browserStorage } from '../utils/browser';
 
 const glass = { background: 'rgba(255,248,240,0.04)', border: '1px solid rgba(139,115,85,0.15)', borderRadius: '12px', backdropFilter: 'blur(20px)' } as const;
 
@@ -10,12 +11,12 @@ const LEGACY_GOALS_KEY = 'revisionos_goals';
 
 export default function StudyGoals() {
   const [goal, setGoal] = useState<GoalData>(() => {
-    try { const s = localStorage.getItem(GOALS_KEY) || localStorage.getItem(LEGACY_GOALS_KEY); return s ? JSON.parse(s) : { target: 20, completed: 0 }; } catch { return { target: 20, completed: 0 }; }
+    try { const s = browserStorage.getItem(GOALS_KEY) || browserStorage.getItem(LEGACY_GOALS_KEY); return s ? JSON.parse(s) : { target: 20, completed: 0 }; } catch { return { target: 20, completed: 0 }; }
   });
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState(goal.target);
 
-  useEffect(() => { localStorage.setItem(GOALS_KEY, JSON.stringify(goal)); }, [goal]);
+  useEffect(() => { browserStorage.setItem(GOALS_KEY, JSON.stringify(goal)); }, [goal]);
 
   const pct = Math.min(100, Math.round((goal.completed / goal.target) * 100));
   const r = 28, c = 2 * Math.PI * r;

@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.module import Module
 from services.pipeline_service import rebuild_module_outputs
+from services.auth_service import get_current_user
+from services.ownership import require_owned_module
+from models.user import User
 
 router = APIRouter(tags=["curriculum"])
 
@@ -45,10 +48,9 @@ def set_curriculum_date(
     module_id: str,
     body: CurriculumRequest,
     db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
 
     try:
         module.exam_date = datetime.fromisoformat(body.exam_date)
@@ -63,10 +65,12 @@ def set_curriculum_date(
 
 
 @router.get("/api/modules/{module_id}/curriculum", response_model=CurriculumResponse)
-def get_curriculum(module_id: str, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+def get_curriculum(
+    module_id: str,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    module = require_owned_module(db, module_id, user)
     if not module.study_plan_json:
         raise HTTPException(status_code=404, detail="Study plan not found")
 

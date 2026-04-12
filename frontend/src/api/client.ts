@@ -48,6 +48,7 @@ import type {
   SessionReplayData,
   MasteryHeatmapData,
 } from '../types';
+import { browserStorage } from '../utils/browser';
 
 const AUTH_TOKEN_KEY = 'reviseos_token';
 const LEGACY_AUTH_TOKEN_KEY = 'revisionos_token';
@@ -101,7 +102,7 @@ const runSearch = (
 
 // Auth interceptor — bearer token as fallback for non-cookie clients
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
+  const token = browserStorage.getItem(AUTH_TOKEN_KEY) || browserStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -109,7 +110,7 @@ client.interceptors.request.use((config) => {
 });
 
 const getAuthToken = () =>
-  localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
+  browserStorage.getItem(AUTH_TOKEN_KEY) || browserStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
 
 const getApiUrl = (path: string) => {
   if (path.startsWith('http://') || path.startsWith('https://')) {

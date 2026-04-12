@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { GoogleLogo, SpinnerGap, WarningCircle } from '@phosphor-icons/react';
 import { getAuthGoogleStartUrl } from '../api/client';
+import { getLocationOrigin, navigateBrowser } from '../utils/browser';
+import { getMarketingUrl, normalizeNextPath } from '../utils/routes';
 
 const glass = {
   background: 'rgba(255,248,240,0.04)',
@@ -24,11 +26,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   const nextPath = useMemo(() => {
-    const next = searchParams.get('next');
-    if (!next || !next.startsWith('/')) {
-      return '/';
-    }
-    return next;
+    return normalizeNextPath(searchParams.get('next'));
   }, [searchParams]);
 
   const oauthError = searchParams.get('error');
@@ -52,8 +50,13 @@ export default function LoginPage() {
 
   const handleGoogleLogin = () => {
     setLoading(true);
-    const returnTo = new URL(nextPath, window.location.origin).toString();
-    window.location.assign(getAuthGoogleStartUrl(returnTo, true));
+    const origin = getLocationOrigin();
+    if (!origin) {
+      setLoading(false);
+      return;
+    }
+    const returnTo = new URL(nextPath, origin).toString();
+    navigateBrowser(getAuthGoogleStartUrl(returnTo, true));
   };
 
   return (
@@ -101,7 +104,7 @@ export default function LoginPage() {
 
           <div className="mt-6 text-center">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigateBrowser(getMarketingUrl()) || navigate('/')}
               className="text-sm transition-colors"
               style={{ color: 'rgba(245,240,232,0.25)', background: 'none', border: 'none', cursor: 'pointer' }}
               onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(245,240,232,0.5)'; }}

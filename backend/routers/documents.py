@@ -17,6 +17,8 @@ from models.document import Document
 from models.module import Module
 from models.module_job import ModuleJob
 from services.content_indexer import backfill_document_summaries
+from services.file_processor import extract_image_text, extract_text, transcribe_audio
+from services.ownership import require_owned_document, require_owned_module
 from services.pipeline_service import ACTIVE_JOB_STATUSES, PIPELINE_TOTAL_STEPS, create_module_job, process_document_pipeline, sync_module_pipeline_state
 from services import ai_service
 from typing import Optional as OptionalType
@@ -183,17 +185,10 @@ async def upload_document(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    # Verify module exists
-    module_query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        module_query = module_query.filter(Module.user_id == user.id)
-    module = module_query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
 
     resolved_module_id = module.id
-    resolved_user_id = user.id if user else None
-    db.close()
+    resolved_user_id = module.user_id
 
     file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
@@ -242,16 +237,10 @@ async def upload_document_stream(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module_query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        module_query = module_query.filter(Module.user_id == user.id)
-    module = module_query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
 
     resolved_module_id = module.id
-    resolved_user_id = user.id if user else None
-    db.close()
+    resolved_user_id = module.user_id
 
     file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
@@ -324,7 +313,7 @@ async def upload_document_stream(
                     await asyncio.sleep(SSE_KEEPALIVE_INTERVAL_SECONDS)
                     await queue.put(SSE_KEEPALIVE_COMMENT)
             except asyncio.CancelledError:
-                return
+                raise
 
         def run_pipeline_in_thread() -> None:
             try:
@@ -347,10 +336,18 @@ async def upload_document_stream(
                     break
                 yield item
             await pipeline_task
+        except asyncio.CancelledError:
+            logger.info("Document upload stream cancelled for %s", document_id)
+            raise
         except Exception as exc:
+            logger.exception("Document upload stream failed for %s: %s", document_id, exc)
             yield ai_service.encode_sse_event({"event": "error", "stage": "failed", "message": str(exc)})
         finally:
             keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
 
     return StreamingResponse(
         event_stream(),
@@ -367,12 +364,11 @@ async def upload_document_stream(
 async def index_document_endpoint(
     document_id: str,
     db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
 ):
     """Trigger topic extraction for a document."""
     from services.content_indexer import index_document
-    doc = db.query(Document).filter(Document.id == document_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = require_owned_document(db, document_id, user)
     if not doc.raw_text:
         raise HTTPException(status_code=400, detail="Document has no extracted text")
 
@@ -382,10 +378,7 @@ async def index_document_endpoint(
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 def get_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
+    doc = require_owned_document(db, document_id, user)
     if not doc or doc.delete_requested_at:
         raise HTTPException(status_code=404, detail="Document not found")
     backfill_document_summaries([doc], db)
@@ -394,12 +387,7 @@ def get_document(document_id: str, db: Session = Depends(get_db), user: Optional
 
 @router.get("/{document_id}/text", response_model=DocumentTextResponse)
 def get_document_text(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = require_owned_document(db, document_id, user)
     return DocumentTextResponse(
         id=doc.id,
         filename=doc.filename,
@@ -409,12 +397,7 @@ def get_document_text(document_id: str, db: Session = Depends(get_db), user: Opt
 
 @router.delete("/{document_id}", status_code=204)
 def delete_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = require_owned_document(db, document_id, user)
 
     active_job = _get_active_job(db, doc.id)
     module = db.query(Module).filter(Module.id == doc.module_id).first()
@@ -467,12 +450,7 @@ def cancel_document_processing(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = require_owned_document(db, document_id, user)
 
     active_job = _get_active_job(db, doc.id)
     if not active_job:
@@ -534,13 +512,10 @@ def import_folder(
     user: OptionalType[User] = Depends(get_current_user),
 ):
     """Import supported files from a local folder recursively."""
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
 
     resolved_module_id = module.id
-    resolved_user_id = user.id if user else None
-    db.close()
+    resolved_user_id = module.user_id
 
     # Validate and resolve the folder path
     folder_path = os.path.realpath(body.path)

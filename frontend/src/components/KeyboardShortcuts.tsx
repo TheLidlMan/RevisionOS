@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Keyboard, X } from '@phosphor-icons/react';
+import { isEditableTarget } from '../utils/browser';
 
 const glass = {
   background: 'rgba(255,248,240,0.04)',
@@ -43,36 +44,38 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['⌘/Ctrl', 'Enter'], description: 'Submit form', category: 'General' },
 ];
 
-export default function KeyboardShortcuts() {
-  const [isOpen, setIsOpen] = useState(false);
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  searchOpen: boolean;
+  onSearchOpenChange: (open: boolean) => void;
+}
+
+export default function KeyboardShortcuts({ open, onOpenChange, searchOpen, onSearchOpenChange }: Props) {
   const navigate = useNavigate();
   const [gPressed, setGPressed] = useState(false);
   const gTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleClose = useCallback(() => setIsOpen(false), []);
+  const handleClose = useCallback(() => onOpenChange(false), [onOpenChange]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
+      const isInput = isEditableTarget(e.target);
 
-      // ? key opens shortcut cheatsheet
-      if (e.key === '?' && !isInput) {
+      if (e.key === '?' && !isInput && !searchOpen) {
         e.preventDefault();
-        setIsOpen((prev) => !prev);
+        onSearchOpenChange(false);
+        onOpenChange(!open);
         return;
       }
 
-      // Escape closes modal
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && open) {
         handleClose();
         return;
       }
 
-      // Don't handle navigation shortcuts when in input fields
-      if (isInput) return;
+      if (isInput || searchOpen || open) return;
 
-      // G + letter navigation
       if (e.key === 'g' || e.key === 'G') {
         if (!gPressed) {
           setGPressed(true);
@@ -107,13 +110,13 @@ export default function KeyboardShortcuts() {
       window.removeEventListener('keydown', handler);
       if (gTimeoutRef.current) clearTimeout(gTimeoutRef.current);
     };
-  }, [isOpen, gPressed, navigate, handleClose]);
+  }, [open, searchOpen, gPressed, navigate, handleClose, onOpenChange, onSearchOpenChange]);
 
   const categories = [...new Set(SHORTCUTS.map((s) => s.category))];
 
   return (
     <AnimatePresence>
-      {isOpen && (
+      {open && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

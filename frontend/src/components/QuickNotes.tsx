@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, StickyNote } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { browserStorage } from '../utils/browser';
 
 interface Props { open: boolean; onClose: () => void; }
 
@@ -9,9 +10,9 @@ const NOTES_KEY = 'reviseos_notes';
 const LEGACY_NOTES_KEY = 'revisionos_notes';
 
 export default function QuickNotes({ open, onClose }: Props) {
-  const [text, setText] = useState(() => localStorage.getItem(NOTES_KEY) || localStorage.getItem(LEGACY_NOTES_KEY) || '');
+  const [text, setText] = useState(() => browserStorage.getItem(NOTES_KEY) || browserStorage.getItem(LEGACY_NOTES_KEY) || '');
 
-  useEffect(() => { localStorage.setItem(NOTES_KEY, text); }, [text]);
+  useEffect(() => { browserStorage.setItem(NOTES_KEY, text); }, [text]);
 
   return (
     <AnimatePresence>

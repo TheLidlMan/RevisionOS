@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.user import User
 from services.auth_service import get_current_user
+from services.ownership import require_owned_module
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
@@ -37,13 +38,10 @@ async def import_from_notion(
     from models.module import Module
     from models.document import Document
 
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, body.module_id, user)
 
     module_id = module.id
-    user_id = user.id if user else None
-    db.close()
+    user_id = module.user_id
 
     headers = {
         "Authorization": f"Bearer {body.notion_token}",
@@ -141,13 +139,10 @@ async def import_from_google_drive(
     from services.file_processor import extract_text
     from config import settings
 
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, body.module_id, user)
 
     module_id = module.id
-    user_id = user.id if user else None
-    db.close()
+    user_id = module.user_id
 
     headers = {"Authorization": f"Bearer {body.access_token}"}
 

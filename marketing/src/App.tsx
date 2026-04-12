@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import CookieBanner from './components/CookieBanner'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
@@ -13,6 +13,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <CookieBanner />
     </>

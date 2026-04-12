@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { usePersistentState } from './usePersistentState';
+import { browserStorage, isBrowser } from '../utils/browser';
 
 type AutosaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -12,10 +13,10 @@ export function useAutosaveDraft<T>(
 ) {
   const [draft, setDraft, hydrated] = usePersistentState<T>(storageKey, initialValue);
   const [initialStored] = useState(() => {
-    if (typeof window === 'undefined' || !enabled) {
+    if (!isBrowser() || !enabled) {
       return false;
     }
-    return window.localStorage.getItem(storageKey) !== null;
+    return browserStorage.getItem(storageKey) !== null;
   });
   const [status, setStatus] = useState<AutosaveStatus>(initialStored ? 'saved' : 'idle');
   const [restored, setRestored] = useState(initialStored);
@@ -33,7 +34,7 @@ export function useAutosaveDraft<T>(
 
     const timeout = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(storageKey, JSON.stringify(draft));
+        browserStorage.setItem(storageKey, JSON.stringify(draft));
         setStatus('saved');
       } catch {
         setStatus('error');
@@ -44,8 +45,8 @@ export function useAutosaveDraft<T>(
   }, [delayMs, draft, enabled, hydrated, storageKey]);
 
   const clearDraft = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(storageKey);
+    if (isBrowser()) {
+      browserStorage.removeItem(storageKey);
     }
     setRestored(false);
     setStatus('idle');

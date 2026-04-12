@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Cookie, X } from '@phosphor-icons/react'
+import { browserStorage } from '../utils/browser'
 
 const CONSENT_KEY = 'reviseos_cookie_consent'
 
@@ -8,12 +9,12 @@ export default function CookieBanner() {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    const consent = localStorage.getItem(CONSENT_KEY)
+    const consent = browserStorage.getItem(CONSENT_KEY)
     if (!consent) setVisible(true)
   }, [])
 
   const accept = () => {
-    localStorage.setItem(CONSENT_KEY, 'essential')
+    browserStorage.setItem(CONSENT_KEY, 'essential')
     setVisible(false)
   }
 

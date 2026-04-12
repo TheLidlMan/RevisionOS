@@ -14,6 +14,7 @@ from models.review_log import ReviewLog
 from models.module import Module
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
+from services.ownership import require_owned_module
 from models.user import User
 
 router = APIRouter(prefix="/api/weakness-map", tags=["weakness-map"])
@@ -141,9 +142,7 @@ def get_weakness_map(
     if user:
         query = query.filter(Concept.user_id == user.id)
     if module_id:
-        module = db.query(Module).filter(Module.id == module_id).first()
-        if not module:
-            raise HTTPException(status_code=404, detail="Module not found")
+        require_owned_module(db, module_id, user)
         query = query.filter(Concept.module_id == module_id)
 
     concepts = query.order_by(Concept.importance_score.desc()).all()
@@ -173,9 +172,7 @@ def get_optimal_session(
     if user:
         query = query.filter(Concept.user_id == user.id)
     if module_id:
-        module = db.query(Module).filter(Module.id == module_id).first()
-        if not module:
-            raise HTTPException(status_code=404, detail="Module not found")
+        require_owned_module(db, module_id, user)
         query = query.filter(Concept.module_id == module_id)
 
     concepts = query.all()

@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
+import { browserStorage, isBrowser } from '../utils/browser';
 
 export function useScrollRestoration(key: string) {
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!isBrowser()) {
       return;
     }
 
-    const stored = window.sessionStorage.getItem(`scroll:${key}`);
+    const storageKey = `scroll:${key}`;
+    const stored = browserStorage.getItem(storageKey, 'session');
     if (stored) {
       const y = Number(stored);
       if (!Number.isNaN(y)) {
@@ -15,7 +17,7 @@ export function useScrollRestoration(key: string) {
     }
 
     const save = () => {
-      window.sessionStorage.setItem(`scroll:${key}`, String(window.scrollY));
+      browserStorage.setItem(storageKey, String(window.scrollY), 'session');
     };
 
     window.addEventListener('scroll', save, { passive: true });

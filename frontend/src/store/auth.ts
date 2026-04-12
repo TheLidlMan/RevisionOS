@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { authSession, authLogout } from '../api/client';
 import type { AuthUser } from '../types';
+import { browserStorage } from '../utils/browser';
 
 const AUTH_TOKEN_KEY = 'reviseos_token';
 const LEGACY_AUTH_TOKEN_KEY = 'revisionos_token';
@@ -13,7 +14,7 @@ interface AuthState {
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
   /** @deprecated kept for backward compat — prefer checkSession */
-  loadFromStorage: () => void;
+  loadFromStorage: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -24,8 +25,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async () => {
     try { await authLogout(); } catch { /* best-effort */ }
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
+    browserStorage.removeItem(AUTH_TOKEN_KEY);
+    browserStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
     set({ token: null, user: null, isAuthenticated: false });
   },
 
@@ -36,9 +37,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (data.authenticated && data.user) {
         set({ user: data.user, isAuthenticated: true, loading: false });
       } else {
-        // Clear any stale localStorage tokens
-        localStorage.removeItem(AUTH_TOKEN_KEY);
-        localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
+        browserStorage.removeItem(AUTH_TOKEN_KEY);
+        browserStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
         set({ token: null, user: null, isAuthenticated: false, loading: false });
       }
     } catch {
@@ -46,27 +46,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  loadFromStorage: () => {
-    // Legacy: try localStorage token, then verify via session endpoint
-    const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
-    if (token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, token);
-      set({ token, isAuthenticated: true });
-    }
-    // Always verify via session endpoint (covers cookie auth too)
-    authSession()
+  loadFromStorage: async () => {
+    await authSession()
       .then((data: { authenticated: boolean; user?: AuthUser }) => {
         if (data.authenticated && data.user) {
-          set({ user: data.user, isAuthenticated: true, loading: false });
-        } else {
-          localStorage.removeItem(AUTH_TOKEN_KEY);
-          localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
-          set({ token: null, user: null, isAuthenticated: false, loading: false });
+          set({ token: null, user: data.user, isAuthenticated: true, loading: false });
+          return;
         }
+
+        browserStorage.removeItem(AUTH_TOKEN_KEY);
+        browserStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
+        set({ token: null, user: null, isAuthenticated: false, loading: false });
       })
       .catch(() => {
-        localStorage.removeItem(AUTH_TOKEN_KEY);
-        localStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
+        browserStorage.removeItem(AUTH_TOKEN_KEY);
+        browserStorage.removeItem(LEGACY_AUTH_TOKEN_KEY);
         set({ token: null, user: null, isAuthenticated: false, loading: false });
       });
   },

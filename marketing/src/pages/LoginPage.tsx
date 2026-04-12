@@ -1,16 +1,16 @@
 import { useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { config } from '../config'
+import { replaceBrowserLocation } from '../utils/browser'
+import { buildAppLoginUrl } from '../utils/routes'
 
 export default function LoginPage() {
   const [searchParams] = useSearchParams()
   const redirectUrl = useMemo(() => {
-    const params = new URLSearchParams(searchParams)
-    return params.toString() ? `${config.loginUrl}?${params.toString()}` : config.loginUrl
+    return buildAppLoginUrl(`?${searchParams.toString()}`)
   }, [searchParams])
 
   useEffect(() => {
-    window.location.replace(redirectUrl)
+    replaceBrowserLocation(redirectUrl)
   }, [redirectUrl])
 
   return (

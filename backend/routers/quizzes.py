@@ -22,6 +22,12 @@ from models.document import Document
 from models.user import User
 from services import ai_service
 from services.auth_service import get_current_user
+from services.ownership import (
+    require_owned_module,
+    require_owned_quiz_question,
+    require_owned_study_session,
+    scope_quiz_questions,
+)
 from services.quota_service import ai_quota_scope
 
 router = APIRouter(tags=["quizzes"])
@@ -122,16 +128,7 @@ class SessionResultsResponse(BaseModel):
 
 
 def _get_owned_session(db: Session, session_id: str, user: Optional[User]) -> StudySession:
-    session_query = db.query(StudySession).filter(StudySession.id == session_id)
-    if user:
-        session_query = session_query.filter(StudySession.user_id == user.id)
-    else:
-        session_query = session_query.filter(StudySession.user_id.is_(None))
-
-    session = session_query.first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
+    return require_owned_study_session(db, session_id, user)
 
 
 def _run_generate_quiz_for_module_background(module_id: str, user_id: Optional[str] = None):
@@ -269,9 +266,11 @@ def list_questions(
     difficulty: Optional[str] = None,
     type: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
-    query = db.query(QuizQuestion)
+    query = scope_quiz_questions(db.query(QuizQuestion), user)
     if module_id:
+        require_owned_module(db, module_id, user)
         query = query.filter(QuizQuestion.module_id == module_id)
     if difficulty:
         query = query.filter(QuizQuestion.difficulty == difficulty.upper())
@@ -282,10 +281,12 @@ def list_questions(
 
 
 @router.post("/api/quizzes/generate", response_model=GenerateQuizResponse)
-async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+async def generate_quiz(
+    body: GenerateQuizRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    module = require_owned_module(db, body.module_id, user)
 
     module_name = module.name
     module_user_id = module.user_id
@@ -318,8 +319,6 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         settings.MAX_QUESTIONS_PER_REQUEST,
     )
 
-    db.close()
-
     with ai_quota_scope(module_user_id):
         generated = await ai_service.generate_quiz_questions(
             text=all_text,
@@ -339,6 +338,7 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
 
         question = QuizQuestion(
+            user_id=module_user_id,
             module_id=body.module_id,
             question_text=qdata.get("question_text", qdata.get("question", "")),
             question_type=q_type,
@@ -362,10 +362,12 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
 
 @router.post("/api/quizzes/generate/stream")
-async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+async def generate_quiz_stream(
+    body: GenerateQuizRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    module = require_owned_module(db, body.module_id, user)
     module_name = module.name
     module_user_id = module.user_id
     if not settings.GROQ_API_KEY:
@@ -403,8 +405,6 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
         subject=module_name,
     )
 
-    db.close()
-
     async def event_stream():
         started = perf_counter()
         pool_before = get_pool_snapshot()
@@ -428,6 +428,7 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
                             options_json = json.dumps(options) if options else None
                             diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
                             question = QuizQuestion(
+                                user_id=module_user_id,
                                 module_id=body.module_id,
                                 question_text=qdata.get("question_text", qdata.get("question", "")),
                                 question_type=q_type,
@@ -477,33 +478,39 @@ def start_quiz_session(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
 ):
+    module = require_owned_module(db, body.module_id, user) if body.module_id else None
+    unique_question_ids = list(dict.fromkeys(body.question_ids))
+    questions: list[QuizQuestion] = []
+    if unique_question_ids:
+        questions = (
+            scope_quiz_questions(
+                db.query(QuizQuestion).filter(QuizQuestion.id.in_(unique_question_ids)),
+                user,
+            )
+            .all()
+        )
+        if len(questions) != len(unique_question_ids):
+            raise HTTPException(status_code=404, detail="Question not found")
+        if module and any(question.module_id != module.id for question in questions):
+            raise HTTPException(status_code=404, detail="Question not found")
+    elif module:
+        questions = (
+            scope_quiz_questions(db.query(QuizQuestion), user)
+            .filter(QuizQuestion.module_id == module.id)
+            .limit(20)
+            .all()
+        )
+
     session = StudySession(
-        module_id=body.module_id,
+        module_id=module.id if module else body.module_id,
         session_type=body.session_type.upper(),
         started_at=datetime.utcnow(),
-        total_items=len(body.question_ids),
-        user_id=user.id if user else None,
+        total_items=len(questions),
+        user_id=module.user_id if module else (user.id if user else None),
     )
     db.add(session)
     db.commit()
     db.refresh(session)
-
-    questions = []
-    if body.question_ids:
-        questions = (
-            db.query(QuizQuestion)
-            .filter(QuizQuestion.id.in_(body.question_ids))
-            .all()
-        )
-    elif body.module_id:
-        questions = (
-            db.query(QuizQuestion)
-            .filter(QuizQuestion.module_id == body.module_id)
-            .limit(20)
-            .all()
-        )
-        session.total_items = len(questions)
-        db.commit()
 
     return SessionResponse(
         id=session.id,
@@ -530,8 +537,8 @@ async def submit_answer(
     session = _get_owned_session(db, session_id, user)
     session_user_id = session.user_id or (user.id if user else None)
 
-    question = db.query(QuizQuestion).filter(QuizQuestion.id == body.question_id).first()
-    if not question:
+    question = require_owned_quiz_question(db, body.question_id, user)
+    if session.module_id and question.module_id != session.module_id:
         raise HTTPException(status_code=404, detail="Question not found")
 
     question_id = question.id
@@ -551,7 +558,6 @@ async def submit_answer(
             is_correct = True
         elif settings.GROQ_API_KEY:
             try:
-                db.close()
                 with ai_quota_scope(session_user_id):
                     ai_feedback = await ai_service.grade_answer(
                         question_text,
@@ -564,7 +570,7 @@ async def submit_answer(
                 # Fall back to simple match
                 is_correct = body.user_answer.strip().lower() == correct_answer.strip().lower()
 
-    question = db.query(QuizQuestion).filter(QuizQuestion.id == question_id).first()
+    question = require_owned_quiz_question(db, question_id, user)
     session = _get_owned_session(db, session_id, user)
 
     # Update question stats

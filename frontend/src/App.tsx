@@ -1,37 +1,46 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import MobileBottomNav from './components/MobileBottomNav';
 import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
-import Dashboard from './pages/Dashboard';
-import ModuleView from './pages/ModuleView';
-import ModuleFlashcards from './pages/ModuleFlashcards';
-import FlashcardReview from './pages/FlashcardReview';
-import QuizMode from './pages/QuizMode';
-import SettingsPage from './pages/Settings';
-import KnowledgeGraph from './pages/KnowledgeGraph';
-import CurriculumPage from './pages/CurriculumPage';
-import LoginPage from './pages/LoginPage';
-import ForgettingCurve from './pages/ForgettingCurve';
-import AchievementsPage from './pages/AchievementsPage';
 import { useAuthStore } from './store/auth';
+import { isEditableTarget } from './utils/browser';
+import { buildLoginRedirectPath } from './utils/routes';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ModuleView = lazy(() => import('./pages/ModuleView'));
+const ModuleFlashcards = lazy(() => import('./pages/ModuleFlashcards'));
+const FlashcardReview = lazy(() => import('./pages/FlashcardReview'));
+const QuizMode = lazy(() => import('./pages/QuizMode'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
+const CurriculumPage = lazy(() => import('./pages/CurriculumPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const ForgettingCurve = lazy(() => import('./pages/ForgettingCurve'));
+const AchievementsPage = lazy(() => import('./pages/AchievementsPage'));
 
 export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const location = useLocation();
-  const { loadFromStorage, isAuthenticated, loading } = useAuthStore();
+  const { checkSession, isAuthenticated, loading } = useAuthStore();
   const nextPath = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
-    loadFromStorage();
-  }, [loadFromStorage]);
+    void checkSession();
+  }, [checkSession]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if (e.defaultPrevented || isEditableTarget(e.target)) {
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setShortcutsOpen(false);
         setSearchOpen((prev) => !prev);
       }
     };
@@ -47,12 +56,15 @@ export default function App() {
     if (isAuthenticated) {
       return <Navigate to="/" replace />;
     }
-    return <LoginPage />;
+    return (
+      <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg)' }} />}>
+        <LoginPage />
+      </Suspense>
+    );
   }
 
   if (!isAuthenticated) {
-    const loginUrl = nextPath && nextPath !== '/' ? `/login?next=${encodeURIComponent(nextPath)}` : '/login';
-    return <Navigate to={loginUrl} replace />;
+    return <Navigate to={buildLoginRedirectPath(nextPath)} replace />;
   }
 
   return (
@@ -64,25 +76,33 @@ export default function App() {
       <div className="app-shell-main flex min-w-0 flex-1 flex-col" style={{ background: 'var(--bg)' }}>
         <MobileTopBar onOpenSearch={() => setSearchOpen(true)} />
         <main className="app-shell-content flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/modules/:id" element={<ModuleView />} />
-            <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
-            <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
-            <Route path="/quiz" element={<QuizMode />} />
-            <Route path="/achievements" element={<AchievementsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
-            <Route path="/curriculum" element={<CurriculumPage />} />
-            <Route path="/forgetting-curve" element={<ForgettingCurve />} />
-            <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
-          </Routes>
+          <Suspense fallback={<div style={{ minHeight: '100%', background: 'var(--bg)' }} />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/modules/:id" element={<ModuleView />} />
+              <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
+              <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
+              <Route path="/quiz" element={<QuizMode />} />
+              <Route path="/achievements" element={<AchievementsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
+              <Route path="/curriculum" element={<CurriculumPage />} />
+              <Route path="/forgetting-curve" element={<ForgettingCurve />} />
+              <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </main>
         <MobileBottomNav />
       </div>
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
-      <KeyboardShortcuts />
+      <KeyboardShortcuts
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+        searchOpen={searchOpen}
+        onSearchOpenChange={setSearchOpen}
+      />
     </div>
   );
 }

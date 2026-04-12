@@ -85,6 +85,10 @@ function SearchDialog({ onClose }: SearchDialogProps) {
   });
 
   const results = useMemo(() => searchData?.results ?? [], [searchData]);
+  const resultSetKey = useMemo(
+    () => results.map((result) => `${result.type}:${result.id}`).join('|'),
+    [results],
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300);
@@ -95,6 +99,10 @@ function SearchDialog({ onClose }: SearchDialogProps) {
     const timeout = window.setTimeout(() => inputRef.current?.focus(), 50);
     return () => window.clearTimeout(timeout);
   }, []);
+
+  useEffect(() => {
+    setSelectedIdx(0);
+  }, [debouncedQuery, moduleFilter, resultSetKey]);
 
   const highlightedIdx = results.length === 0 ? -1 : Math.min(selectedIdx, results.length - 1);
 
@@ -153,7 +161,6 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  setSelectedIdx(0);
                 }}
                 placeholder="Search concepts, flashcards, questions…"
                 className="flex-1 py-4"
@@ -170,7 +177,6 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 value={moduleFilter}
                 onChange={(e) => {
                   setModuleFilter(e.target.value);
-                  setSelectedIdx(0);
                 }}
                 className="px-2 py-1 text-xs"
                 style={sg.input}

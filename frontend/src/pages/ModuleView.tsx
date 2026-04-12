@@ -38,6 +38,7 @@ import DocumentSummary from '../components/DocumentSummary';
 import ShowMoreText from '../components/ShowMoreText';
 import Skeleton from '../components/Skeleton';
 import { useToast } from '../hooks/useToast';
+import { browserStorage } from '../utils/browser';
 import UploadDocumentsModal from '../components/UploadDocumentsModal';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
@@ -156,13 +157,11 @@ export default function ModuleView() {
   const deleteModuleMutation = useMutation({
     mutationFn: () => deleteModule(id!),
     onSuccess: () => {
-      if (typeof window !== 'undefined') {
-        ['curriculum:module', 'forgetting-curve:module'].forEach((storageKey) => {
-          if (window.localStorage.getItem(storageKey) === id) {
-            window.localStorage.removeItem(storageKey);
-          }
-        });
-      }
+      ['curriculum:module', 'forgetting-curve:module'].forEach((storageKey) => {
+        if (browserStorage.getItem(storageKey) === id) {
+          browserStorage.removeItem(storageKey);
+        }
+      });
       queryClient.setQueryData(['modules'], (current: Array<{ id: string }> | undefined) =>
         current?.filter((module) => module.id !== id),
       );

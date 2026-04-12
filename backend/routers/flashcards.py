@@ -17,6 +17,7 @@ from services.fsrs_service import schedule_review
 from services import ai_service
 from services.quota_service import ai_quota_scope
 from services.auth_service import get_current_user
+from services.ownership import require_owned_flashcard, require_owned_module, scope_flashcards
 from models.user import User
 
 router = APIRouter(tags=["flashcards"])
@@ -188,9 +189,11 @@ def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
     db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
-    query = db.query(Flashcard)
+    query = scope_flashcards(db.query(Flashcard), user)
     if module_id:
+        require_owned_module(db, module_id, user)
         query = query.filter(Flashcard.module_id == module_id)
     if due:
         now = datetime.utcnow()
@@ -200,12 +203,15 @@ def list_flashcards(
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
-def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+def create_flashcard(
+    body: FlashcardCreate,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    module = require_owned_module(db, body.module_id, user)
 
     card = Flashcard(
+        user_id=module.user_id,
         module_id=body.module_id,
         front=body.front,
         back=body.back,
@@ -225,10 +231,13 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/api/flashcards/{card_id}", response_model=FlashcardResponse)
-def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(get_db)):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+def update_flashcard(
+    card_id: str,
+    body: FlashcardUpdate,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    card = require_owned_flashcard(db, card_id, user)
     if body.front is not None:
         card.front = body.front
     if body.back is not None:
@@ -245,10 +254,12 @@ def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(
 
 
 @router.delete("/api/flashcards/{card_id}", status_code=204)
-def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+def delete_flashcard(
+    card_id: str,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    card = require_owned_flashcard(db, card_id, user)
     db.delete(card)
     db.commit()
     return None
@@ -261,9 +272,7 @@ def review_flashcard(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
 ):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
-    if not card:
-        raise HTTPException(status_code=404, detail="Flashcard not found")
+    card = require_owned_flashcard(db, card_id, user)
 
     card_data = {
         "due": card.due,
@@ -338,10 +347,9 @@ async def generate_cards_for_module(
     module_id: str,
     body: Optional[GenerateCardsRequest] = None,
     db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = require_owned_module(db, module_id, user)
 
     module_name = module.name
     module_user_id = module.user_id
