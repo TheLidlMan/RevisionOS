@@ -8,7 +8,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -19,7 +19,6 @@ from models.auth_session import AuthSession
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 SESSION_COOKIE_NAME = "reviseos_session"
-AUTH_SESSIONS_TABLE_NAME = AuthSession.__tablename__
 
 logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -60,11 +59,12 @@ def _hash_token(raw_token: str) -> str:
 
 def _is_missing_auth_sessions_table(exc: Exception) -> bool:
     original_exc = getattr(exc, "orig", exc)
-    if getattr(original_exc, "pgcode", None) == "42P01" or getattr(original_exc, "sqlstate", None) == "42P01":
+    sqlstate = getattr(original_exc, "sqlstate", None) or getattr(original_exc, "pgcode", None)
+    if sqlstate == "42P01":
         return True
 
     message = str(original_exc).lower()
-    return AUTH_SESSIONS_TABLE_NAME in message and (
+    return "auth_sessions" in message and (
         "does not exist" in message
         or "undefined table" in message
         or "no such table" in message
@@ -90,7 +90,7 @@ def _query_session(
             raise
         try:
             db.rollback()
-        except Exception:
+        except SQLAlchemyError:
             logger.warning("Rollback failed after auth session lookup error", exc_info=True)
         logger.warning(
             "Skipping session lookup because auth_sessions is unavailable: %s",
