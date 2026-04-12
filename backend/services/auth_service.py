@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -7,6 +8,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -18,6 +20,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 SESSION_COOKIE_NAME = "reviseos_session"
 
+logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
@@ -54,6 +57,48 @@ def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
+def _is_missing_auth_sessions_table(exc: Exception) -> bool:
+    original_exc = getattr(exc, "orig", exc)
+    sqlstate = getattr(original_exc, "sqlstate", None) or getattr(original_exc, "pgcode", None)
+    if sqlstate == "42P01":
+        return True
+
+    message = str(original_exc).lower()
+    return "auth_sessions" in message and (
+        "does not exist" in message
+        or "undefined table" in message
+        or "no such table" in message
+    )
+
+
+def _query_session(
+    db: Session,
+    raw_token: str,
+    *,
+    require_unexpired: bool,
+) -> Optional[AuthSession]:
+    try:
+        query = db.query(AuthSession).filter(
+            AuthSession.token_hash == _hash_token(raw_token),
+            AuthSession.revoked.is_(False),
+        )
+        if require_unexpired:
+            query = query.filter(AuthSession.expires_at > datetime.now(timezone.utc))
+        return query.first()
+    except (OperationalError, ProgrammingError) as exc:
+        if not _is_missing_auth_sessions_table(exc):
+            raise
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            logger.warning("Rollback failed after auth session lookup error", exc_info=True)
+        logger.warning(
+            "Skipping session lookup because auth_sessions is unavailable: %s",
+            getattr(exc, "orig", exc),
+        )
+        return None
+
+
 def create_session(db: Session, user: User, request: Optional[Request] = None) -> str:
     """Create a new auth session and return the raw session token."""
     raw_token = secrets.token_urlsafe(48)
@@ -74,10 +119,7 @@ def create_session(db: Session, user: User, request: Optional[Request] = None) -
 
 def revoke_session(db: Session, raw_token: str) -> bool:
     """Revoke a session by its raw token. Returns True if found."""
-    session = db.query(AuthSession).filter(
-        AuthSession.token_hash == _hash_token(raw_token),
-        AuthSession.revoked.is_(False),
-    ).first()
+    session = _query_session(db, raw_token, require_unexpired=False)
     if session:
         session.revoked = True
         db.commit()
@@ -87,11 +129,7 @@ def revoke_session(db: Session, raw_token: str) -> bool:
 
 def get_user_from_session_token(db: Session, raw_token: str) -> Optional[User]:
     """Look up a valid (non-revoked, non-expired) session and return its user."""
-    session = db.query(AuthSession).filter(
-        AuthSession.token_hash == _hash_token(raw_token),
-        AuthSession.revoked.is_(False),
-        AuthSession.expires_at > datetime.now(timezone.utc),
-    ).first()
+    session = _query_session(db, raw_token, require_unexpired=True)
     if not session:
         return None
     return db.query(User).filter(User.id == session.user_id, User.is_active.is_(True)).first()
