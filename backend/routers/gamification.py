@@ -172,6 +172,9 @@ def _replenish_hearts(stats: UserStats) -> None:
     """Replenish hearts based on time elapsed."""
     if stats.hearts_remaining >= HEARTS_MAX:
         return
+    if stats.hearts_last_replenish is None:
+        stats.hearts_last_replenish = datetime.utcnow()
+        return
     now = datetime.utcnow()
     elapsed = (now - stats.hearts_last_replenish).total_seconds()
     hearts_to_add = int(elapsed // (HEARTS_REPLENISH_MINUTES * 60))
