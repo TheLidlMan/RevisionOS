@@ -20,6 +20,7 @@ QUALITY_MODEL_KINDS = frozenset({
     "free_recall",
     "writing_grade",
     "writing_prompt",
+    "tutor_explain",
 })
 
 
@@ -411,19 +412,25 @@ def _json_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]
 
 
 async def generate_flashcards(text: str, num_cards: int, subject: str) -> list[dict[str, Any]]:
-    """Generate fill-in-the-gap flashcards from text using Groq API."""
+    """Generate exhaustive flashcards from text using Groq API."""
     messages = _json_messages(
-        "You create exam-focused cloze flashcards grounded only in the provided material.",
+        "You create exam-focused cloze flashcards grounded only in the provided material. "
+        "Be exhaustive — extract EVERY distinct fact, concept, definition, formula, process, "
+        "and relationship from the text. Do not summarise or skip details.",
         (
             f"Subject: {subject}\n"
-            f"Create {num_cards} flashcards from the material below.\n\n"
+            f"Create as many flashcards as needed to cover ALL key concepts from the material below. "
+            f"Aim for at least {num_cards} cards but do not stop until every important fact, "
+            f"definition, threshold, relationship, formula, and non-trivial exam point is covered.\n\n"
             "Requirements:\n"
             "- Return a JSON object with a `cards` array.\n"
             "- Each card must have `front`, `back`, `type`, `concept_name`, and `tags`.\n"
             "- Every `front` must contain exactly one `___` blank.\n"
             "- `back` is the missing word or phrase.\n"
             "- `type` must always be `CLOZE`.\n"
-            "- Focus on key definitions, thresholds, relationships, and non-trivial exam material.\n\n"
+            "- Focus on key definitions, thresholds, relationships, and non-trivial exam material.\n"
+            "- Cover different angles: definitions, examples, comparisons, causes, effects, dates, formulas.\n"
+            "- Avoid duplicate or near-duplicate cards.\n\n"
             "Material:\n"
             f"{text}"
         ),
@@ -433,7 +440,7 @@ async def generate_flashcards(text: str, num_cards: int, subject: str) -> list[d
         envelope = await _call_groq(
             messages,
             kind="flashcards",
-            max_completion_tokens=8192,
+            max_completion_tokens=16384,
             response_format=_json_response_format(),
             expected_payload_key="cards",
         )
@@ -475,7 +482,7 @@ async def generate_flashcards_for_concept(
         envelope = await _call_groq(
             messages,
             kind="concept_flashcards",
-            max_completion_tokens=4096,
+            max_completion_tokens=8192,
             response_format=_json_response_format(),
             expected_payload_key="cards",
         )
@@ -489,7 +496,7 @@ async def generate_flashcards_for_concept(
 async def generate_flashcards_chunked(
     chunks: list[dict[str, Any]],
     subject: str,
-    cards_per_chunk: int = 25,
+    cards_per_chunk: int = 50,
     max_total_cards: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Generate flashcards from multiple document chunks."""
@@ -576,7 +583,7 @@ async def generate_quiz_questions(
         envelope = await _call_groq(
             messages,
             kind="quiz_questions",
-            max_completion_tokens=4096,
+            max_completion_tokens=8192,
             response_format=_json_response_format(),
             expected_payload_key="questions",
         )
@@ -637,3 +644,109 @@ async def validate_api_key(api_key: str) -> bool:
             return response.status_code == 200
         except httpx.RequestError:
             return False
+
+
+async def tutor_explain(
+    concept: str,
+    context: str,
+    mode: str = "eli5",
+    card_front: Optional[str] = None,
+    card_back: Optional[str] = None,
+    user_answer: Optional[str] = None,
+) -> dict[str, Any]:
+    """AI Tutor: explain a concept in various modes."""
+    mode_instructions = {
+        "eli5": (
+            "Explain this concept as if teaching a 5-year-old. Use simple language, "
+            "everyday analogies, and short sentences. Make it fun and memorable."
+        ),
+        "deep": (
+            "Provide a thorough, detailed explanation of this concept. Cover the underlying "
+            "principles, mechanisms, and nuances. Use precise academic language."
+        ),
+        "example": (
+            "Provide 2-3 clear, worked examples that demonstrate this concept. "
+            "Show step-by-step solutions and explain each step."
+        ),
+        "why_wrong": (
+            "The student answered incorrectly. Explain why the correct answer is right "
+            "and why common wrong answers are wrong. Be encouraging but thorough."
+        ),
+    }
+
+    instruction = mode_instructions.get(mode, mode_instructions["eli5"])
+
+    card_context = ""
+    if card_front:
+        card_context += f"\nFlashcard question: {card_front}"
+    if card_back:
+        card_context += f"\nCorrect answer: {card_back}"
+    if user_answer and mode == "why_wrong":
+        card_context += f"\nStudent's answer: {user_answer}"
+
+    messages = _json_messages(
+        "You are a supportive, knowledgeable AI tutor. "
+        "Your goal is to help the student truly understand the material. "
+        "Be concise but thorough. Use formatting (bold, bullet points) for clarity.",
+        (
+            f"Concept: {concept}\n"
+            f"Context: {context}\n"
+            f"{card_context}\n\n"
+            f"Task: {instruction}\n\n"
+            "Return a JSON object with:\n"
+            "- `explanation`: your explanation text (use markdown formatting)\n"
+            "- `key_takeaways`: array of 2-4 short bullet points summarising the key points\n"
+            "- `memory_hook`: a memorable analogy or mnemonic to help remember this\n"
+        ),
+    )
+
+    try:
+        envelope = await _call_groq(
+            messages,
+            kind="tutor_explain",
+            max_completion_tokens=4096,
+            response_format=_json_response_format(),
+            expected_payload_key="explanation",
+        )
+        return envelope.get("data", {})
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.error("Failed to parse tutor response: %s", exc)
+        return {"explanation": "Sorry, I couldn't generate an explanation. Please try again."}
+
+
+async def generate_cards_from_topic(topic: str, num_cards: int = 30) -> list[dict[str, Any]]:
+    """Generate flashcards from a topic name alone, with no source material."""
+    messages = _json_messages(
+        "You are an expert study card generator. You create comprehensive, exam-ready "
+        "cloze flashcards from your own knowledge. Be exhaustive and cover all important "
+        "aspects of the topic.",
+        (
+            f"Topic: {topic}\n\n"
+            f"Generate at least {num_cards} flashcards covering ALL key concepts, "
+            f"definitions, formulas, relationships, processes, and important facts "
+            f"about {topic}.\n\n"
+            "Requirements:\n"
+            "- Return a JSON object with a `cards` array.\n"
+            "- Each card must have `front`, `back`, `type`, `concept_name`, and `tags`.\n"
+            "- Every `front` must contain exactly one `___` blank.\n"
+            "- `back` is the missing word or phrase.\n"
+            "- `type` must always be `CLOZE`.\n"
+            "- Cover different angles: definitions, examples, comparisons, causes, effects, dates, formulas.\n"
+            "- Avoid duplicate or near-duplicate cards.\n"
+            "- Organise cards logically from foundational to advanced concepts.\n"
+        ),
+    )
+
+    try:
+        envelope = await _call_groq(
+            messages,
+            kind="flashcards",
+            max_completion_tokens=16384,
+            response_format=_json_response_format(),
+            expected_payload_key="cards",
+        )
+        cards = envelope.get("data", {}).get("cards", [])
+        return cards if isinstance(cards, list) else []
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.error("Failed to parse topic flashcard response: %s", exc)
+        return []

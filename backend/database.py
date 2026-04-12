@@ -84,7 +84,7 @@ def _ensure_runtime_schema():
             _add_missing_columns(conn, inspector, table_name, columns)
 
         existing_tables = set(inspector.get_table_names())
-        for table_name in ["module_jobs", "auth_sessions", "ai_usage_events"]:
+        for table_name in ["module_jobs", "auth_sessions", "ai_usage_events", "user_stats", "achievements"]:
             if table_name in existing_tables:
                 continue
             Base.metadata.tables[table_name].create(bind=conn)

@@ -15,6 +15,8 @@ from models.document import Document
 from services.fsrs_service import schedule_review
 from services import ai_service
 from services.quota_service import ai_quota_scope
+from services.auth_service import get_current_user
+from models.user import User
 
 router = APIRouter(tags=["flashcards"])
 
@@ -81,6 +83,11 @@ class ReviewResponse(BaseModel):
     lapses: int
     state: str
     last_review: Optional[datetime] = None
+    xp_earned: int = 0
+    xp_total: int = 0
+    level: int = 1
+    level_up: bool = False
+    new_achievements: list[dict] = []
 
 
 class GenerateCardsRequest(BaseModel):
@@ -199,7 +206,12 @@ def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/flashcards/{card_id}/review", response_model=ReviewResponse)
-def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(get_db)):
+def review_flashcard(
+    card_id: str,
+    body: ReviewRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
     card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
@@ -234,6 +246,25 @@ def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(ge
     db.commit()
     db.refresh(card)
 
+    # Award XP via gamification
+    xp_data = {"xp_earned": 0, "xp_total": 0, "level": 1, "level_up": False, "new_achievements": []}
+    if user:
+        try:
+            from routers.gamification import process_card_review
+            xp_result = process_card_review(db, user.id)
+            xp_data = {
+                "xp_earned": xp_result.xp_earned,
+                "xp_total": xp_result.xp_total,
+                "level": xp_result.level,
+                "level_up": xp_result.level_up,
+                "new_achievements": [
+                    {"key": a.achievement_key, "name": a.name, "icon": a.icon}
+                    for a in xp_result.new_achievements
+                ],
+            }
+        except Exception:
+            pass  # Gamification is non-critical
+
     return ReviewResponse(
         id=card.id,
         due=card.due,
@@ -245,6 +276,11 @@ def review_flashcard(card_id: str, body: ReviewRequest, db: Session = Depends(ge
         lapses=card.lapses,
         state=card.state,
         last_review=card.last_review,
+        xp_earned=xp_data["xp_earned"],
+        xp_total=xp_data["xp_total"],
+        level=xp_data["level"],
+        level_up=xp_data["level_up"],
+        new_achievements=xp_data["new_achievements"],
     )
 
 
