@@ -50,7 +50,7 @@ class OptimalSessionItem(BaseModel):
 
 
 class OptimalSessionResponse(BaseModel):
-    items: list[OptimalSessionItem] = Field(default_factory=list)
+    items: list[OptimalSessionItem] = []
     total_items: int = 0
 
 
