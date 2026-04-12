@@ -5,6 +5,7 @@ import { getAnalyticsOverview, getModules } from '../api/client';
 import CreateModuleModal from '../components/CreateModuleModal';
 import ModuleCard from '../components/ModuleCard';
 import Skeleton from '../components/Skeleton';
+import GamificationBar from '../components/GamificationBar';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { formatRelativeTime } from '../utils/formatters';
 
@@ -62,6 +63,9 @@ export default function Dashboard() {
           Create Module
         </button>
       </div>
+
+      {/* Gamification Bar: streak, XP, daily goal, hearts */}
+      <GamificationBar />
 
       {analyticsLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-8">

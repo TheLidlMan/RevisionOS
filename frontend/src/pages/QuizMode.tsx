@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
@@ -10,14 +10,19 @@ import {
   Trophy,
   XCircle,
 } from '@phosphor-icons/react';
-import { getModules, generateQuizStream, startQuizSession, submitAnswer, completeSession } from '../api/client';
+import { getModules, generateQuizStream, startQuizSession, submitAnswer, completeSession, awardQuizCompletion } from '../api/client';
 import type {
   Difficulty,
   SessionResponse,
   AnswerResponse,
   SessionResults,
   QuestionForQuiz,
+  XPAwardResponse,
 } from '../types';
+import confetti from 'canvas-confetti';
+import AITutorPanel from '../components/AITutorPanel';
+import XPPopup from '../components/XPPopup';
+import AchievementToast from '../components/AchievementToast';
 
 type Phase = 'config' | 'quiz' | 'results';
 
@@ -39,6 +44,7 @@ const accentBtn = {
 export default function QuizMode() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const preModule = searchParams.get('module') ?? '';
 
   // Config state
@@ -57,6 +63,9 @@ export default function QuizMode() {
   const [results, setResults] = useState<SessionResults | null>(null);
   const [generationStatus, setGenerationStatus] = useState('');
   const [generationDelta, setGenerationDelta] = useState('');
+  const [showTutor, setShowTutor] = useState(false);
+  const [lastXP, setLastXP] = useState<{ earned: number; levelUp: boolean; level: number } | null>(null);
+  const [pendingAchievements, setPendingAchievements] = useState<{ key: string; name: string; icon: string }[]>([]);
 
   const { data: modules } = useQuery({
     queryKey: ['modules'],
@@ -110,7 +119,32 @@ export default function QuizMode() {
       submitAnswer(sessionId, { question_id: questionId, user_answer: answer }),
     onSuccess: (data) => {
       setAnswerResult(data);
-      if (data.is_correct) setScore((s) => s + 1);
+      if (data.is_correct) {
+        setScore((s) => s + 1);
+        // Mini confetti burst on correct answer
+        confetti({ particleCount: 30, spread: 50, origin: { y: 0.7 }, colors: ['#c4956a', '#78b478', '#f5f0e8'] });
+      }
+    },
+  });
+
+  const quizAwardMutation = useMutation({
+    mutationFn: (scorePct: number) => awardQuizCompletion(scorePct),
+    onSuccess: (data: XPAwardResponse) => {
+      queryClient.invalidateQueries({ queryKey: ['gamification-stats'] });
+      if (data.xp_earned > 0) {
+        setLastXP({ earned: data.xp_earned, levelUp: data.level_up, level: data.level });
+        setTimeout(() => setLastXP(null), 2500);
+      }
+      if (data.new_achievements.length > 0) {
+        setPendingAchievements(
+          data.new_achievements.map((achievement) => ({
+            key: achievement.achievement_key,
+            name: achievement.name,
+            icon: achievement.icon,
+          })),
+        );
+        setTimeout(() => setPendingAchievements([]), 5000);
+      }
     },
   });
 
@@ -119,6 +153,9 @@ export default function QuizMode() {
     onSuccess: (data) => {
       setResults(data);
       setPhase('results');
+      // Celebration confetti on quiz completion
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+      quizAwardMutation.mutate(data.score_pct);
     },
   });
 
@@ -333,6 +370,8 @@ export default function QuizMode() {
 
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto w-full">
+        <AchievementToast achievements={pendingAchievements} onDismiss={() => setPendingAchievements([])} />
+        {lastXP && <XPPopup xpEarned={lastXP.earned} levelUp={lastXP.levelUp} newLevel={lastXP.level} />}
         <div className="flex flex-col items-center text-center py-12">
           <Trophy className="w-16 h-16 mb-4" style={{ color: '#c4956a' }} />
           <h2
@@ -418,6 +457,8 @@ export default function QuizMode() {
 
   return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
+      <AchievementToast achievements={pendingAchievements} onDismiss={() => setPendingAchievements([])} />
+      {lastXP && <XPPopup xpEarned={lastXP.earned} levelUp={lastXP.levelUp} newLevel={lastXP.level} />}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
         <span style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>
@@ -556,6 +597,14 @@ export default function QuizMode() {
           {answerResult.explanation && (
             <p style={{ color: 'rgba(245,240,232,0.5)', fontWeight: 300, fontSize: '0.9rem' }}>{answerResult.explanation}</p>
           )}
+          <button
+            onClick={() => setShowTutor(true)}
+            className="mt-3 flex items-center gap-1.5 text-sm transition-all hover:opacity-80"
+            style={{ color: 'var(--accent)', fontWeight: 400, fontSize: '0.8rem' }}
+          >
+            <Brain size={14} />
+            Ask Tutor
+          </button>
         </motion.div>
       )}
 
@@ -593,6 +642,15 @@ export default function QuizMode() {
           </button>
         )}
       </div>
+
+      {/* AI Tutor Panel */}
+      {showTutor && question && (
+        <AITutorPanel
+          concept={question.question_text}
+          context={answerResult?.explanation || ''}
+          onClose={() => setShowTutor(false)}
+        />
+      )}
     </div>
   );
 }

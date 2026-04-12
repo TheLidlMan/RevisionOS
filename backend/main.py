@@ -11,6 +11,7 @@ from routers import modules, documents, flashcards, quizzes, study_sessions, con
 from routers import settings as settings_router
 from routers import weakness_map, knowledge_graph, search as search_router, curriculum, exports
 from routers import social, integrations, collaboration, features
+from routers import gamification, tutor
 
 fastapi_app = FastAPI(
     title="Revise OS API",
@@ -36,6 +37,8 @@ fastapi_app.include_router(social.router)
 fastapi_app.include_router(integrations.router)
 fastapi_app.include_router(collaboration.router)
 fastapi_app.include_router(features.router)
+fastapi_app.include_router(gamification.router)
+fastapi_app.include_router(tutor.router)
 
 
 @fastapi_app.on_event("startup")

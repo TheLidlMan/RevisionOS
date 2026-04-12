@@ -2,6 +2,7 @@ import { CardsThree, ClockCountdown, FileText, Sparkle } from '@phosphor-icons/r
 import { useNavigate } from 'react-router-dom';
 import type { Module } from '../types';
 import { formatRelativeTime, titleCase } from '../utils/formatters';
+import MasteryRing from './MasteryRing';
 
 interface Props {
   module: Module;
@@ -44,12 +45,7 @@ export default function ModuleCard({ module }: Props) {
             </p>
           )}
         </div>
-        <div
-          className="px-2 py-1 rounded-full"
-          style={{ background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: '0.8rem' }}
-        >
-          {Math.round(module.mastery_pct)}%
-        </div>
+        <MasteryRing percentage={module.mastery_pct} size={44} strokeWidth={3.5} />
       </div>
 
       <div className="flex flex-wrap gap-4 mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>

@@ -56,10 +56,10 @@ class Settings(BaseSettings):
     MAX_CONTEXT_TOKENS: int = 800000
     MAX_PROMPT_CHARS: int = 120000
     UPLOAD_DIR: str = "./uploads"
-    DAILY_NEW_CARDS_LIMIT: int = 20
-    CARDS_PER_DOCUMENT: int = 20
+    DAILY_NEW_CARDS_LIMIT: int = 50
+    CARDS_PER_DOCUMENT: int = 200
     QUESTIONS_PER_DOCUMENT: int = 10
-    MAX_CARDS_PER_REQUEST: int = 50
+    MAX_CARDS_PER_REQUEST: int = 200
     MAX_QUESTIONS_PER_REQUEST: int = 20
     WEAKNESS_THRESHOLD: float = 0.7
     DESIRED_RETENTION: float = 0.9
