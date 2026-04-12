@@ -128,8 +128,8 @@ export default function FlashcardReview() {
   const reviewMutation = useMutation({
     mutationFn: ({ id, rating }: { id: string; rating: Rating }) =>
       reviewFlashcard(id, rating),
-    onSuccess: (data: ReviewResponse) => {
-      const isWrong = data.state === 'RELEARNING' || data.lapses > 0;
+    onSuccess: (data: ReviewResponse, variables: { id: string; rating: Rating }) => {
+      const isWrong = variables.rating === 'AGAIN';
 
       // Show answer feedback animation
       setAnswerFeedback(isWrong ? 'wrong' : 'correct');
@@ -574,7 +574,6 @@ export default function FlashcardReview() {
           context={card.front}
           cardId={card.id}
           cardFront={card.front}
-          cardBack={card.back}
           onClose={() => setShowTutor(false)}
         />
       )}

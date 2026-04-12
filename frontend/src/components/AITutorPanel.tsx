@@ -18,7 +18,6 @@ interface AITutorPanelProps {
   context?: string;
   cardId?: string;
   cardFront?: string;
-  cardBack?: string;
   onClose: () => void;
 }
 

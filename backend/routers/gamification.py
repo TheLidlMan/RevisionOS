@@ -195,11 +195,6 @@ def _update_streak(stats: UserStats) -> list[AchievementResponse]:
         elif days_gap == 1:
             stats.streak_current += 1
         elif days_gap >= 2:
-            # Streak broken - check for comeback
-            if days_gap >= 3:
-                from database import get_db
-                # Comeback achievement handled by caller
-                pass
             stats.streak_current = 1
     else:
         stats.streak_current = 1
