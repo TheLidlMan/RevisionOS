@@ -27,7 +27,10 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
-type SortOption = 'UPDATED' | 'NEWEST' | 'OLDEST' | 'A_Z';
+const PAGE_SIZES = [10, 20, 50, 100] as const;
+
+type SortOption = 'updated_desc' | 'created_desc' | 'created_asc' | 'front_asc';
+type PageSize = (typeof PAGE_SIZES)[number];
 
 export default function ModuleFlashcards() {
   const { id } = useParams<{ id: string }>();
@@ -41,7 +44,10 @@ export default function ModuleFlashcards() {
   const [search, setSearch] = usePersistentState(`module-flashcards:${id}:search`, '');
   const [sourceFilter, setSourceFilter] = usePersistentState<'ALL' | 'AUTO' | 'MANUAL'>(`module-flashcards:${id}:source`, 'ALL');
   const [stateFilter, setStateFilter] = usePersistentState<'ALL' | 'NEW' | 'LEARNING' | 'REVIEW' | 'RELEARNING'>(`module-flashcards:${id}:state`, 'ALL');
-  const [sortBy, setSortBy] = usePersistentState<SortOption>(`module-flashcards:${id}:sort`, 'UPDATED');
+  const [sortBy, setSortBy] = usePersistentState<SortOption>(`module-flashcards:${id}:sort`, 'updated_desc');
+  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [offset, setOffset] = useState(0);
+  const [loadedCards, setLoadedCards] = useState<Flashcard[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Flashcard | null>(null);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
@@ -58,6 +64,8 @@ export default function ModuleFlashcards() {
     Boolean(editing),
   );
 
+  const trimmedSearch = search.trim();
+
   const moduleQuery = useQuery({
     queryKey: ['module', id],
     queryFn: () => getModule(id!),
@@ -65,20 +73,51 @@ export default function ModuleFlashcards() {
   });
 
   const cardsQuery = useQuery({
-    queryKey: ['flashcards', id, sourceFilter, stateFilter],
+    queryKey: ['flashcards', id, sourceFilter, stateFilter, sortBy, pageSize, trimmedSearch, offset],
     queryFn: () =>
       getFlashcards({
         module_id: id!,
         generation_source: sourceFilter === 'ALL' ? undefined : sourceFilter,
         state: stateFilter === 'ALL' ? undefined : stateFilter,
+        search: trimmedSearch || undefined,
+        sort: sortBy,
+        limit: pageSize,
+        offset,
       }),
     enabled: !!id,
   });
+
+  const resetPagination = () => {
+    setOffset(0);
+    setLoadedCards([]);
+    setSelectedCardId(null);
+  };
+
+  useEffect(() => {
+    resetPagination();
+  }, [id, pageSize, search, sortBy, sourceFilter, stateFilter]);
+
+  useEffect(() => {
+    if (!cardsQuery.data) {
+      return;
+    }
+
+    setLoadedCards((current) => {
+      if (offset === 0) {
+        return cardsQuery.data.items;
+      }
+
+      const existingIds = new Set(current.map((card) => card.id));
+      const appended = cardsQuery.data.items.filter((card) => !existingIds.has(card.id));
+      return [...current, ...appended];
+    });
+  }, [cardsQuery.data, offset]);
 
   const updateMutation = useMutation({
     mutationFn: ({ cardId, front, back }: { cardId: string; front: string; back: string }) =>
       updateFlashcard(cardId, { front, back }),
     onSuccess: () => {
+      resetPagination();
       queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
       queryClient.invalidateQueries({ queryKey: ['module', id] });
       clearEditDraft();
@@ -92,36 +131,26 @@ export default function ModuleFlashcards() {
 
   const deleteMutation = useMutation({
     mutationFn: deleteFlashcard,
-    onSuccess: () => {
+    onSuccess: (_, cardId) => {
+      resetPagination();
+      setPendingDeleteIds((current) => current.filter((value) => value !== cardId));
+      if (selectedCardId === cardId) {
+        setSelectedCardId(null);
+      }
       queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
       queryClient.invalidateQueries({ queryKey: ['module', id] });
       queryClient.invalidateQueries({ queryKey: ['modules'] });
     },
+    onError: (_, cardId) => {
+      setPendingDeleteIds((current) => current.filter((value) => value !== cardId));
+      showToast({ title: 'Could not delete flashcard', tone: 'error' });
+    },
   });
 
-  const filteredCards = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    const visible = (cardsQuery.data || []).filter((card) => {
-      if (pendingDeleteIds.includes(card.id)) {
-        return false;
-      }
-      if (!term) {
-        return true;
-      }
-      return card.front.toLowerCase().includes(term) || card.back.toLowerCase().includes(term);
-    });
-
-    if (sortBy === 'A_Z') {
-      return visible.sort((a, b) => a.front.localeCompare(b.front));
-    }
-    if (sortBy === 'NEWEST') {
-      return visible.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    }
-    if (sortBy === 'OLDEST') {
-      return visible.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    }
-    return visible.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  }, [cardsQuery.data, pendingDeleteIds, search, sortBy]);
+  const filteredCards = useMemo(
+    () => loadedCards.filter((card) => !pendingDeleteIds.includes(card.id)),
+    [loadedCards, pendingDeleteIds],
+  );
 
   const activeSelectedCardId = useMemo(() => {
     if (!filteredCards.length) {
@@ -192,7 +221,6 @@ export default function ModuleFlashcards() {
     const timeout = window.setTimeout(() => {
       deleteMutation.mutate(card.id);
       deleteTimeoutsRef.current.delete(card.id);
-      setPendingDeleteIds((current) => current.filter((idValue) => idValue !== card.id));
     }, 5000);
     deleteTimeoutsRef.current.set(card.id, timeout);
     showToast({
@@ -215,8 +243,12 @@ export default function ModuleFlashcards() {
   };
 
   const editCanSave = editDraft.front.trim().length > 0 && editDraft.back.trim().length > 0 && !updateMutation.isPending;
+  const pendingLoadedCount = loadedCards.filter((card) => pendingDeleteIds.includes(card.id)).length;
+  const totalCards = Math.max(0, (cardsQuery.data?.total ?? loadedCards.length) - pendingLoadedCount);
+  const hasMore = cardsQuery.data?.has_more ?? false;
+  const initialLoading = (moduleQuery.isLoading || cardsQuery.isLoading) && loadedCards.length === 0;
 
-  if (moduleQuery.isLoading || cardsQuery.isLoading) {
+  if (initialLoading) {
     return (
       <div className="p-6 lg:p-8 max-w-6xl mx-auto w-full">
         <Skeleton className="h-5 w-40 mb-6" />
@@ -226,8 +258,9 @@ export default function ModuleFlashcards() {
             <Skeleton className="h-4 w-80" />
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
           <Skeleton className="h-12 md:col-span-2" />
+          <Skeleton className="h-12" />
           <Skeleton className="h-12" />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -257,17 +290,17 @@ export default function ModuleFlashcards() {
             {moduleQuery.data?.name || 'Module'} Flashcards
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-            Edit, delete, and inspect cards without leaving the module flow.
+            Edit, delete, and browse cards in fixed chunks without leaving the module flow.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3" style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>
-          <span>{filteredCards.length} visible</span>
-          <span>{cardsQuery.data?.length || 0} total</span>
+          <span>{filteredCards.length} loaded</span>
+          <span>{totalCards} total</span>
           <span className="hidden md:inline">Use `/` to search and arrow keys to move</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[1.5fr_220px_190px] gap-3 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_220px_190px_130px] gap-3 mb-6">
         <div className="relative">
           <MagnifyingGlass size={18} style={{ position: 'absolute', left: 12, top: 13, color: 'var(--text-secondary)' }} />
           <input
@@ -287,10 +320,17 @@ export default function ModuleFlashcards() {
           <option value="MANUAL">Manual</option>
         </select>
         <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SortOption)} className="px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
-          <option value="UPDATED">Recently updated</option>
-          <option value="NEWEST">Newest</option>
-          <option value="OLDEST">Oldest</option>
-          <option value="A_Z">A-Z</option>
+          <option value="updated_desc">Recently updated</option>
+          <option value="created_desc">Newest</option>
+          <option value="created_asc">Oldest</option>
+          <option value="front_asc">A-Z</option>
+        </select>
+        <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as PageSize)} className="px-3 py-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}>
+          {PAGE_SIZES.map((value) => (
+            <option key={value} value={value}>
+              {value} / page
+            </option>
+          ))}
         </select>
       </div>
 
@@ -313,74 +353,89 @@ export default function ModuleFlashcards() {
       </div>
 
       {filteredCards.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filteredCards.map((card) => {
-            const isSelected = activeSelectedCardId === card.id;
-            return (
-              <div
-                key={card.id}
-                className="p-5 h-full min-h-[280px] flex flex-col"
-                style={{
-                  ...glass,
-                  borderColor: isSelected ? 'rgba(196,149,106,0.45)' : 'var(--border)',
-                  boxShadow: isSelected ? '0 0 0 2px rgba(196,149,106,0.18)' : 'none',
-                }}
-                onClick={() => setSelectedCardId(card.id)}
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filteredCards.map((card) => {
+              const isSelected = activeSelectedCardId === card.id;
+              return (
+                <div
+                  key={card.id}
+                  className="p-5 h-full min-h-[280px] flex flex-col"
+                  style={{
+                    ...glass,
+                    borderColor: isSelected ? 'rgba(196,149,106,0.45)' : 'var(--border)',
+                    boxShadow: isSelected ? '0 0 0 2px rgba(196,149,106,0.18)' : 'none',
+                  }}
+                  onClick={() => setSelectedCardId(card.id)}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <span className="px-2 py-1 rounded-full" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                        {card.generation_source}
+                      </span>
+                      <span className="px-2 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>
+                        {card.state}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(card)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', minWidth: 36, minHeight: 36 }}
+                        aria-label="Edit card"
+                      >
+                        <PencilSimple size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => queueDelete(card)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', minWidth: 36, minHeight: 36 }}
+                        aria-label="Delete card"
+                      >
+                        <Trash size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ color: 'var(--text)', fontSize: '0.98rem', marginBottom: 10 }}>{card.front}</p>
+                  <div className="flex-1">
+                    <ShowMoreText text={card.back} collapsedLines={4} color="var(--text-secondary)" fontSize="0.92rem" />
+                  </div>
+                  <div className="mt-4 pt-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                    <div className="flex items-center justify-between text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
+                      <span>Stability: {formatDays(card.stability)}</span>
+                      <button type="button" className="inline-flex items-center gap-1" style={{ color: 'var(--accent)' }} onClick={() => navigate(`/forgetting-curve/${card.id}`)}>
+                        <ChartLineDown size={16} />
+                        Curve
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                      <span title={formatDateTime(card.updated_at)}>Updated {formatRelativeTime(card.updated_at)}</span>
+                      <span>{card.reps} reviews</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {hasMore ? (
+            <div className="flex justify-center mt-6">
+              <button
+                type="button"
+                className="scholar-btn"
+                disabled={cardsQuery.isFetching}
+                onClick={() => setOffset((current) => current + pageSize)}
               >
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="px-2 py-1 rounded-full" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-                      {card.generation_source}
-                    </span>
-                    <span className="px-2 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>
-                      {card.state}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditing(card)}
-                      style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', minWidth: 36, minHeight: 36 }}
-                      aria-label="Edit card"
-                    >
-                      <PencilSimple size={18} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => queueDelete(card)}
-                      style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', minWidth: 36, minHeight: 36 }}
-                      aria-label="Delete card"
-                    >
-                      <Trash size={18} />
-                    </button>
-                  </div>
-                </div>
-                <p style={{ color: 'var(--text)', fontSize: '0.98rem', marginBottom: 10 }}>{card.front}</p>
-                <div className="flex-1">
-                  <ShowMoreText text={card.back} collapsedLines={4} color="var(--text-secondary)" fontSize="0.92rem" />
-                </div>
-                <div className="mt-4 pt-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-                  <div className="flex items-center justify-between text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    <span>Stability: {formatDays(card.stability)}</span>
-                    <button type="button" className="inline-flex items-center gap-1" style={{ color: 'var(--accent)' }} onClick={() => navigate(`/forgetting-curve/${card.id}`)}>
-                      <ChartLineDown size={16} />
-                      Curve
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    <span title={formatDateTime(card.updated_at)}>Updated {formatRelativeTime(card.updated_at)}</span>
-                    <span>{card.reps} reviews</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                {cardsQuery.isFetching ? 'Loading…' : 'Show more'}
+              </button>
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="p-10 text-center" style={glass}>
           <p style={{ color: 'var(--text)', marginBottom: 8 }}>No flashcards match this view.</p>
           <p style={{ color: 'var(--text-secondary)' }}>
-            {cardsQuery.data?.length
+            {totalCards
               ? 'Try clearing one of the filters or search terms.'
               : 'Upload more material and let the backend finish processing this module.'}
           </p>

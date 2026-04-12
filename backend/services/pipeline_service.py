@@ -247,34 +247,125 @@ def _target_cards_for_weight(study_weight: Optional[float]) -> int:
     return max(1, min(5, ceil(weight * 1.5)))
 
 
-async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]:
-    if not settings.GROQ_API_KEY:
+def _normalize_flashcard_tags(raw_tags: object, concept_name: Optional[str] = None) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    candidates: list[str] = []
+    if concept_name:
+        candidates.append(concept_name)
+    if isinstance(raw_tags, list):
+        candidates.extend(str(tag).strip() for tag in raw_tags)
+
+    for tag in candidates:
+        normalized = tag.strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(normalized)
+
+    return tags
+
+
+def _create_flashcards_from_payloads(
+    *,
+    db: Session,
+    module: Module,
+    document: Document,
+    payloads: list[dict],
+    existing_pairs: set[tuple[str, str]],
+    concept_id: Optional[str] = None,
+    concept_name: Optional[str] = None,
+    default_card_type: str = "BASIC",
+    require_cloze: bool = False,
+    default_source_excerpt: Optional[str] = None,
+) -> list[str]:
+    created_cards: list[Flashcard] = []
+
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+
+        front = str(payload.get("front") or "").strip()
+        card_type = str(payload.get("type") or default_card_type).upper()
+        if card_type not in ("BASIC", "CLOZE"):
+            card_type = default_card_type
+
+        back = str(payload.get("back") or "").strip()
+        cloze_text = payload.get("cloze_text")
+        if card_type == "CLOZE" and not back:
+            back = str(cloze_text or "").strip()
+
+        pair = (front.lower(), back.lower())
+        if not front or not back or pair in existing_pairs:
+            continue
+        if require_cloze and "___" not in front and "___" not in back:
+            continue
+
+        tags = _normalize_flashcard_tags(payload.get("tags"), concept_name)
+        card = Flashcard(
+            user_id=module.user_id,
+            module_id=module.id,
+            concept_id=concept_id,
+            front=front,
+            back=back,
+            card_type=card_type,
+            cloze_text=(cloze_text or front) if card_type == "CLOZE" else None,
+            source_document_id=payload.get("source_document_id") or document.id,
+            source_excerpt=payload.get("source_excerpt") or default_source_excerpt,
+            tags=json.dumps(tags),
+            due=datetime.utcnow(),
+            state="NEW",
+            generation_source="AUTO",
+        )
+        db.add(card)
+        created_cards.append(card)
+        existing_pairs.add(pair)
+
+    if not created_cards:
         return []
+
+    db.flush()
+    return [card.id for card in created_cards if card.id]
+
+
+def _build_flashcard_generation_error(
+    *,
+    concept_error: Optional[str],
+    concept_had_usable_cards: bool,
+    raw_text_error: Optional[str],
+    raw_text_had_usable_cards: bool,
+) -> str:
+    parts: list[str] = []
+
+    if concept_error:
+        parts.append(f"Concept-generation failure: {concept_error}")
+    elif not concept_had_usable_cards:
+        parts.append("Concept generation returned no usable cards")
+
+    if raw_text_error:
+        parts.append(f"Raw-text fallback failure: {raw_text_error}")
+    elif not raw_text_had_usable_cards:
+        parts.append("Raw-text fallback returned no usable cards")
+
+    return "; ".join(parts)
+
+
+async def _generate_missing_flashcards(
+    module: Module,
+    document: Document,
+    concept_ids: list[str],
+    db: Session,
+) -> tuple[list[str], Optional[str]]:
+    if not settings.GROQ_API_KEY:
+        return [], None
 
     module_id = module.id
     module_name = module.name
-    module_user_id = module.user_id
-
-    concept_rows = (
-        db.query(Concept)
-        .filter(Concept.module_id == module_id)
-        .order_by(Concept.parent_concept_id.is_(None).desc(), Concept.order_index.asc(), Concept.importance_score.desc())
-        .all()
-    )
-    if not concept_rows:
-        return []
-
-    concepts = [
-        {
-            "id": concept.id,
-            "name": concept.name,
-            "definition": concept.definition,
-            "explanation": concept.explanation,
-            "study_weight": concept.study_weight,
-        }
-        for concept in concept_rows
-    ]
-
+    raw_text = (document.raw_text or "").strip()
     existing_cards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     cards_by_concept: dict[str, list[Flashcard]] = defaultdict(list)
     existing_pairs = set()
@@ -283,87 +374,126 @@ async def _generate_missing_flashcards(module: Module, db: Session) -> list[str]
             cards_by_concept[card.concept_id].append(card)
         existing_pairs.add(((card.front or "").strip().lower(), (card.back or "").strip().lower()))
 
-    docs = (
-        db.query(Document)
-        .filter(Document.module_id == module_id, Document.processing_status == "done")
-        .all()
-    )
-    default_doc_id = docs[0].id if docs else None
     created_ids: list[str] = []
+    concept_had_usable_cards = False
+    raw_text_had_usable_cards = False
+    concept_error: Optional[str] = None
+    raw_text_error: Optional[str] = None
+    fallback_target_cards = 0
 
-    for concept in concepts:
-        concept_id = concept["id"]
-        concept_name = concept["name"]
-        concept_definition = concept.get("definition") or concept.get("explanation") or ""
-        current_count = len(cards_by_concept.get(concept_id, []))
-        missing = _target_cards_for_weight(concept.get("study_weight")) - current_count
-        if missing <= 0:
-            continue
-
-        rag_context = build_rag_context(
-            db,
-            module_id,
-            query=f"{concept_name}\n{concept.get('definition') or ''}\n{concept.get('explanation') or ''}",
-            max_chars=18000,
-            user_id=module_user_id,
-        )
-        db.close()
-        if not rag_context.strip():
-            continue
-
-        generated_cards = await ai_service.generate_flashcards_for_concept(
-            concept_name=concept_name,
-            concept_definition=concept_definition,
-            context=rag_context,
-            num_cards=missing,
-            subject=module_name,
-        )
-
-        new_cards: list[Flashcard] = []
-
-        for payload in generated_cards:
-            if not isinstance(payload, dict):
-                continue
-
-            front = (payload.get("front") or "").strip()
-            back = (payload.get("back") or "").strip()
-            pair = (front.lower(), back.lower())
-            if not front or not back or pair in existing_pairs:
-                continue
-            if "___" not in front and "___" not in back:
-                continue
-
-            tags = payload.get("tags", [])
-            if not isinstance(tags, list):
-                tags = []
-            if concept_name not in tags:
-                tags = [concept_name, *tags]
-
-            card = Flashcard(
-                user_id=module_user_id,
-                module_id=module_id,
-                concept_id=concept_id,
-                front=front,
-                back=back,
-                card_type="CLOZE",
-                cloze_text=front,
-                source_document_id=payload.get("source_document_id") or default_doc_id,
-                source_excerpt=payload.get("source_excerpt"),
-                tags=json.dumps(tags),
-                due=datetime.utcnow(),
-                state="NEW",
-                generation_source="AUTO",
+    try:
+        concept_rows = (
+            db.query(Concept)
+            .filter(
+                Concept.module_id == module_id,
+                Concept.id.in_(concept_ids or [""]),
             )
-            db.add(card)
-            cards_by_concept[concept_id].append(card)
-            existing_pairs.add(pair)
-            new_cards.append(card)
+            .order_by(Concept.parent_concept_id.is_(None).desc(), Concept.order_index.asc(), Concept.importance_score.desc())
+            .all()
+        )
+        per_concept_errors: list[str] = []
 
-        db.flush()
-        created_ids.extend(card.id for card in new_cards if card.id)
-        db.commit()
+        for concept in concept_rows:
+            current_count = len(cards_by_concept.get(concept.id, []))
+            missing = _target_cards_for_weight(concept.study_weight) - current_count
+            if missing <= 0:
+                continue
+            fallback_target_cards = min(
+                settings.CARDS_PER_DOCUMENT,
+                max(1, fallback_target_cards + missing),
+            )
 
-    return created_ids
+            try:
+                rag_context = build_rag_context(
+                    db,
+                    module_id,
+                    query=f"{concept.name}\n{concept.definition or ''}\n{concept.explanation or ''}",
+                    max_chars=18000,
+                    user_id=module.user_id,
+                )
+                db.close()
+                if not rag_context.strip():
+                    continue
+
+                generated_cards = await ai_service.generate_flashcards_for_concept(
+                    concept_name=concept.name,
+                    concept_definition=concept.definition or concept.explanation or "",
+                    context=rag_context,
+                    num_cards=missing,
+                    subject=module_name,
+                )
+                new_ids = _create_flashcards_from_payloads(
+                    db=db,
+                    module=module,
+                    document=document,
+                    payloads=generated_cards,
+                    existing_pairs=existing_pairs,
+                    concept_id=concept.id,
+                    concept_name=concept.name,
+                    default_card_type="CLOZE",
+                    require_cloze=True,
+                )
+                if new_ids:
+                    concept_had_usable_cards = True
+                    created_ids.extend(new_ids)
+                    cards_by_concept[concept.id].extend(
+                        db.query(Flashcard).filter(Flashcard.id.in_(new_ids)).all()
+                    )
+                    db.commit()
+            except Exception as exc:
+                logger.exception(
+                    "Concept flashcard generation failed for document %s concept %s: %s",
+                    document.id,
+                    concept.name,
+                    exc,
+                )
+                per_concept_errors.append(f"{concept.name}: {exc}")
+
+        if per_concept_errors and not concept_had_usable_cards:
+            concept_error = "; ".join(per_concept_errors[:3])
+    except Exception as exc:
+        logger.exception("Concept flashcard generation crashed for document %s: %s", document.id, exc)
+        concept_error = str(exc)
+
+    fallback_target_cards = max(1, fallback_target_cards or settings.CARDS_PER_DOCUMENT)
+
+    if concept_had_usable_cards:
+        return created_ids, None
+
+    try:
+        generated_cards = await ai_service.generate_flashcards(
+            raw_text,
+            fallback_target_cards,
+            module_name,
+            source_name=document.filename,
+        )
+        new_ids = _create_flashcards_from_payloads(
+            db=db,
+            module=module,
+            document=document,
+            payloads=generated_cards,
+            existing_pairs=existing_pairs,
+            default_card_type="BASIC",
+            require_cloze=False,
+            default_source_excerpt=raw_text[:200] if raw_text else None,
+        )
+        if new_ids:
+            raw_text_had_usable_cards = True
+            created_ids.extend(new_ids)
+            db.commit()
+    except Exception as exc:
+        logger.exception("Raw-text flashcard fallback failed for document %s: %s", document.id, exc)
+        raw_text_error = str(exc)
+
+    if raw_text_had_usable_cards:
+        return created_ids, None
+
+    return created_ids, _build_flashcard_generation_error(
+        concept_error=concept_error,
+        concept_had_usable_cards=concept_had_usable_cards,
+        raw_text_error=raw_text_error,
+        raw_text_had_usable_cards=raw_text_had_usable_cards,
+    )
 
 
 def _remove_document_file(doc: Document) -> None:
@@ -885,6 +1015,7 @@ async def process_document_pipeline(
 ) -> None:
     db = SessionLocal()
     created_concept_ids: list[str] = []
+    extracted_concept_ids: list[str] = []
     created_flashcard_ids: list[str] = []
     clear_summary_on_cancel = False
     clear_raw_text_on_cancel = False
@@ -1018,6 +1149,7 @@ async def process_document_pipeline(
             db.commit()
             await _emit_pipeline_event(event_handler, {"event": "status", "stage": "indexing_topics", "completed": 2, "total": PIPELINE_TOTAL_STEPS})
             created_concepts = await index_document(document_id, db, skip_summary=True)
+            extracted_concept_ids = [entry["id"] for entry in created_concepts if entry.get("id")]
             created_concept_ids = [entry["id"] for entry in created_concepts if entry.get("is_new")]
 
             doc, module, job = _current_entities(db, document_id, module_id, job_id)
@@ -1062,10 +1194,42 @@ async def process_document_pipeline(
             sync_module_pipeline_state(db, module.id)
             db.commit()
             await _emit_pipeline_event(event_handler, {"event": "status", "stage": "generating_flashcards", "completed": 4, "total": PIPELINE_TOTAL_STEPS})
-            created_flashcard_ids = await _generate_missing_flashcards(module, db)
+            created_flashcard_ids, flashcard_generation_error = await _generate_missing_flashcards(module, doc, extracted_concept_ids, db)
             refresh_module_relationships(module.id, db)
             sync_module_pipeline_state(db, module.id)
             db.commit()
+
+            if flashcard_generation_error:
+                doc, module, job = _current_entities(db, document_id, module_id, job_id)
+                _set_document_state(
+                    doc,
+                    status="failed",
+                    stage="generating_flashcards",
+                    completed=4,
+                    total=PIPELINE_TOTAL_STEPS,
+                    error=flashcard_generation_error,
+                )
+                _set_pipeline_state(
+                    module,
+                    job,
+                    status="failed",
+                    stage="generating_flashcards",
+                    completed=4,
+                    total=PIPELINE_TOTAL_STEPS,
+                    error=flashcard_generation_error,
+                )
+                sync_module_pipeline_state(db, module.id)
+                db.commit()
+                await _emit_pipeline_event(
+                    event_handler,
+                    {
+                        "event": "error",
+                        "stage": "generating_flashcards",
+                        "message": flashcard_generation_error,
+                        "document_id": doc.id,
+                    },
+                )
+                return
 
             doc, module, job = _current_entities(db, document_id, module_id, job_id)
             if _cancellation_requested(doc, job):
