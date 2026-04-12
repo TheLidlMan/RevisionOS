@@ -50,7 +50,7 @@ class OptimalSessionItem(BaseModel):
 
 
 class OptimalSessionResponse(BaseModel):
-    items: list[OptimalSessionItem] = []
+    items: list[OptimalSessionItem] = Field(default_factory=list)
     total_items: int = 0
 
 
@@ -186,7 +186,7 @@ def get_optimal_session(
     cutoff = max(1, len(scored) // 5)
     weak_concepts = scored[:cutoff]
 
-    items: list[OptimalSessionItem] = Field(default_factory=list)
+    items = []
     total_items = 0
 
     for conf, concept in weak_concepts:

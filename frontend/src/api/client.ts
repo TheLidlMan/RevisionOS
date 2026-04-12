@@ -123,8 +123,6 @@ const getApiUrl = (path: string) => {
 
 const stripHtml = (value: string) =>
   value
-    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
