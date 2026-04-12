@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   ChartLineDown,
@@ -46,8 +46,6 @@ export default function ModuleFlashcards() {
   const [stateFilter, setStateFilter] = usePersistentState<'ALL' | 'NEW' | 'LEARNING' | 'REVIEW' | 'RELEARNING'>(`module-flashcards:${id}:state`, 'ALL');
   const [sortBy, setSortBy] = usePersistentState<SortOption>(`module-flashcards:${id}:sort`, 'updated_desc');
   const [pageSize, setPageSize] = useState<PageSize>(20);
-  const [offset, setOffset] = useState(0);
-  const [loadedCards, setLoadedCards] = useState<Flashcard[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Flashcard | null>(null);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
@@ -72,9 +70,9 @@ export default function ModuleFlashcards() {
     enabled: !!id,
   });
 
-  const cardsQuery = useQuery({
-    queryKey: ['flashcards', id, sourceFilter, stateFilter, sortBy, pageSize, trimmedSearch, offset],
-    queryFn: () =>
+  const cardsQuery = useInfiniteQuery({
+    queryKey: ['flashcards', id, sourceFilter, stateFilter, sortBy, pageSize, trimmedSearch],
+    queryFn: ({ pageParam }) =>
       getFlashcards({
         module_id: id!,
         generation_source: sourceFilter === 'ALL' ? undefined : sourceFilter,
@@ -82,42 +80,17 @@ export default function ModuleFlashcards() {
         search: trimmedSearch || undefined,
         sort: sortBy,
         limit: pageSize,
-        offset,
+        offset: pageParam,
       }),
     enabled: !!id,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => (lastPage.has_more ? lastPage.offset + lastPage.limit : undefined),
   });
-
-  const resetPagination = () => {
-    setOffset(0);
-    setLoadedCards([]);
-    setSelectedCardId(null);
-  };
-
-  useEffect(() => {
-    resetPagination();
-  }, [id, pageSize, search, sortBy, sourceFilter, stateFilter]);
-
-  useEffect(() => {
-    if (!cardsQuery.data) {
-      return;
-    }
-
-    setLoadedCards((current) => {
-      if (offset === 0) {
-        return cardsQuery.data.items;
-      }
-
-      const existingIds = new Set(current.map((card) => card.id));
-      const appended = cardsQuery.data.items.filter((card) => !existingIds.has(card.id));
-      return [...current, ...appended];
-    });
-  }, [cardsQuery.data, offset]);
 
   const updateMutation = useMutation({
     mutationFn: ({ cardId, front, back }: { cardId: string; front: string; back: string }) =>
       updateFlashcard(cardId, { front, back }),
     onSuccess: () => {
-      resetPagination();
       queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
       queryClient.invalidateQueries({ queryKey: ['module', id] });
       clearEditDraft();
@@ -132,7 +105,6 @@ export default function ModuleFlashcards() {
   const deleteMutation = useMutation({
     mutationFn: deleteFlashcard,
     onSuccess: (_, cardId) => {
-      resetPagination();
       setPendingDeleteIds((current) => current.filter((value) => value !== cardId));
       if (selectedCardId === cardId) {
         setSelectedCardId(null);
@@ -146,6 +118,24 @@ export default function ModuleFlashcards() {
       showToast({ title: 'Could not delete flashcard', tone: 'error' });
     },
   });
+
+  const loadedCards = useMemo(() => {
+    const pages = cardsQuery.data?.pages ?? [];
+    const merged: Flashcard[] = [];
+    const seen = new Set<string>();
+
+    pages.forEach((page) => {
+      page.items.forEach((card) => {
+        if (seen.has(card.id)) {
+          return;
+        }
+        seen.add(card.id);
+        merged.push(card);
+      });
+    });
+
+    return merged;
+  }, [cardsQuery.data]);
 
   const filteredCards = useMemo(
     () => loadedCards.filter((card) => !pendingDeleteIds.includes(card.id)),
@@ -244,8 +234,9 @@ export default function ModuleFlashcards() {
 
   const editCanSave = editDraft.front.trim().length > 0 && editDraft.back.trim().length > 0 && !updateMutation.isPending;
   const pendingLoadedCount = loadedCards.filter((card) => pendingDeleteIds.includes(card.id)).length;
-  const totalCards = Math.max(0, (cardsQuery.data?.total ?? loadedCards.length) - pendingLoadedCount);
-  const hasMore = cardsQuery.data?.has_more ?? false;
+  const firstPage = cardsQuery.data?.pages[0];
+  const totalCards = Math.max(0, (firstPage?.total ?? loadedCards.length) - pendingLoadedCount);
+  const hasMore = cardsQuery.hasNextPage;
   const initialLoading = (moduleQuery.isLoading || cardsQuery.isLoading) && loadedCards.length === 0;
 
   if (initialLoading) {
@@ -423,10 +414,10 @@ export default function ModuleFlashcards() {
               <button
                 type="button"
                 className="scholar-btn"
-                disabled={cardsQuery.isFetching}
-                onClick={() => setOffset((current) => current + pageSize)}
+                disabled={cardsQuery.isFetchingNextPage}
+                onClick={() => cardsQuery.fetchNextPage()}
               >
-                {cardsQuery.isFetching ? 'Loading…' : 'Show more'}
+                {cardsQuery.isFetchingNextPage ? 'Loading…' : 'Show more'}
               </button>
             </div>
           ) : null}
