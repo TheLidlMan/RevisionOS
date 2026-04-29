@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Brain, CheckCircle, Graph, Sparkle, SpinnerGap } from '@phosphor-icons/react';
 import {
@@ -32,53 +32,44 @@ export default function StudyCoachPage() {
     queryFn: getModules,
   });
 
-  useEffect(() => {
-    if (!moduleId && modulesQuery.data?.length) {
-      setModuleId(modulesQuery.data[0].id);
-    }
-  }, [moduleId, modulesQuery.data]);
+  const resolvedModuleId = moduleId || modulesQuery.data?.[0]?.id || '';
 
   const coachQuery = useQuery({
-    queryKey: ['study-coach', moduleId],
-    queryFn: () => getStudyCoachState(moduleId),
-    enabled: !!moduleId,
+    queryKey: ['study-coach', resolvedModuleId],
+    queryFn: () => getStudyCoachState(resolvedModuleId),
+    enabled: !!resolvedModuleId,
   });
 
-  useEffect(() => {
-    if (!coachQuery.data) {
-      return;
-    }
-    setSelectedConceptId((current) => current || coachQuery.data.focus_topic_id || coachQuery.data.topics[0]?.concept_id || '');
-  }, [coachQuery.data]);
+  const resolvedConceptId = selectedConceptId || coachQuery.data?.focus_topic_id || coachQuery.data?.topics[0]?.concept_id || '';
 
   const selectedTopic = useMemo(
-    () => coachQuery.data?.topics.find((topic) => topic.concept_id === selectedConceptId) || null,
-    [coachQuery.data, selectedConceptId],
+    () => coachQuery.data?.topics.find((topic) => topic.concept_id === resolvedConceptId) || null,
+    [coachQuery.data, resolvedConceptId],
   );
 
   const planQuery = useQuery({
-    queryKey: ['study-coach-plan', moduleId, selectedConceptId],
-    queryFn: () => buildStudyCoachPlan(moduleId, selectedConceptId ? { concept_id: selectedConceptId } : {}),
-    enabled: !!moduleId && !!selectedConceptId,
+    queryKey: ['study-coach-plan', resolvedModuleId, resolvedConceptId],
+    queryFn: () => buildStudyCoachPlan(resolvedModuleId, resolvedConceptId ? { concept_id: resolvedConceptId } : {}),
+    enabled: !!resolvedModuleId && !!resolvedConceptId,
   });
 
   const progressMutation = useMutation({
     mutationFn: ({ topic, progress, notes }: { topic: StudyCoachTopic; progress: number; notes: string }) =>
-      updateStudyCoachProgress(moduleId, topic.concept_id, {
+      updateStudyCoachProgress(resolvedModuleId, topic.concept_id, {
         progress_pct: progress,
         status: progress >= 85 ? 'mastered' : progress >= 60 ? 'solid' : progress > 0 ? 'in_progress' : 'not_started',
         notes,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['study-coach', moduleId] });
-      queryClient.invalidateQueries({ queryKey: ['study-coach-plan', moduleId, selectedConceptId] });
-      queryClient.invalidateQueries({ queryKey: ['knowledge-graph', moduleId] });
+      queryClient.invalidateQueries({ queryKey: ['study-coach', resolvedModuleId] });
+      queryClient.invalidateQueries({ queryKey: ['study-coach-plan', resolvedModuleId, resolvedConceptId] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-graph', resolvedModuleId] });
     },
   });
 
   const evaluationMutation = useMutation({
     mutationFn: ({ conceptId, question, answer }: { conceptId: string; question: StudyCoachQuestion; answer: string }) =>
-      evaluateStudyCoachAnswer(moduleId, {
+      evaluateStudyCoachAnswer(resolvedModuleId, {
         concept_id: conceptId,
         question: question.question,
         answer_outline: question.answer_outline,
@@ -89,9 +80,9 @@ export default function StudyCoachPage() {
         ...current,
         [variables.question.question]: `${Math.round(result.score)}% · ${result.feedback}`,
       }));
-      queryClient.invalidateQueries({ queryKey: ['study-coach', moduleId] });
-      queryClient.invalidateQueries({ queryKey: ['study-coach-plan', moduleId, selectedConceptId] });
-      queryClient.invalidateQueries({ queryKey: ['knowledge-graph', moduleId] });
+      queryClient.invalidateQueries({ queryKey: ['study-coach', resolvedModuleId] });
+      queryClient.invalidateQueries({ queryKey: ['study-coach-plan', resolvedModuleId, resolvedConceptId] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-graph', resolvedModuleId] });
     },
   });
 
@@ -114,7 +105,7 @@ export default function StudyCoachPage() {
 
         <div className="flex flex-col sm:flex-row gap-3">
           <select
-            value={moduleId}
+            value={resolvedModuleId}
             onChange={(event) => {
               setModuleId(event.target.value);
               setSelectedConceptId('');
@@ -130,7 +121,7 @@ export default function StudyCoachPage() {
           </select>
 
           <select
-            value={selectedConceptId}
+            value={resolvedConceptId}
             onChange={(event) => setSelectedConceptId(event.target.value)}
             className="px-3 py-2.5"
             style={{ ...glass, color: 'var(--text)', minWidth: 260 }}

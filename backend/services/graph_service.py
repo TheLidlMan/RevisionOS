@@ -301,13 +301,11 @@ def sync_module_graph(db: Session, module_id: str, user_id: Optional[str] = None
                     WITH source, target, edge
                     WITH source, target, edge WHERE edge.type = 'related'
                     MERGE (source)-[:RELATED_TO]->(target)
-                    MERGE (target)-[:RELATED_TO]->(source)
                     RETURN 1 AS _
                     UNION
                     WITH source, target, edge
                     WITH source, target, edge WHERE edge.type = 'shared_document'
                     MERGE (source)-[:SHARED_DOCUMENT]->(target)
-                    MERGE (target)-[:SHARED_DOCUMENT]->(source)
                     RETURN 1 AS _
                 }
                 RETURN count(*) AS applied

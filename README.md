@@ -10,6 +10,8 @@ Revise OS transforms folders of lecture transcripts, PDFs, and slides into an in
 - **Quiz Mode** — Multiple choice questions with instant feedback and explanations
 - **Module Organisation** — Organise materials by course/subject with colour coding
 - **Mastery Tracking** — Track your progress per module with mastery percentages
+- **Neo4j Knowledge Graph** — Sync uploaded documents and extracted concepts into a graph database for richer topic relationships
+- **Study Coach** — Build graph-aware topic checklists, answer AI-marked questions, and persist per-topic progress in the UI
 - **Settings** — Configurable AI parameters, daily card limits, and study preferences
 
 ## Tech Stack
@@ -19,7 +21,7 @@ Revise OS transforms folders of lecture transcripts, PDFs, and slides into an in
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS v4 |
 | Backend | FastAPI (Python 3.11+) |
-| Database | SQLite via SQLAlchemy |
+| Database | SQLite/Postgres via SQLAlchemy + optional Neo4j graph database |
 | AI/LLM | Groq API (`openai/gpt-oss-120b` primary, routed by task) |
 | Spaced Repetition | py-fsrs v4 |
 
@@ -46,7 +48,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The app will be available at **http://localhost:3000**.
+The app will be available at **http://localhost:3000** and Neo4j Browser at **http://localhost:7474**.
 
 ### Option 2: Manual Setup
 
@@ -87,10 +89,11 @@ The frontend will be at **http://localhost:5173** and the API at **http://localh
 
 1. **Add your Groq API key** in Settings (`/settings`)
 2. **Create a module** from the Dashboard (e.g., "Corporate Finance")
-3. **Upload documents** — PDFs or text files via the Upload Center
+3. **Upload documents** — PDFs or text files via the Upload Center; the backend now syncs extracted concepts into Neo4j when configured
 4. **Generate flashcards** — Click "Generate Flashcards" on the module page
-5. **Start reviewing** — Click "Start Review" to begin FSRS-scheduled flashcard sessions
-6. **Take quizzes** — Test yourself with AI-generated multiple choice questions
+5. **Open Study Coach** — Pick a topic, generate a graph-aware checklist, answer coach questions, and save topic progress
+6. **Start reviewing** — Click "Start Review" to begin FSRS-scheduled flashcard sessions
+7. **Take quizzes** — Test yourself with AI-generated multiple choice questions
 
 ## API Documentation
 
@@ -141,6 +144,10 @@ ReviseOS/
 |----------|---------|-------------|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
+| `NEO4J_URI` | *(optional)* | Neo4j Bolt connection string, e.g. `bolt://localhost:7687` |
+| `NEO4J_USERNAME` | `neo4j` | Neo4j username |
+| `NEO4J_PASSWORD` | *(optional)* | Neo4j password |
+| `NEO4J_DATABASE` | `neo4j` | Neo4j database name |
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,https://revisionos-frontend.pages.dev,https://reviseos.co.uk,https://login.reviseos.co.uk,https://app.reviseos.co.uk,https://api.reviseos.co.uk` | Comma-separated allowed frontend origins |
 | `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)` | Optional regex for Cloudflare Pages previews and ReviseOS subdomains |
 | `LLM_MODEL` | `openai/gpt-oss-120b` | Primary high-quality LLM model |
