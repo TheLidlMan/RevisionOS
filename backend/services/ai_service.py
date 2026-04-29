@@ -1392,6 +1392,10 @@ def _fallback_study_coach_plan(
     }
 
 
+def _tokenize_overlap_text(text: str) -> set[str]:
+    return {token.lower() for token in text.split() if len(token) > 4}
+
+
 async def generate_study_coach_plan(
     topic: str,
     module_name: str,
@@ -1449,8 +1453,8 @@ async def evaluate_study_coach_answer(
     user_answer: str,
 ) -> dict[str, Any]:
     if not settings.GROQ_API_KEY:
-        outline_tokens = {token.lower() for token in answer_outline.split() if len(token) > 4}
-        answer_tokens = {token.lower() for token in user_answer.split() if len(token) > 4}
+        outline_tokens = _tokenize_overlap_text(answer_outline)
+        answer_tokens = _tokenize_overlap_text(user_answer)
         overlap = len(outline_tokens & answer_tokens)
         possible = max(1, len(outline_tokens))
         score = int(round(min(1.0, overlap / possible) * 100))

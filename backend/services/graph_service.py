@@ -11,12 +11,16 @@ from models.module import Module
 from models.review_log import ReviewLog
 from models.topic_progress import TopicProgress
 
-logger = logging.getLogger(__name__)
-
+_neo4j_import_error: Exception | None = None
 try:
     from neo4j import GraphDatabase
-except Exception:  # pragma: no cover - optional dependency import safeguard
+except Exception as exc:  # pragma: no cover - optional dependency import safeguard
     GraphDatabase = None
+    _neo4j_import_error = exc
+
+logger = logging.getLogger(__name__)
+if _neo4j_import_error is not None:
+    logger.warning("Neo4j driver import failed; graph sync will fall back to SQL only: %s", _neo4j_import_error)
 
 
 def neo4j_enabled() -> bool:
