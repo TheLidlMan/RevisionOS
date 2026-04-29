@@ -22,6 +22,7 @@ from services.content_indexer import index_document, summarize_document
 from services.file_processor import extract_image_text, extract_text, transcribe_audio
 from services.quota_service import ai_quota_scope
 from services.rag_service import build_rag_context
+from services.graph_service import sync_module_graph
 
 logger = logging.getLogger(__name__)
 
@@ -1089,6 +1090,7 @@ async def process_document_pipeline(
             _set_document_state(doc, status="done", stage="ready", completed=PIPELINE_TOTAL_STEPS, total=PIPELINE_TOTAL_STEPS)
             sync_module_pipeline_state(db, module.id)
             db.commit()
+            sync_module_graph(db, module.id, module.user_id)
             await _emit_pipeline_event(event_handler, {"event": "status", "stage": "building_study_plan", "completed": 5, "total": PIPELINE_TOTAL_STEPS})
             await _emit_pipeline_event(
                 event_handler,
@@ -1137,4 +1139,6 @@ async def process_document_pipeline(
 
 def rebuild_module_outputs(db: Session, module: Module) -> Optional[dict]:
     refresh_module_relationships(module.id, db)
-    return _build_study_plan(module, db)
+    study_plan = _build_study_plan(module, db)
+    sync_module_graph(db, module.id, module.user_id)
+    return study_plan

@@ -118,6 +118,17 @@ def _ensure_runtime_schema():
         "concepts": ["study_weight"],
         "flashcards": ["generation_source", "updated_at"],
         "users": ["auth_provider", "google_subject", "avatar_url", "email_verified_at", "last_login_at"],
+        "topic_progress": [
+            "status",
+            "progress_pct",
+            "last_score_pct",
+            "confidence_pct",
+            "question_count",
+            "correct_count",
+            "notes",
+            "last_activity_at",
+            "updated_at",
+        ],
     }
 
     with engine.begin() as conn:
@@ -126,7 +137,7 @@ def _ensure_runtime_schema():
             _add_missing_columns(conn, inspector, table_name, columns)
 
         existing_tables = set(inspector.get_table_names())
-        for table_name in ["module_jobs", "auth_sessions", "ai_usage_events", "ai_request_locks", "user_stats", "achievements"]:
+        for table_name in ["module_jobs", "auth_sessions", "ai_usage_events", "ai_request_locks", "user_stats", "achievements", "topic_progress"]:
             if table_name in existing_tables:
                 continue
             Base.metadata.tables[table_name].create(bind=conn)
@@ -160,3 +171,10 @@ def _ensure_runtime_schema():
         if "flashcards" in existing_tables:
             conn.execute(text("UPDATE flashcards SET generation_source = 'MANUAL' WHERE generation_source IS NULL"))
             conn.execute(text("UPDATE flashcards SET updated_at = COALESCE(updated_at, created_at)"))
+
+        if "topic_progress" in existing_tables:
+            conn.execute(text("UPDATE topic_progress SET status = COALESCE(status, 'not_started')"))
+            conn.execute(text("UPDATE topic_progress SET progress_pct = COALESCE(progress_pct, 0.0)"))
+            conn.execute(text("UPDATE topic_progress SET question_count = COALESCE(question_count, 0)"))
+            conn.execute(text("UPDATE topic_progress SET correct_count = COALESCE(correct_count, 0)"))
+            conn.execute(text("UPDATE topic_progress SET updated_at = COALESCE(updated_at, created_at)"))

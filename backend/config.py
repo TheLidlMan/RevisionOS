@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     DESIRED_RETENTION: float = 0.9
     WHISPER_MODEL: str = "whisper-large-v3-turbo"
     WHISPER_HQ_MODEL: str = "whisper-large-v3"
+    NEO4J_URI: str = ""
+    NEO4J_USERNAME: str = "neo4j"
+    NEO4J_PASSWORD: str = ""
+    NEO4J_DATABASE: str = "neo4j"
     REQUEST_TIMING_LOG_ENABLED: bool = True
     REQUEST_TIMING_WARN_MS: int = 1000
     AUTH_SESSION_WARN_MS: int = 250

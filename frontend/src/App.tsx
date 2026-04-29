@@ -16,6 +16,7 @@ import CurriculumPage from './pages/CurriculumPage';
 import LoginPage from './pages/LoginPage';
 import ForgettingCurve from './pages/ForgettingCurve';
 import AchievementsPage from './pages/AchievementsPage';
+import StudyCoachPage from './pages/StudyCoachPage';
 import { useAuthStore } from './store/auth';
 
 export default function App() {
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
+            <Route path="/study-coach" element={<StudyCoachPage />} />
             <Route path="/curriculum" element={<CurriculumPage />} />
             <Route path="/forgetting-curve" element={<ForgettingCurve />} />
             <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />

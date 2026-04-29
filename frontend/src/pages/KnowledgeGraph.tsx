@@ -216,6 +216,11 @@ export default function KnowledgeGraph() {
         </select>
         {moduleId && (
           <div className="hidden md:flex md:flex-wrap md:items-center md:gap-3">
+            {graph && (
+              <div className="px-3 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                {graph.graph_backend || 'sql'} · {graph.document_count || 0} docs · {graph.nodes.length} topics
+              </div>
+            )}
             <button
               onClick={() => gapMutation.mutate(moduleId)}
               disabled={gapMutation.isPending}
@@ -450,11 +455,13 @@ export default function KnowledgeGraph() {
               </p>
               <div className="flex gap-4 mt-1" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                 <span>Mastery: {Math.round((selectedNode || hoveredNode)!.mastery)}%</span>
+                <span>Progress: {Math.round((selectedNode || hoveredNode)!.progress_pct ?? (selectedNode || hoveredNode)!.mastery)}%</span>
                 <span>Importance: {(selectedNode || hoveredNode)!.importance}</span>
                 {(selectedNode || hoveredNode)!.item_count !== undefined && (
                   <span>Items: {(selectedNode || hoveredNode)!.item_count}</span>
                 )}
                 {(selectedNode || hoveredNode)!.parent_id && <span>Has parent</span>}
+                {(selectedNode || hoveredNode)!.progress_status && <span>Status: {(selectedNode || hoveredNode)!.progress_status?.replace('_', ' ')}</span>}
               </div>
             </div>
           )}

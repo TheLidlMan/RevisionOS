@@ -18,3 +18,4 @@ python-jose[cryptography]==3.4.0
 bcrypt==4.2.0
 psycopg2-binary==2.9.9
 sentence-transformers==4.1.0
+neo4j==6.1.0
