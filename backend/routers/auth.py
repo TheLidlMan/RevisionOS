@@ -27,7 +27,36 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 # In-memory nonce/state store (use Redis in production for multi-instance)
-_oauth_states: dict[str, dict] = {}
+_oauth_states: dict[str, dict[str, object]] = {}
+OAUTH_STATE_TTL = timedelta(minutes=10)
+
+
+def _prune_oauth_states(now: Optional[datetime] = None) -> None:
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time - OAUTH_STATE_TTL
+    expired_states = []
+
+    for state, payload in _oauth_states.items():
+        created_at = payload.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except ValueError:
+                expired_states.append(state)
+                continue
+
+        if not isinstance(created_at, datetime):
+            expired_states.append(state)
+            continue
+
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
+        if created_at < cutoff:
+            expired_states.append(state)
+
+    for state in expired_states:
+        _oauth_states.pop(state, None)
 
 
 def _set_session_cookie(response: Response, raw_token: str) -> None:
@@ -145,6 +174,9 @@ def google_start(return_to: Optional[str] = None, redirect: bool = False):
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Google login is not configured")
 
+    now = datetime.now(timezone.utc)
+    _prune_oauth_states(now)
+
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(16)
     code_verifier = secrets.token_urlsafe(64)
@@ -161,7 +193,7 @@ def google_start(return_to: Optional[str] = None, redirect: bool = False):
         "nonce": nonce,
         "code_verifier": code_verifier,
         "return_to": validated_return,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now,
     }
 
     params = {
@@ -206,6 +238,7 @@ async def google_callback(
             headers={"Location": f"{login_url}?error=missing_params"},
         )
 
+    _prune_oauth_states()
     state_data = _oauth_states.pop(state, None)
     if not state_data:
         return Response(
