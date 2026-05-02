@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timezone
+import calendar
 
 from fastapi import HTTPException
 from config import settings
@@ -32,17 +33,23 @@ def get_current_ai_user_id() -> str | None:
 _NEW_CARD_KINDS = frozenset({"flashcards", "synthesis_cards", "concept_flashcards"})
 
 
-def check_ai_usage_limit(user_id: str | None) -> None:
-    if not user_id:
-        return
+def check_ai_usage_limit(user_id: str | None) -> bool:
+    """Check whether the user is within their monthly AI request quota.
 
-    daily_limit = settings.DAILY_NEW_CARDS_LIMIT
-    if daily_limit <= 0:
-        return
+    Returns True when the request is allowed, False when the monthly limit is exceeded.
+    Returns True unconditionally when user_id is absent or the limit is disabled (≤ 0).
+    """
+    if not user_id:
+        return True
+
+    monthly_limit = settings.AI_MONTHLY_REQUEST_LIMIT
+    if monthly_limit <= 0:
+        return True
 
     now = datetime.now(timezone.utc)
-    window_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc).replace(tzinfo=None)
-    window_end = (datetime.combine(now.date(), time.min, tzinfo=timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+    month_start = datetime(now.year, now.month, 1, tzinfo=None)
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    month_end = datetime(now.year, now.month, last_day, 23, 59, 59, 999999, tzinfo=None)
 
     db = SessionLocal()
     try:
@@ -50,19 +57,15 @@ def check_ai_usage_limit(user_id: str | None) -> None:
             db.query(AiUsageEvent)
             .filter(
                 AiUsageEvent.user_id == user_id,
-                AiUsageEvent.kind.in_(_NEW_CARD_KINDS),
-                AiUsageEvent.created_at >= window_start,
-                AiUsageEvent.created_at < window_end,
+                AiUsageEvent.created_at >= month_start,
+                AiUsageEvent.created_at <= month_end,
             )
             .count()
         )
     finally:
         db.close()
 
-    if usage_count >= daily_limit:
-        raise AiQuotaExceededError(
-            f"Daily new-card generation limit reached ({daily_limit} requests per day)."
-        )
+    return usage_count < monthly_limit
 
 
 def record_ai_usage(user_id: str | None, kind: str) -> None:
@@ -80,48 +83,46 @@ def record_ai_usage(user_id: str | None, kind: str) -> None:
         db.close()
 
 
-def check_and_record_ai_usage(user_id: str | None, kind: str) -> None:
-    """Atomically check quota and record usage in a single transaction."""
-    if not user_id:
-        return
+def check_and_record_ai_usage(user_id: str | None, kind: str) -> bool:
+    """Check monthly quota and, if within limit, record this usage event.
 
-    daily_limit = settings.DAILY_NEW_CARDS_LIMIT
-    if daily_limit <= 0:
-        # No limit enforced
+    Designed to be called *after* successful AI generation so that usage is only
+    incremented when a response was actually produced.  Returns True when the
+    event was recorded (i.e. the request was within quota), False when the
+    monthly limit has already been reached and the event was *not* recorded.
+    """
+    if not user_id:
+        return True
+
+    monthly_limit = settings.AI_MONTHLY_REQUEST_LIMIT
+    if monthly_limit <= 0:
         record_ai_usage(user_id, kind)
-        return
+        return True
 
     now = datetime.now(timezone.utc)
-    window_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc).replace(tzinfo=None)
-    window_end = (datetime.combine(now.date(), time.min, tzinfo=timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+    month_start = datetime(now.year, now.month, 1, tzinfo=None)
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    month_end = datetime(now.year, now.month, last_day, 23, 59, 59, 999999, tzinfo=None)
 
     db = SessionLocal()
     try:
-        # Lock the rows we're counting to prevent concurrent race conditions
-        # Use SELECT FOR UPDATE on the user's usage records for today
         usage_count = (
             db.query(AiUsageEvent)
             .filter(
                 AiUsageEvent.user_id == user_id,
-                AiUsageEvent.kind.in_(_NEW_CARD_KINDS),
-                AiUsageEvent.created_at >= window_start,
-                AiUsageEvent.created_at < window_end,
+                AiUsageEvent.created_at >= month_start,
+                AiUsageEvent.created_at <= month_end,
             )
             .with_for_update()
             .count()
         )
 
-        if usage_count >= daily_limit:
-            raise AiQuotaExceededError(
-                f"Daily new-card generation limit reached ({daily_limit} requests per day)."
-            )
+        if usage_count >= monthly_limit:
+            return False
 
-        # Record the usage within the same transaction
         db.add(AiUsageEvent(user_id=user_id, kind=kind, created_at=datetime.now(timezone.utc).replace(tzinfo=None)))
         db.commit()
-    except AiQuotaExceededError:
-        db.rollback()
-        raise
+        return True
     except Exception:
         db.rollback()
         raise

@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     MAX_PROMPT_CHARS: int = 120000
     UPLOAD_DIR: str = "./uploads"
     DAILY_NEW_CARDS_LIMIT: int = 50
+    AI_MONTHLY_REQUEST_LIMIT: int = 500
     CARDS_PER_DOCUMENT: int = 200
     QUESTIONS_PER_DOCUMENT: int = 10
     MAX_CARDS_PER_REQUEST: int = 200

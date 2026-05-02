@@ -9,6 +9,7 @@ import httpx
 from config import settings
 from services.ai_request_lock_service import serialized_ai_request
 from services import quota_service
+from services.quota_service import AiQuotaExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +415,10 @@ async def _request_groq_completion(
                             stream=False,
                         )
                         try:
-                            quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
+                            if not quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id()):
+                                raise AiQuotaExceededError(
+                                    f"Monthly AI request limit reached ({settings.AI_MONTHLY_REQUEST_LIMIT} requests per month)."
+                                )
                             response = await client.post(GROQ_API_URL, headers=headers, json=payload)
                             response.raise_for_status()
                             quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
@@ -503,7 +507,10 @@ async def stream_groq_completion(
     async with serialized_ai_request():
         async with httpx.AsyncClient(timeout=None) as client:
             try:
-                quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id())
+                if not quota_service.check_ai_usage_limit(quota_service.get_current_ai_user_id()):
+                    raise AiQuotaExceededError(
+                        f"Monthly AI request limit reached ({settings.AI_MONTHLY_REQUEST_LIMIT} requests per month)."
+                    )
                 async with client.stream("POST", GROQ_API_URL, headers=headers, json=payload) as response:
                     response.raise_for_status()
                     quota_service.record_ai_usage(quota_service.get_current_ai_user_id(), kind)
