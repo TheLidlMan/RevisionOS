@@ -109,7 +109,6 @@ async def topic_generate(
         raise HTTPException(status_code=404, detail="Module not found")
 
     user_id = user.id
-    db.close()
     with ai_quota_scope(user_id):
         cards_data = await ai_service.generate_cards_from_topic(body.topic, body.num_cards)
 

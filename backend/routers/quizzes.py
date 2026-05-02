@@ -578,7 +578,6 @@ async def submit_answer(
             is_correct = True
         elif settings.GROQ_API_KEY:
             try:
-                db.close()
                 with ai_quota_scope(session_user_id):
                     ai_feedback = await ai_service.grade_answer(
                         question_text,
