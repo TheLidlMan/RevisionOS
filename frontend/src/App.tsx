@@ -1,22 +1,39 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import MobileBottomNav from './components/MobileBottomNav';
 import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
+// Eagerly loaded — always needed immediately after login
 import Dashboard from './pages/Dashboard';
 import ModuleView from './pages/ModuleView';
 import ModuleFlashcards from './pages/ModuleFlashcards';
 import FlashcardReview from './pages/FlashcardReview';
-import QuizMode from './pages/QuizMode';
-import SettingsPage from './pages/Settings';
-import KnowledgeGraph from './pages/KnowledgeGraph';
-import CurriculumPage from './pages/CurriculumPage';
 import LoginPage from './pages/LoginPage';
-import ForgettingCurve from './pages/ForgettingCurve';
-import AchievementsPage from './pages/AchievementsPage';
+import SettingsPage from './pages/Settings';
+// Lazily loaded — not needed on the critical path
+const QuizMode = lazy(() => import('./pages/QuizMode'));
+const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
+const CurriculumPage = lazy(() => import('./pages/CurriculumPage'));
+const ForgettingCurve = lazy(() => import('./pages/ForgettingCurve'));
+const AchievementsPage = lazy(() => import('./pages/AchievementsPage'));
 import { useAuthStore } from './store/auth';
+import Skeleton from './components/Skeleton';
+
+function PageFallback() {
+  return (
+    <div className="p-6 flex flex-col gap-4 max-w-4xl mx-auto w-full">
+      <Skeleton style={{ height: 40, width: '40%' }} />
+      <Skeleton style={{ height: 24, width: '60%' }} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+        {[...Array(6)].map((_, i) => (
+          <Skeleton key={i} style={{ height: 140 }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -69,13 +86,13 @@ export default function App() {
             <Route path="/modules/:id" element={<ModuleView />} />
             <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
             <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
-            <Route path="/quiz" element={<QuizMode />} />
-            <Route path="/achievements" element={<AchievementsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
-            <Route path="/curriculum" element={<CurriculumPage />} />
-            <Route path="/forgetting-curve" element={<ForgettingCurve />} />
-            <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
+            <Route path="/quiz" element={<Suspense fallback={<PageFallback />}><QuizMode /></Suspense>} />
+            <Route path="/achievements" element={<Suspense fallback={<PageFallback />}><AchievementsPage /></Suspense>} />
+            <Route path="/knowledge-graph" element={<Suspense fallback={<PageFallback />}><KnowledgeGraph /></Suspense>} />
+            <Route path="/curriculum" element={<Suspense fallback={<PageFallback />}><CurriculumPage /></Suspense>} />
+            <Route path="/forgetting-curve" element={<Suspense fallback={<PageFallback />}><ForgettingCurve /></Suspense>} />
+            <Route path="/forgetting-curve/:cardId" element={<Suspense fallback={<PageFallback />}><ForgettingCurve /></Suspense>} />
           </Routes>
         </main>
         <MobileBottomNav />

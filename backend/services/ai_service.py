@@ -1015,15 +1015,41 @@ async def generate_flashcards(
     subject_mode: Optional[str] = None,
     source_name: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Generate exhaustive flashcards from text using routed Groq models."""
+    """Generate exhaustive flashcards from text using routed Groq models.
+
+    Results are cached on disk (``/tmp/ai_cache/``) keyed by a hash of the
+    document content, model, and generation parameters.  On a cache hit the
+    cached JSON is returned immediately without calling the LLM.
+    """
+    import hashlib
+    import os
+
     cleaned_text = (text or "").strip()
     if not cleaned_text:
         return []
+
+    # ------------------------------------------------------------------ cache
+    _cache_dir = "/tmp/ai_cache"
+    os.makedirs(_cache_dir, exist_ok=True)
+    _cache_key_raw = f"{cleaned_text}|{settings.LLM_MODEL}|{num_cards}|{subject}|{subject_mode}"
+    _cache_hash = hashlib.sha256(_cache_key_raw.encode(), usedforsecurity=False).hexdigest()
+    _cache_file = os.path.join(_cache_dir, f"{_cache_hash}.json")
+    if os.path.exists(_cache_file):
+        try:
+            with open(_cache_file, "r", encoding="utf-8") as _f:
+                cached_result = json.load(_f)
+            if isinstance(cached_result, list):
+                logger.debug("AI cache hit for flashcard generation (hash=%s)", _cache_hash[:8])
+                return cached_result
+        except Exception as _exc:
+            logger.debug("AI cache read error: %s", _exc)
+    # ------------------------------------------------------------------ /cache
 
     resolved_subject_mode = _normalize_subject_mode(subject_mode)
     if resolved_subject_mode == "default":
         resolved_subject_mode = await detect_subject_mode(cleaned_text)
 
+    result: list[dict[str, Any]] = []
     try:
         if (
             _estimate_tokens(cleaned_text) >= LARGE_DOCUMENT_TOKEN_THRESHOLD
@@ -1058,23 +1084,33 @@ async def generate_flashcards(
                 subject_mode=resolved_subject_mode,
                 source_name=source_name,
             )
-            return _dedupe_flashcards_exact([*deduped_cards, *synthesis_cards])
-
-        cards = await _generate_flashcards_single_pass(
-            text=cleaned_text,
-            min_cards=num_cards,
-            subject=subject,
-            subject_mode=resolved_subject_mode,
-            source_name=source_name,
-        )
-        normalized_cards = _normalize_generated_cards(cards)
-        return await deduplicate_flashcards(normalized_cards, subject)
+            result = _dedupe_flashcards_exact([*deduped_cards, *synthesis_cards])
+        else:
+            cards = await _generate_flashcards_single_pass(
+                text=cleaned_text,
+                min_cards=num_cards,
+                subject=subject,
+                subject_mode=resolved_subject_mode,
+                source_name=source_name,
+            )
+            normalized_cards = _normalize_generated_cards(cards)
+            result = await deduplicate_flashcards(normalized_cards, subject)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.error("Failed to parse flashcard response: %s", exc)
         return []
     except Exception as exc:
         logger.error("Flashcard generation failed: %s", exc)
         return []
+
+    # Write to cache
+    if result:
+        try:
+            with open(_cache_file, "w", encoding="utf-8") as _f:
+                json.dump(result, _f)
+        except Exception as _exc:
+            logger.debug("AI cache write error: %s", _exc)
+
+    return result
 
 
 async def generate_flashcards_for_concept(

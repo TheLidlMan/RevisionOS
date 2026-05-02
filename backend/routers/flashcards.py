@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+import threading
 import uuid
 from datetime import datetime
 from typing import Literal, Optional
@@ -8,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_
 
+from cache import cache_get, cache_set, cache_invalidate_prefix
 from config import settings
 from database import get_db
 from models.flashcard import Flashcard
@@ -17,11 +21,16 @@ from models.document import Document
 from services.fsrs_service import schedule_review
 from services import ai_service
 from services.quota_service import ai_quota_scope
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from models.user import User
 
 router = APIRouter(tags=["flashcards"])
 logger = logging.getLogger(__name__)
+
+# In-process deduplication state for generate-cards requests {module_id: started_at}
+_pending_generation: dict[str, float] = {}
+_pending_lock = threading.Lock()
+_GENERATION_DEBOUNCE_SECS = 30
 
 
 # ---------- Pydantic schemas ----------
@@ -73,16 +82,25 @@ class FlashcardResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class FlashcardListResponse(BaseModel):
-    items: list[FlashcardResponse]
-    total: int
-    limit: int
-    offset: int
-    has_more: bool
-
-
 class ReviewRequest(BaseModel):
     rating: str  # AGAIN, HARD, GOOD, EASY
+
+
+class BatchReviewItem(BaseModel):
+    id: str
+    rating: str
+    duration_ms: Optional[int] = None
+
+
+class BatchReviewResponse(BaseModel):
+    reviewed: int
+    results: list[ReviewResponse]
+
+
+class PaginatedFlashcardsResponse(BaseModel):
+    items: list[FlashcardResponse]
+    total: int
+    has_more: bool
 
 
 class ReviewResponse(BaseModel):
@@ -114,23 +132,25 @@ class GenerateCardsResponse(BaseModel):
 
 # ---------- Helpers ----------
 
-def _card_to_response(card: Flashcard) -> FlashcardResponse:
+def _card_to_response(card: Flashcard, fields: Optional[set] = None) -> FlashcardResponse:
     tags = []
     if card.tags:
         try:
             tags = json.loads(card.tags)
         except (json.JSONDecodeError, TypeError):
             tags = []
-    return FlashcardResponse(
+
+    # Build full response object; field selection trims content-heavy fields for list endpoints
+    resp = FlashcardResponse(
         id=card.id,
         module_id=card.module_id,
         concept_id=card.concept_id,
-        front=card.front,
-        back=card.back,
+        front=card.front if (fields is None or "front" in fields) else "",
+        back=card.back if (fields is None or "back" in fields) else "",
         card_type=card.card_type,
-        cloze_text=card.cloze_text,
+        cloze_text=card.cloze_text if (fields is None or "cloze_text" in fields) else None,
         source_document_id=card.source_document_id,
-        source_excerpt=card.source_excerpt,
+        source_excerpt=card.source_excerpt if (fields is None or "source_excerpt" in fields) else None,
         tags=tags,
         due=card.due,
         stability=card.stability,
@@ -144,6 +164,24 @@ def _card_to_response(card: Flashcard) -> FlashcardResponse:
         last_review=card.last_review,
         created_at=card.created_at,
         updated_at=card.updated_at,
+    )
+    return resp
+
+
+def _user_owns_card_condition(user_id: str, owned_module_ids):
+    """Return SQLAlchemy condition for flashcard ownership, handling legacy NULL user_id rows."""
+    return or_(
+        Flashcard.user_id == user_id,
+        and_(Flashcard.user_id.is_(None), Flashcard.module_id.in_(owned_module_ids)),
+    )
+
+
+def _owned_card_filter(db: Session, card_id: str, user_id: str):
+    """Return a query that finds a flashcard by ID owned by user_id, handling legacy NULL user_id rows."""
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == user_id)
+    return db.query(Flashcard).filter(
+        Flashcard.id == card_id,
+        _user_owns_card_condition(user_id, owned_module_ids),
     )
 
 
@@ -196,7 +234,7 @@ def _allocate_card_targets(docs: list[Document], requested_total: Optional[int])
 
 # ---------- Endpoints ----------
 
-@router.get("/api/flashcards", response_model=FlashcardListResponse)
+@router.get("/api/flashcards", response_model=PaginatedFlashcardsResponse)
 def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
@@ -204,11 +242,15 @@ def list_flashcards(
     state: Optional[str] = None,
     search: Optional[str] = None,
     sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"] = "updated_desc",
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
-    query = db.query(Flashcard)
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == current_user.id)
+    query = db.query(Flashcard).filter(
+        _user_owns_card_condition(current_user.id, owned_module_ids)
+    )
     if module_id:
         query = query.filter(Flashcard.module_id == module_id)
     if generation_source:
@@ -234,24 +276,23 @@ def list_flashcards(
     else:
         query = query.order_by(Flashcard.updated_at.desc(), Flashcard.id.desc())
 
-    cards = query.offset(offset).limit(limit).all()
+    cards = query.offset(skip).limit(limit).all()
     items = [_card_to_response(card) for card in cards]
-    return FlashcardListResponse(
-        items=items,
-        total=total,
-        limit=limit,
-        offset=offset,
-        has_more=offset + len(items) < total,
-    )
+    return PaginatedFlashcardsResponse(items=items, total=total, has_more=(skip + len(items)) < total)
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
-def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+def create_flashcard(
+    body: FlashcardCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == current_user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
     card = Flashcard(
+        user_id=current_user.id,
         module_id=body.module_id,
         front=body.front,
         back=body.back,
@@ -271,8 +312,13 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/api/flashcards/{card_id}", response_model=FlashcardResponse)
-def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(get_db)):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
+def update_flashcard(
+    card_id: str,
+    body: FlashcardUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    card = _owned_card_filter(db, card_id, current_user.id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     if body.front is not None:
@@ -291,8 +337,12 @@ def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(
 
 
 @router.delete("/api/flashcards/{card_id}", status_code=204)
-def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
+def delete_flashcard(
+    card_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    card = _owned_card_filter(db, card_id, current_user.id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     db.delete(card)
@@ -305,9 +355,9 @@ def review_flashcard(
     card_id: str,
     body: ReviewRequest,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
+    card = _owned_card_filter(db, card_id, user.id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
 
@@ -379,6 +429,92 @@ def review_flashcard(
     )
 
 
+@router.post("/api/flashcards/review/batch", response_model=BatchReviewResponse)
+def review_flashcards_batch(
+    items: list[BatchReviewItem],
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    """
+    Submit multiple flashcard reviews in a single database transaction.
+    Accepts a list of {id, rating, duration_ms} objects.
+    """
+    if not items:
+        return BatchReviewResponse(reviewed=0, results=[])
+
+    card_ids = [item.id for item in items]
+    cards = {c.id: c for c in db.query(Flashcard).filter(Flashcard.id.in_(card_ids)).all()}
+
+    results: list[ReviewResponse] = []
+    errors: list[str] = []
+
+    for item in items:
+        card = cards.get(item.id)
+        if not card:
+            errors.append(f"Card {item.id} not found")
+            continue
+
+        card_data = {
+            "due": card.due,
+            "stability": card.stability,
+            "difficulty": card.difficulty,
+            "elapsed_days": card.elapsed_days,
+            "scheduled_days": card.scheduled_days,
+            "reps": card.reps,
+            "lapses": card.lapses,
+            "state": card.state,
+            "last_review": card.last_review,
+        }
+        try:
+            result = schedule_review(card_data, item.rating)
+        except ValueError as exc:
+            errors.append(f"Card {item.id}: {exc}")
+            continue
+
+        card.due = result["due"]
+        card.stability = result["stability"]
+        card.difficulty = result["difficulty"]
+        card.elapsed_days = result["elapsed_days"]
+        card.scheduled_days = result["scheduled_days"]
+        card.reps = result["reps"]
+        card.lapses = result["lapses"]
+        card.state = result["state"]
+        card.last_review = result["last_review"]
+        results.append(ReviewResponse(
+            id=card.id,
+            due=card.due,
+            stability=card.stability,
+            difficulty=card.difficulty,
+            elapsed_days=card.elapsed_days,
+            scheduled_days=card.scheduled_days,
+            reps=card.reps,
+            lapses=card.lapses,
+            state=card.state,
+            last_review=card.last_review,
+        ))
+
+    # Single commit for all cards
+    db.commit()
+
+    if errors:
+        logger.warning("Batch review had %d error(s): %s", len(errors), "; ".join(errors))
+
+    # Award XP once for the whole batch
+    if user and results:
+        try:
+            from routers.gamification import process_card_review
+            for _r in results:
+                process_card_review(db, user.id)
+        except Exception as exc:
+            logger.warning("Failed to award batch gamification XP: %s", exc)
+
+    # Invalidate cache for this user's due flashcards
+    if user:
+        cache_invalidate_prefix(f"cache:flashcards:{user.id}:")
+
+    return BatchReviewResponse(reviewed=len(results), results=results)
+
+
 @router.post("/api/modules/{module_id}/generate-cards", response_model=GenerateCardsResponse)
 async def generate_cards_for_module(
     module_id: str,
@@ -389,6 +525,26 @@ async def generate_cards_for_module(
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
+    # Debounce: reject duplicate generation requests within GENERATION_DEBOUNCE_SECS
+    with _pending_lock:
+        last = _pending_generation.get(module_id)
+        now_ts = time.monotonic()
+        if last is not None and (now_ts - last) < _GENERATION_DEBOUNCE_SECS:
+            remaining = int(_GENERATION_DEBOUNCE_SECS - (now_ts - last))
+            raise HTTPException(
+                status_code=429,
+                detail=f"Generation already in progress for this module. Try again in {remaining}s.",
+            )
+        _pending_generation[module_id] = now_ts
+
+    try:
+        return await _do_generate_cards(module_id, body, db, module)
+    finally:
+        with _pending_lock:
+            _pending_generation.pop(module_id, None)
+
+
+async def _do_generate_cards(module_id: str, body: Optional[GenerateCardsRequest], db: Session, module: Module) -> GenerateCardsResponse:
     module_name = module.name
     module_user_id = module.user_id
 
