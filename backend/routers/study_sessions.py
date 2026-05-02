@@ -3,9 +3,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
+from cache import cache_get, cache_set
 from database import get_db
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
@@ -75,7 +76,7 @@ def list_sessions(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    query = db.query(StudySession)
+    query = db.query(StudySession).options(joinedload(StudySession.module))
     if user:
         query = query.filter(StudySession.user_id == user.id)
     if module_id:
@@ -84,15 +85,10 @@ def list_sessions(
 
     results = []
     for s in sessions:
-        module_name = None
-        if s.module_id:
-            mod = db.query(Module).filter(Module.id == s.module_id).first()
-            if mod:
-                module_name = mod.name
         results.append(SessionListItem(
             id=s.id,
             module_id=s.module_id,
-            module_name=module_name,
+            module_name=s.module.name if s.module else None,
             session_type=s.session_type,
             started_at=s.started_at,
             ended_at=s.ended_at,
@@ -107,6 +103,11 @@ def list_sessions(
 
 @router.get("/api/analytics/overview", response_model=OverviewResponse)
 def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    cache_key = f"cache:analytics:{user.id if user else 'anonymous'}:overview"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     mod_query = db.query(Module)
     card_query = db.query(Flashcard)
     session_query_base = db.query(StudySession)
@@ -123,46 +124,98 @@ def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] =
         due_query = due_query.filter(Flashcard.user_id == user.id)
     due_today = due_query.count()
 
-    # Calculate streak: consecutive days with at least one session
+    # Calculate streak from a single distinct-date query instead of 365 point lookups
     streak = 0
-    today = datetime.utcnow().date()
-    for i in range(365):
-        check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-        sess_q = (
+    today = now.date()
+    streak_window_start = datetime.combine(today - timedelta(days=364), datetime.min.time())
+    streak_dates = {
+        str(value)
+        for value, in (
             session_query_base
-            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
+            .filter(StudySession.started_at >= streak_window_start)
+            .with_entities(func.date(StudySession.started_at))
+            .distinct()
+            .all()
         )
-        has_session = sess_q.first()
-        if has_session:
+        if value is not None
+    }
+    for i in range(365):
+        if (today - timedelta(days=i)).isoformat() in streak_dates:
             streak += 1
         else:
             if i == 0:
                 continue  # Today might not have a session yet
             break
 
-    # Overall mastery
-    all_cards = card_query.all()
-    if all_cards:
-        mastered = sum(1 for c in all_cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
-        overall_mastery = round((mastered / len(all_cards)) * 100, 1)
+    # Overall mastery via SQL instead of loading every card into Python
+    if total_cards:
+        mastered = (
+            card_query
+            .filter(Flashcard.state == "REVIEW", Flashcard.lapses == 0, Flashcard.reps >= 2)
+            .count()
+        )
+        overall_mastery = round((mastered / total_cards) * 100, 1)
     else:
         overall_mastery = 0.0
 
-    return OverviewResponse(
+    response = OverviewResponse(
         total_modules=total_modules,
         total_cards=total_cards,
         due_today=due_today,
         streak=streak,
         overall_mastery=overall_mastery,
     )
+    cache_set(cache_key, response.model_dump(mode="json"), ttl=60)
+    return response
 
 
 @router.get("/api/analytics/streaks", response_model=StreakResponse)
 def get_streaks(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Current streak, longest streak, and daily activity for last 30 days."""
     today = datetime.utcnow().date()
+    window_start = datetime.combine(today - timedelta(days=29), datetime.min.time())
+    longest_window_start = datetime.combine(today - timedelta(days=364), datetime.min.time())
+
+    sessions_by_date_query = (
+        db.query(
+            func.date(StudySession.started_at).label("day"),
+            func.count(StudySession.id).label("sessions"),
+        )
+        .filter(StudySession.started_at >= window_start)
+    )
+    longest_dates_query = (
+        db.query(func.date(StudySession.started_at))
+        .filter(StudySession.started_at >= longest_window_start)
+        .distinct()
+    )
+    reviewed_by_date_query = (
+        db.query(
+            func.date(StudySession.started_at).label("day"),
+            func.count(ReviewLog.id).label("items_reviewed"),
+        )
+        .join(ReviewLog, ReviewLog.session_id == StudySession.id)
+        .filter(StudySession.started_at >= window_start)
+    )
+    if user:
+        sessions_by_date_query = sessions_by_date_query.filter(StudySession.user_id == user.id)
+        longest_dates_query = longest_dates_query.filter(StudySession.user_id == user.id)
+        reviewed_by_date_query = reviewed_by_date_query.filter(StudySession.user_id == user.id)
+
+    sessions_by_date = {
+        str(day): int(count or 0)
+        for day, count in sessions_by_date_query.group_by(func.date(StudySession.started_at)).all()
+        if day is not None
+    }
+    reviewed_by_date = {
+        str(day): int(count or 0)
+        for day, count in reviewed_by_date_query.group_by(func.date(StudySession.started_at)).all()
+        if day is not None
+    }
+    active_date_set = {
+        str(day)
+        for day, in longest_dates_query.all()
+        if day is not None
+    }
 
     # Build daily activity for last 30 days
     daily_activity: list[DailyActivity] = []
@@ -170,33 +223,12 @@ def get_streaks(db: Session = Depends(get_db), user: OptionalType[User] = Depend
 
     for i in range(30):
         check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-
-        sess_q = db.query(func.count(StudySession.id)).filter(
-            StudySession.started_at >= day_start, StudySession.started_at <= day_end
-        )
-        if user:
-            sess_q = sess_q.filter(StudySession.user_id == user.id)
-        session_count = sess_q.scalar() or 0
-
-        items_reviewed = 0
-        if session_count > 0:
-            sid_q = db.query(StudySession).filter(
-                StudySession.started_at >= day_start, StudySession.started_at <= day_end
-            )
-            if user:
-                sid_q = sid_q.filter(StudySession.user_id == user.id)
-            session_ids = [s.id for s in sid_q.all()]
-            if session_ids:
-                items_reviewed = (
-                    db.query(func.count(ReviewLog.id))
-                    .filter(ReviewLog.session_id.in_(session_ids))
-                    .scalar()
-                ) or 0
+        date_key = check_date.isoformat()
+        session_count = sessions_by_date.get(date_key, 0)
+        items_reviewed = reviewed_by_date.get(date_key, 0)
 
         daily_activity.append(DailyActivity(
-            date=check_date.isoformat(),
+            date=date_key,
             sessions=session_count,
             items_reviewed=items_reviewed,
         ))
@@ -216,16 +248,7 @@ def get_streaks(db: Session = Depends(get_db), user: OptionalType[User] = Depend
     longest_streak = 0
     temp_streak = 0
     for i in range(365):
-        check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-        longest_q = db.query(StudySession).filter(
-            StudySession.started_at >= day_start, StudySession.started_at <= day_end
-        )
-        if user:
-            longest_q = longest_q.filter(StudySession.user_id == user.id)
-        has_session = longest_q.first()
-        if has_session:
+        if (today - timedelta(days=i)).isoformat() in active_date_set:
             temp_streak += 1
             longest_streak = max(longest_streak, temp_streak)
         else:

@@ -12,13 +12,13 @@ class Flashcard(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
-    concept_id = Column(String(36), ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True)
+    module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False, index=True)
+    concept_id = Column(String(36), ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True, index=True)
     front = Column(Text, nullable=False)
     back = Column(Text, nullable=False)
     card_type = Column(String(10), nullable=False, default="BASIC")  # BASIC, CLOZE
     cloze_text = Column(Text, nullable=True)
-    source_document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    source_document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
     source_excerpt = Column(Text, nullable=True)
     tags = Column(Text, nullable=True, default="[]")  # JSON string
     generation_source = Column(String(10), nullable=False, default="MANUAL")  # AUTO, MANUAL

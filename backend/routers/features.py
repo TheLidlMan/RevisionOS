@@ -862,11 +862,13 @@ async def synthesis_cards(
     if len(modules) != len(body.module_ids):
         raise HTTPException(status_code=404, detail="One or more modules not found")
 
+    concepts_by_module_id: dict[str, list[Concept]] = {}
+    for concept in db.query(Concept).filter(Concept.module_id.in_(body.module_ids)).all():
+        concepts_by_module_id.setdefault(concept.module_id, []).append(concept)
+
     module_concepts: dict[str, list[str]] = {}
     for mod in modules:
-        concepts = (
-            db.query(Concept).filter(Concept.module_id == mod.id).all()
-        )
+        concepts = concepts_by_module_id.get(mod.id, [])
         module_concepts[mod.name] = [
             f"{c.name}: {c.definition or ''}" for c in concepts
         ]

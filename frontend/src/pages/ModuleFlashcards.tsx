@@ -38,6 +38,9 @@ export default function ModuleFlashcards() {
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
   const deleteTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const filteredCardsRef = useRef<Flashcard[]>([]);
+  const activeSelectedCardIdRef = useRef<string | null>(null);
+  const editingRef = useRef<Flashcard | null>(null);
   const { showToast } = useToast();
   useScrollRestoration(`module-flashcards:${id}`);
 
@@ -137,9 +140,11 @@ export default function ModuleFlashcards() {
     return merged;
   }, [cardsQuery.data]);
 
+  const pendingDeleteIdSet = useMemo(() => new Set(pendingDeleteIds), [pendingDeleteIds]);
+
   const filteredCards = useMemo(
-    () => loadedCards.filter((card) => !pendingDeleteIds.includes(card.id)),
-    [loadedCards, pendingDeleteIds],
+    () => loadedCards.filter((card) => !pendingDeleteIdSet.has(card.id)),
+    [loadedCards, pendingDeleteIdSet],
   );
 
   const activeSelectedCardId = useMemo(() => {
@@ -151,6 +156,12 @@ export default function ModuleFlashcards() {
     }
     return filteredCards[0].id;
   }, [filteredCards, selectedCardId]);
+
+  useEffect(() => {
+    filteredCardsRef.current = filteredCards;
+    activeSelectedCardIdRef.current = activeSelectedCardId;
+    editingRef.current = editing;
+  }, [activeSelectedCardId, editing, filteredCards]);
 
   useEffect(() => {
     if (!editing) {
@@ -172,30 +183,31 @@ export default function ModuleFlashcards() {
         return;
       }
 
-      if (event.key === 'Escape' && editing) {
+      if (event.key === 'Escape' && editingRef.current) {
         setEditing(null);
         clearEditDraft();
         return;
       }
 
-      if (isInput || filteredCards.length === 0) {
+      const currentCards = filteredCardsRef.current;
+      if (isInput || currentCards.length === 0) {
         return;
       }
 
-      const currentIndex = filteredCards.findIndex((card) => card.id === activeSelectedCardId);
+      const currentIndex = currentCards.findIndex((card) => card.id === activeSelectedCardIdRef.current);
       if (['ArrowRight', 'ArrowDown'].includes(event.key)) {
         event.preventDefault();
-        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % filteredCards.length : 0;
-        setSelectedCardId(filteredCards[nextIndex].id);
+        const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % currentCards.length : 0;
+        setSelectedCardId(currentCards[nextIndex].id);
       }
       if (['ArrowLeft', 'ArrowUp'].includes(event.key)) {
         event.preventDefault();
-        const nextIndex = currentIndex > 0 ? currentIndex - 1 : filteredCards.length - 1;
-        setSelectedCardId(filteredCards[nextIndex].id);
+        const nextIndex = currentIndex > 0 ? currentIndex - 1 : currentCards.length - 1;
+        setSelectedCardId(currentCards[nextIndex].id);
       }
-      if (event.key === 'Enter' && activeSelectedCardId) {
+      if (event.key === 'Enter' && activeSelectedCardIdRef.current) {
         event.preventDefault();
-        const selected = filteredCards.find((card) => card.id === activeSelectedCardId);
+        const selected = currentCards.find((card) => card.id === activeSelectedCardIdRef.current);
         if (selected) {
           setEditing(selected);
         }
@@ -204,7 +216,7 @@ export default function ModuleFlashcards() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeSelectedCardId, clearEditDraft, editing, filteredCards]);
+  }, [clearEditDraft]);
 
   const queueDelete = (card: Flashcard) => {
     setPendingDeleteIds((current) => [...current, card.id]);

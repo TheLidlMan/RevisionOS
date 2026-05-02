@@ -18,7 +18,7 @@ class StudySession(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=True)
+    module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=True, index=True)
     session_type = Column(String(20), nullable=False)  # FLASHCARDS, QUIZ, MIXED, WEAKNESS_DRILL
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)

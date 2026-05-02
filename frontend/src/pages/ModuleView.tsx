@@ -57,6 +57,22 @@ type DocumentSort = 'UPDATED' | 'NEWEST' | 'OLDEST' | 'A_Z';
 const ACTIVE_DOCUMENT_STATUSES = new Set(['pending', 'processing', 'cancelling']);
 const CANCELLABLE_DOCUMENT_STATUSES = new Set(['pending', 'processing']);
 
+function getPipelineRefetchInterval(status: string | undefined, updatedAt: string | null | undefined) {
+  if (!status || !['queued', 'running', 'cancelling'].includes(status)) {
+    return false;
+  }
+
+  const lastUpdate = updatedAt ? new Date(updatedAt).getTime() : 0;
+  const ageMs = lastUpdate > 0 ? Date.now() - lastUpdate : Number.POSITIVE_INFINITY;
+  if (ageMs < 15_000) {
+    return 2_000;
+  }
+  if (ageMs < 60_000) {
+    return 5_000;
+  }
+  return 10_000;
+}
+
 const formatFileSize = (bytes: number) => {
   if (!bytes || bytes <= 0) {
     return '0 B';
@@ -106,7 +122,7 @@ export default function ModuleView() {
     enabled: !!id,
     refetchInterval: (query) => {
       const data = query.state.data as ModuleDetail | undefined;
-      return data && ['queued', 'running', 'cancelling'].includes(data.pipeline_status) ? 2000 : false;
+      return getPipelineRefetchInterval(data?.pipeline_status, data?.pipeline_updated_at);
     },
   });
 

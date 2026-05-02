@@ -1,13 +1,26 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+FROM python:3.11-slim
+
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
 
 COPY backend/ ./
 

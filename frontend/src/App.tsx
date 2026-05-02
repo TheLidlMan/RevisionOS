@@ -5,16 +5,15 @@ import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
-// Eagerly loaded — always needed immediately after login
-import Dashboard from './pages/Dashboard';
-import ModuleView from './pages/ModuleView';
-import ModuleFlashcards from './pages/ModuleFlashcards';
-import FlashcardReview from './pages/FlashcardReview';
 import LoginPage from './pages/LoginPage';
-import ForgettingCurve from './pages/ForgettingCurve';
-import AchievementsPage from './pages/AchievementsPage';
-import SettingsPage from './pages/Settings';
-// Lazily loaded — not needed on the critical path
+// Lazily loaded — defer heavier authenticated routes until navigation
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ModuleView = lazy(() => import('./pages/ModuleView'));
+const ModuleFlashcards = lazy(() => import('./pages/ModuleFlashcards'));
+const FlashcardReview = lazy(() => import('./pages/FlashcardReview'));
+const ForgettingCurve = lazy(() => import('./pages/ForgettingCurve'));
+const AchievementsPage = lazy(() => import('./pages/AchievementsPage'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
 const QuizMode = lazy(() => import('./pages/QuizMode'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 const CurriculumPage = lazy(() => import('./pages/CurriculumPage'));
@@ -84,18 +83,18 @@ export default function App() {
         <MobileTopBar onOpenSearch={() => setSearchOpen(true)} />
         <main className="app-shell-content flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/modules/:id" element={<ModuleView />} />
-            <Route path="/modules/:id/flashcards" element={<ModuleFlashcards />} />
-            <Route path="/flashcards/:moduleId" element={<FlashcardReview />} />
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/" element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
+            <Route path="/modules/:id" element={<Suspense fallback={<PageFallback />}><ModuleView /></Suspense>} />
+            <Route path="/modules/:id/flashcards" element={<Suspense fallback={<PageFallback />}><ModuleFlashcards /></Suspense>} />
+            <Route path="/flashcards/:moduleId" element={<Suspense fallback={<PageFallback />}><FlashcardReview /></Suspense>} />
+            <Route path="/settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
             <Route path="/quiz" element={<Suspense fallback={<PageFallback />}><QuizMode /></Suspense>} />
             <Route path="/achievements" element={<Suspense fallback={<PageFallback />}><AchievementsPage /></Suspense>} />
             <Route path="/knowledge-graph" element={<Suspense fallback={<PageFallback />}><KnowledgeGraph /></Suspense>} />
             <Route path="/study-coach" element={<Suspense fallback={<PageFallback />}><StudyCoachPage /></Suspense>} />
             <Route path="/curriculum" element={<Suspense fallback={<PageFallback />}><CurriculumPage /></Suspense>} />
-            <Route path="/forgetting-curve" element={<ForgettingCurve />} />
-            <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
+            <Route path="/forgetting-curve" element={<Suspense fallback={<PageFallback />}><ForgettingCurve /></Suspense>} />
+            <Route path="/forgetting-curve/:cardId" element={<Suspense fallback={<PageFallback />}><ForgettingCurve /></Suspense>} />
             <Route path="*" element={<Suspense fallback={<PageFallback />}><NotFound /></Suspense>} />
           </Routes>
         </main>
