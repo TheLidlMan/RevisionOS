@@ -17,6 +17,7 @@ from models.document import Document
 from models.module import Module
 from models.module_job import ModuleJob
 from services.content_indexer import backfill_document_summaries
+from services.file_processor import extract_text, transcribe_audio, extract_image_text
 from services.pipeline_service import ACTIVE_JOB_STATUSES, PIPELINE_TOTAL_STEPS, create_module_job, process_document_pipeline, sync_module_pipeline_state
 from services import ai_service
 from typing import Optional as OptionalType
@@ -193,7 +194,6 @@ async def upload_document(
 
     resolved_module_id = module.id
     resolved_user_id = user.id if user else None
-    db.close()
 
     file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
@@ -251,7 +251,6 @@ async def upload_document_stream(
 
     resolved_module_id = module.id
     resolved_user_id = user.id if user else None
-    db.close()
 
     file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
@@ -540,7 +539,6 @@ def import_folder(
 
     resolved_module_id = module.id
     resolved_user_id = user.id if user else None
-    db.close()
 
     # Validate and resolve the folder path
     folder_path = os.path.realpath(body.path)

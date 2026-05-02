@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.module import Module
+from models.user import User
+from services.auth_service import require_user
 from services.pipeline_service import rebuild_module_outputs
 
 router = APIRouter(tags=["curriculum"])
@@ -45,8 +47,9 @@ def set_curriculum_date(
     module_id: str,
     body: CurriculumRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = db.query(Module).filter(Module.id == module_id, Module.user_id == current_user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 

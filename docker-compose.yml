@@ -8,10 +8,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=sqlite:///./data/revisionos.db
       - UPLOAD_DIR=./uploads
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
     restart: unless-stopped
 
   frontend:
@@ -20,4 +21,6 @@ services:
       - "3000:80"
     depends_on:
       - backend
+    env_file:
+      - .env
     restart: unless-stopped
