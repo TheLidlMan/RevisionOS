@@ -1,11 +1,15 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-slim AS build
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
-COPY . .
+COPY index.html eslint.config.js tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts ./
+COPY public ./public
+COPY src ./src
 RUN npm run build
 
 # Serve with nginx
