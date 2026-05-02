@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom'
+import { TwitterLogo, LinkedinLogo, GithubLogo } from '@phosphor-icons/react'
+import { config } from '../config'
 
 export default function Footer() {
   return (
@@ -28,6 +30,17 @@ export default function Footer() {
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.6, maxWidth: 280 }}>
               AI-powered adaptive study platform. Upload your material, let AI build your revision assets, and learn smarter.
             </p>
+            <div style={{ display: 'flex', gap: '0.875rem', marginTop: '1rem' }}>
+              <a href="https://twitter.com/reviseos" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
+                <TwitterLogo size={20} />
+              </a>
+              <a href="https://linkedin.com/company/reviseos" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
+                <LinkedinLogo size={20} />
+              </a>
+              <a href="https://github.com/reviseos" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
+                <GithubLogo size={20} />
+              </a>
+            </div>
           </div>
 
           {/* Product */}
@@ -37,7 +50,22 @@ export default function Footer() {
             </h4>
             <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <li><a href="/#features" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Features</a></li>
-              <li><a href="https://app.reviseos.co.uk" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Launch App</a></li>
+              <li><a href="/#pricing" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Pricing</a></li>
+              <li><a href="/#why-reviseos" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Why ReviseOS?</a></li>
+              <li><a href="/#testimonials" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Student Stories</a></li>
+              <li><a href={config.loginUrl} style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Launch App</a></li>
+            </ul>
+          </div>
+
+          {/* Resources */}
+          <div>
+            <h4 style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Resources
+            </h4>
+            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <li><a href="/concepts" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Concepts</a></li>
+              <li><a href="/#how-it-works" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>How It Works</a></li>
+              <li><a href="/#planner" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Study Planner</a></li>
             </ul>
           </div>
 
@@ -58,7 +86,8 @@ export default function Footer() {
               Contact
             </h4>
             <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <li><span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>hello@reviseos.co.uk</span></li>
+              <li><a href="mailto:hello@reviseos.co.uk" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>hello@reviseos.co.uk</a></li>
+              <li><a href="/#pricing" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Teams & Schools</a></li>
             </ul>
           </div>
         </div>
@@ -72,7 +101,7 @@ export default function Footer() {
               © {new Date().getFullYear()} ReviseOS. All rights reserved.
           </p>
           <p style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>
-            Built for students, by students.
+            Built for students, by students. 🚀
           </p>
         </div>
       </div>

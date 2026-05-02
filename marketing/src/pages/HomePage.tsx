@@ -7,6 +7,9 @@ import FlashcardDemo from '../components/FlashcardDemo'
 import QuizDemo from '../components/QuizDemo'
 import KnowledgeGraphDemo from '../components/KnowledgeGraphDemo'
 import ForgettingCurveDemo from '../components/ForgettingCurveDemo'
+import Testimonials from '../components/Testimonials'
+import WhyReviseOS from '../components/WhyReviseOS'
+import Pricing from '../components/Pricing'
 import { config } from '../config'
 import { demoModules, demoStudyPlan } from '../data/demo'
 
@@ -58,10 +61,10 @@ export default function HomePage() {
               style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}
             >
               <a href={config.loginUrl} className="btn-primary" style={{ fontSize: '1rem', padding: '0.875rem 2rem' }}>
-                Get Started Free →
+                Start Studying Free — No Credit Card
               </a>
               <a href="#how-it-works" className="btn-secondary" style={{ fontSize: '1rem', padding: '0.875rem 2rem' }}>
-                See how it works
+                See how it works ↓
               </a>
             </motion.div>
           </div>
@@ -361,6 +364,15 @@ export default function HomePage() {
             <FeatureShowcase />
           </div>
         </section>
+
+        {/* ── Why ReviseOS? (Comparison) ── */}
+        <WhyReviseOS />
+
+        {/* ── Testimonials ── */}
+        <Testimonials />
+
+        {/* ── Pricing ── */}
+        <Pricing />
 
         {/* ── Triple CTA ── */}
         <section className="section-lg" style={{
