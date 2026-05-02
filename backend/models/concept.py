@@ -12,13 +12,13 @@ class Concept(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
+    module_id = Column(String(36), ForeignKey("modules.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String, nullable=False)
     definition = Column(Text, nullable=True, default="")
     explanation = Column(Text, nullable=True, default="")
     importance_score = Column(Float, default=0.5)
     study_weight = Column(Float, default=1.0)
-    parent_concept_id = Column(String(36), ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True)
+    parent_concept_id = Column(String(36), ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True, index=True)
     order_index = Column(Integer, default=0)  # Logical ordering within parent
     source_document_ids = Column(Text, nullable=True, default="[]")  # JSON array of document IDs
     related_concept_ids = Column(Text, nullable=True, default="[]")  # JSON array for knowledge graph edges

@@ -12,8 +12,8 @@ class ReviewLog(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    session_id = Column(String(36), ForeignKey("study_sessions.id", ondelete="CASCADE"), nullable=False)
-    item_id = Column(String(36), nullable=False)
+    session_id = Column(String(36), ForeignKey("study_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column(String(36), nullable=False, index=True)
     item_type = Column(String(15), nullable=False)  # FLASHCARD, QUESTION
     rating = Column(String(10), nullable=False)  # AGAIN, HARD, GOOD, EASY or score
     time_taken_seconds = Column(Float, default=0.0)
