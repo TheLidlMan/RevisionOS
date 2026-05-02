@@ -40,6 +40,17 @@ def extract_text(file_path: str, file_type: str) -> str:
         raise ValueError(f"Unsupported file type for text extraction: {file_type}")
 
 
+async def extract_text_async(file_path: str, file_type: str) -> str:
+    """Async variant of extract_text; uses aiofiles for plain-text files."""
+    safe_path = _validate_path(file_path)
+    file_type_upper = file_type.upper()
+
+    if file_type_upper in ("TXT", "MD"):
+        return await _extract_text_file_async(safe_path)
+    # Fall back to sync for binary formats (PDF, PPTX, DOCX use C-extensions)
+    return extract_text(file_path, file_type)
+
+
 def _extract_pdf(file_path: str) -> str:
     """Extract text from PDF using PyMuPDF."""
     import fitz
@@ -62,6 +73,20 @@ def _extract_text_file(file_path: str) -> str:
 
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         return f.read()
+
+
+async def _extract_text_file_async(file_path: str) -> str:
+    """Async variant using aiofiles to avoid blocking the event loop."""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    try:
+        import aiofiles  # type: ignore
+        async with aiofiles.open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return await f.read()
+    except ImportError:
+        # aiofiles not installed – fall back to sync read
+        return _extract_text_file(file_path)
 
 
 def _extract_pptx(file_path: str) -> str:
