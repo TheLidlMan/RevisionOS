@@ -118,30 +118,37 @@ def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] =
         due_query = due_query.filter(Flashcard.user_id == user.id)
     due_today = due_query.count()
 
-    # Calculate streak: consecutive days with at least one session
+    # Calculate streak from a single distinct-date query instead of 365 point lookups
     streak = 0
-    today = datetime.utcnow().date()
-    for i in range(365):
-        check_date = today - timedelta(days=i)
-        day_start = datetime.combine(check_date, datetime.min.time())
-        day_end = datetime.combine(check_date, datetime.max.time())
-        sess_q = (
+    today = now.date()
+    streak_window_start = datetime.combine(today - timedelta(days=364), datetime.min.time())
+    streak_dates = {
+        str(value)
+        for value, in (
             session_query_base
-            .filter(StudySession.started_at >= day_start, StudySession.started_at <= day_end)
+            .filter(StudySession.started_at >= streak_window_start)
+            .with_entities(func.date(StudySession.started_at))
+            .distinct()
+            .all()
         )
-        has_session = sess_q.first()
-        if has_session:
+        if value is not None
+    }
+    for i in range(365):
+        if (today - timedelta(days=i)).isoformat() in streak_dates:
             streak += 1
         else:
             if i == 0:
                 continue  # Today might not have a session yet
             break
 
-    # Overall mastery
-    all_cards = card_query.all()
-    if all_cards:
-        mastered = sum(1 for c in all_cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
-        overall_mastery = round((mastered / len(all_cards)) * 100, 1)
+    # Overall mastery via SQL instead of loading every card into Python
+    if total_cards:
+        mastered = (
+            card_query
+            .filter(Flashcard.state == "REVIEW", Flashcard.lapses == 0, Flashcard.reps >= 2)
+            .count()
+        )
+        overall_mastery = round((mastered / total_cards) * 100, 1)
     else:
         overall_mastery = 0.0
 
