@@ -26,6 +26,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Add created_at column to study_sessions if it doesn't exist (may have been
+    # missed in initial schema on some environments)
+    try:
+        op.add_column("study_sessions", sa.Column("created_at", sa.DateTime(), nullable=True))
+    except Exception:
+        pass  # Column already exists
+
     # --- flashcards ---
     op.create_index(
         "ix_flashcards_user_id_due",
