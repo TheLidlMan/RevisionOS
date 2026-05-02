@@ -364,7 +364,6 @@ async def topic_generate(
     user = _require_user(user)
     module = _require_owned_module(db, body.module_id, user)
 
-    db.close()
     with ai_quota_scope(user.id):
         cards_data = await ai_service.generate_cards_from_topic(body.topic, body.num_cards)
 

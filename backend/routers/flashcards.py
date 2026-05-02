@@ -520,8 +520,9 @@ async def generate_cards_for_module(
     module_id: str,
     body: Optional[GenerateCardsRequest] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = db.query(Module).filter(Module.id == module_id, Module.user_id == current_user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 

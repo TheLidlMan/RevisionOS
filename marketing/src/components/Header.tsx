@@ -26,6 +26,7 @@ export default function Header() {
           <a href="/#how-it-works" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textDecoration: 'none' }}>How it works</a>
           <a href="/#features" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textDecoration: 'none' }}>Features</a>
           <a href="/#planner" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textDecoration: 'none' }}>Planner</a>
+          <Link to="/concepts" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Concepts</Link>
           <Link to="/privacy" style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Privacy</Link>
           <a
             href={config.loginUrl}
