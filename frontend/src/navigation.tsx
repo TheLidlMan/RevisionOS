@@ -1,4 +1,5 @@
 import {
+  Brain,
   BookOpen,
   CalendarDots,
   GearSix,
@@ -29,6 +30,7 @@ export const primaryNavItems = [
   { to: '/quiz', label: 'Quiz', icon: BookOpen },
   { to: '/achievements', label: 'Trophies', icon: Trophy },
   { to: '/knowledge-graph', label: 'Graph', icon: Graph },
+  { to: '/study-coach', label: 'Coach', icon: Brain },
   { to: '/curriculum', label: 'Plan', icon: CalendarDots },
   { to: '/forgetting-curve', label: 'Curve', icon: TrendDown },
   { to: '/settings', label: 'Settings', icon: GearSix },
@@ -60,6 +62,7 @@ const appPageConfigs: AppPageConfig[] = [
     getBackTo: () => '/',
   },
   { pattern: '/knowledge-graph', title: 'Knowledge Graph' },
+  { pattern: '/study-coach', title: 'Study Coach' },
   { pattern: '/forgetting-curve', title: 'Forgetting Curve' },
   { pattern: '/achievements', title: 'Achievements' },
   { pattern: '/curriculum', title: 'Study Plan' },

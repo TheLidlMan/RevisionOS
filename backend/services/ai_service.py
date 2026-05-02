@@ -1385,6 +1385,126 @@ async def tutor_explain(
         return {"explanation": "Sorry, I couldn't generate an explanation. Please try again."}
 
 
+def _fallback_study_coach_plan(
+    topic: str,
+    module_name: str,
+    graph_context: str,
+    related_topics: list[dict[str, Any]],
+    progress_pct: float,
+) -> dict[str, Any]:
+    checklist = [
+        {
+            "concept_id": item.get("id"),
+            "title": item.get("name", topic),
+            "reason": item.get("reason") or "Review this linked topic to strengthen the main idea.",
+        }
+        for item in related_topics[:5]
+    ]
+    if not checklist:
+        checklist = [{"concept_id": None, "title": topic, "reason": "Start by explaining the main idea in your own words."}]
+
+    context_excerpt = " ".join((graph_context or "").split())[:420]
+    return {
+        "overview": (
+            f"{topic} sits inside {module_name}. "
+            f"Current progress is about {round(progress_pct)}%. "
+            f"Use the checklist to move from recall into explanation and application."
+        ),
+        "checklist": checklist,
+        "questions": [
+            {
+                "question": f"What problem does {topic} solve, and when would you use it?",
+                "answer_outline": context_excerpt or f"Define {topic}, explain why it matters, and give one concrete use case.",
+            },
+            {
+                "question": f"How does {topic} connect to the surrounding topics in {module_name}?",
+                "answer_outline": (
+                    ", ".join(item.get("name", "") for item in related_topics[:3] if item.get("name"))
+                    or f"Describe the parent idea, one neighbouring topic, and one downstream implication of {topic}."
+                ),
+            },
+        ],
+        "encouragement": "Focus on explaining the idea clearly before trying to memorise every detail.",
+    }
+
+
+def _tokenize_overlap_text(text: str) -> set[str]:
+    return {token.lower() for token in text.split() if len(token) > 4}
+
+
+async def generate_study_coach_plan(
+    topic: str,
+    module_name: str,
+    graph_context: str,
+    related_topics: list[dict[str, Any]],
+    progress_pct: float = 0.0,
+) -> dict[str, Any]:
+    if not settings.GROQ_API_KEY:
+        return _fallback_study_coach_plan(topic, module_name, graph_context, related_topics, progress_pct)
+
+    related_lines = "\n".join(
+        f"- {item.get('name')}: {item.get('reason') or 'Linked topic'}"
+        for item in related_topics[:6]
+        if item.get("name")
+    ) or "- No nearby linked topics were found."
+
+    messages = _json_messages(
+        "You are an expert study coach building a graph-aware revision checklist.",
+        (
+            f"Module: {module_name}\n"
+            f"Focus topic: {topic}\n"
+            f"Current progress: {round(progress_pct, 1)}%\n"
+            f"Linked topics:\n{related_lines}\n\n"
+            f"Knowledge graph context:\n{graph_context[:12000]}\n\n"
+            "Return a JSON object with:\n"
+            "- `overview`: 2-4 sentences explaining what to focus on next\n"
+            "- `checklist`: array of 3-6 objects with `title`, `reason`, and optional `concept_id`\n"
+            "- `questions`: array of 2-4 objects with `question` and `answer_outline`\n"
+            "- `encouragement`: one short motivating sentence\n"
+            "Keep everything grounded in the supplied context."
+        ),
+    )
+
+    try:
+        envelope = await _call_groq(
+            messages,
+            kind="study_coach_plan",
+            max_completion_tokens=2048,
+            response_format=_json_response_format(),
+            expected_payload_key="overview",
+        )
+        data = envelope.get("data", {})
+        if not isinstance(data, dict):
+            return _fallback_study_coach_plan(topic, module_name, graph_context, related_topics, progress_pct)
+        return data
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.error("Failed to parse study coach plan: %s", exc)
+        return _fallback_study_coach_plan(topic, module_name, graph_context, related_topics, progress_pct)
+
+
+async def evaluate_study_coach_answer(
+    topic: str,
+    question: str,
+    answer_outline: str,
+    user_answer: str,
+) -> dict[str, Any]:
+    if not settings.GROQ_API_KEY:
+        outline_tokens = _tokenize_overlap_text(answer_outline)
+        answer_tokens = _tokenize_overlap_text(user_answer)
+        overlap = len(outline_tokens & answer_tokens)
+        possible = max(1, len(outline_tokens))
+        score = int(round(min(1.0, overlap / possible) * 100))
+        return {
+            "score": score,
+            "feedback": f"Fallback marking for {topic}: you matched {overlap} of {possible} key idea tokens.",
+            "what_was_correct": "You covered some of the expected ideas." if overlap else "You need more topic-specific detail.",
+            "what_was_missing": "Add more of the expected terminology and structure from the answer outline.",
+            "improved_answer": answer_outline,
+        }
+
+    return await grade_answer(question=question, correct_answer=answer_outline, user_answer=user_answer)
+
+
 async def generate_cards_from_topic(topic: str, num_cards: int = 30) -> list[dict[str, Any]]:
     """Generate flashcards from a topic name alone, with no source material."""
     try:

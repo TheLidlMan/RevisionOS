@@ -409,6 +409,9 @@ export interface GraphNode {
   parent_id?: string | null;
   order_index?: number;
   item_count?: number;
+  progress_pct?: number;
+  progress_status?: string;
+  score_pct?: number | null;
 }
 
 export interface GraphEdge {
@@ -421,6 +424,8 @@ export interface KnowledgeGraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   module_name: string;
+  graph_backend?: string;
+  document_count?: number;
 }
 
 export interface SearchResult {
@@ -783,4 +788,64 @@ export interface TutorExplainResponse {
 export interface TopicGenerateResponse {
   generated: number;
   topic: string;
+}
+
+export interface StudyCoachTopic {
+  concept_id: string;
+  name: string;
+  mastery: number;
+  progress_pct: number;
+  status: string;
+  score_pct?: number | null;
+  importance: number;
+  item_count: number;
+  parent_id?: string | null;
+}
+
+export interface StudyCoachSummary {
+  total_topics: number;
+  completed_topics: number;
+  active_topics: number;
+  average_progress_pct: number;
+}
+
+export interface StudyCoachState {
+  module_id: string;
+  module_name: string;
+  graph_backend: string;
+  document_count: number;
+  focus_topic_id?: string | null;
+  summary: StudyCoachSummary;
+  topics: StudyCoachTopic[];
+}
+
+export interface StudyCoachChecklistItem {
+  concept_id?: string | null;
+  title: string;
+  reason: string;
+}
+
+export interface StudyCoachQuestion {
+  question: string;
+  answer_outline: string;
+}
+
+export interface StudyCoachPlan {
+  module_id: string;
+  module_name: string;
+  graph_backend: string;
+  focus_topic: StudyCoachTopic;
+  overview: string;
+  encouragement: string;
+  checklist: StudyCoachChecklistItem[];
+  questions: StudyCoachQuestion[];
+}
+
+export interface StudyCoachEvaluationResult {
+  score: number;
+  feedback: string;
+  what_was_correct: string;
+  what_was_missing: string;
+  improved_answer: string;
+  updated_topic: StudyCoachTopic;
 }

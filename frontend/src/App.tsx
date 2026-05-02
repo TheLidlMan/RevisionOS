@@ -11,13 +11,14 @@ import ModuleView from './pages/ModuleView';
 import ModuleFlashcards from './pages/ModuleFlashcards';
 import FlashcardReview from './pages/FlashcardReview';
 import LoginPage from './pages/LoginPage';
+import ForgettingCurve from './pages/ForgettingCurve';
+import AchievementsPage from './pages/AchievementsPage';
 import SettingsPage from './pages/Settings';
 // Lazily loaded — not needed on the critical path
 const QuizMode = lazy(() => import('./pages/QuizMode'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 const CurriculumPage = lazy(() => import('./pages/CurriculumPage'));
-const ForgettingCurve = lazy(() => import('./pages/ForgettingCurve'));
-const AchievementsPage = lazy(() => import('./pages/AchievementsPage'));
+const StudyCoachPage = lazy(() => import('./pages/StudyCoachPage'));
 import { useAuthStore } from './store/auth';
 import Skeleton from './components/Skeleton';
 
@@ -90,9 +91,10 @@ export default function App() {
             <Route path="/quiz" element={<Suspense fallback={<PageFallback />}><QuizMode /></Suspense>} />
             <Route path="/achievements" element={<Suspense fallback={<PageFallback />}><AchievementsPage /></Suspense>} />
             <Route path="/knowledge-graph" element={<Suspense fallback={<PageFallback />}><KnowledgeGraph /></Suspense>} />
+            <Route path="/study-coach" element={<Suspense fallback={<PageFallback />}><StudyCoachPage /></Suspense>} />
             <Route path="/curriculum" element={<Suspense fallback={<PageFallback />}><CurriculumPage /></Suspense>} />
-            <Route path="/forgetting-curve" element={<Suspense fallback={<PageFallback />}><ForgettingCurve /></Suspense>} />
-            <Route path="/forgetting-curve/:cardId" element={<Suspense fallback={<PageFallback />}><ForgettingCurve /></Suspense>} />
+            <Route path="/forgetting-curve" element={<ForgettingCurve />} />
+            <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
           </Routes>
         </main>
         <MobileBottomNav />
