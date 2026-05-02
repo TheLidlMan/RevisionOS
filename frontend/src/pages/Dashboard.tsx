@@ -17,6 +17,25 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
+function getPipelineRefetchInterval(
+  items: Array<{ pipeline_status?: string; pipeline_updated_at?: string | null }> | undefined,
+) {
+  const activeItem = items?.find((item) => item.pipeline_status === 'running' || item.pipeline_status === 'queued');
+  if (!activeItem) {
+    return false;
+  }
+
+  const lastUpdate = activeItem.pipeline_updated_at ? new Date(activeItem.pipeline_updated_at).getTime() : 0;
+  const ageMs = lastUpdate > 0 ? Date.now() - lastUpdate : Number.POSITIVE_INFINITY;
+  if (ageMs < 15_000) {
+    return 2_000;
+  }
+  if (ageMs < 60_000) {
+    return 5_000;
+  }
+  return 10_000;
+}
+
 export default function Dashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [sortBy, setSortBy] = usePersistentState<'UPDATED' | 'NEWEST' | 'OLDEST' | 'NAME'>('dashboard:module-sort', 'UPDATED');
@@ -29,10 +48,7 @@ export default function Dashboard() {
   const { data: modules, isLoading: modulesLoading } = useQuery({
     queryKey: ['modules'],
     queryFn: getModules,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return data?.some((module) => module.pipeline_status === 'running' || module.pipeline_status === 'queued') ? 2000 : false;
-    },
+    refetchInterval: (query) => getPipelineRefetchInterval(query.state.data),
   });
 
   const sortedModules = useMemo(() => {
