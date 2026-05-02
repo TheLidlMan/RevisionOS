@@ -130,7 +130,7 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
           Upload Documents{moduleName ? ` to ${moduleName}` : ''}
         </h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          Files start processing as soon as they upload. Summaries, topic mapping, flashcards, and the study plan all run on the backend.
+          Files start processing as soon as they upload. Summaries, topic mapping, flashcards, the study plan, and graph sync all run on the backend.
         </p>
       </div>
 

@@ -48,6 +48,9 @@ import type {
   ExamTimeline,
   SessionReplayData,
   MasteryHeatmapData,
+  StudyCoachState,
+  StudyCoachPlan,
+  StudyCoachEvaluationResult,
 } from '../types';
 
 const AUTH_TOKEN_KEY = 'reviseos_token';
@@ -662,3 +665,22 @@ export const generateCardsFromTopic = (topic: string, moduleId: string, numCards
     module_id: moduleId,
     num_cards: numCards,
   }).then((r) => r.data);
+
+export const getStudyCoachState = (moduleId: string) =>
+  client.get<StudyCoachState>(`/modules/${moduleId}/study-coach`).then((r) => r.data);
+
+export const buildStudyCoachPlan = (moduleId: string, data?: { concept_id?: string; topic?: string }) =>
+  client.post<StudyCoachPlan>(`/modules/${moduleId}/study-coach/plan`, data || {}).then((r) => r.data);
+
+export const updateStudyCoachProgress = (
+  moduleId: string,
+  conceptId: string,
+  data: { progress_pct: number; status?: string; score_pct?: number; confidence_pct?: number; notes?: string },
+) =>
+  client.post<import('../types').StudyCoachTopic>(`/modules/${moduleId}/study-coach/topics/${conceptId}/progress`, data).then((r) => r.data);
+
+export const evaluateStudyCoachAnswer = (
+  moduleId: string,
+  data: { concept_id: string; question: string; answer_outline: string; user_answer: string },
+) =>
+  client.post<StudyCoachEvaluationResult>(`/modules/${moduleId}/study-coach/evaluate`, data).then((r) => r.data);

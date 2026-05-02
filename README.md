@@ -37,8 +37,8 @@ Industry-standard FSRS algorithm schedules reviews at the optimal moment — jus
 ### AI Quiz Mode
 Multiple choice questions generated from your materials. Instant feedback with explanations so you understand why you got something wrong — not just whether you did.
 
-### Knowledge Graph
-Watch concepts from your notes form a living map. See how topics connect, surface isolated gaps, and understand the structure of your knowledge spatially.
+### Knowledge Graph *(Neo4j)*
+When Neo4j is configured, Revise OS syncs your documents and extracted concepts into a graph database, building a living map of how topics connect. Surface isolated gaps, discover hidden relationships, and understand the structure of your knowledge spatially.
 
 ### Smart Study Planner
 A personalised weekly schedule that balances new learning with review sessions, tuned to your performance. Rest days included — science says so.
@@ -79,11 +79,11 @@ cd RevisionOS
 cp .env.example .env
 # Edit .env and set GROQ_API_KEY=your_key_here
 
-# Start everything (frontend + backend)
+# Start everything (frontend + backend; optionally Neo4j if NEO4J_URI is set)
 docker compose up --build
 ```
 
-Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+Open **[http://localhost:3000](http://localhost:3000)** in your browser. If Neo4j is configured, the Neo4j Browser is at **http://localhost:7474**.
 
 ### Option 2 — Manual
 
@@ -116,7 +116,7 @@ Frontend runs at **http://localhost:5173**, proxying API calls to the backend at
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS v4 |
 | Backend | FastAPI (Python 3.11+) |
-| Database | SQLite via SQLAlchemy |
+| Database | SQLite/Postgres via SQLAlchemy + optional Neo4j graph database |
 | AI/LLM | Groq API (`openai/gpt-oss-120b` primary) |
 | Spaced Repetition | [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) v4 |
 
@@ -172,6 +172,10 @@ With the backend running, visit **[http://localhost:8000/docs](http://localhost:
 |----------|---------|-------------|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
+| `NEO4J_URI` | *(optional)* | Neo4j Bolt connection, e.g. `bolt://localhost:7687` |
+| `NEO4J_USERNAME` | `neo4j` | Neo4j username |
+| `NEO4J_PASSWORD` | *(optional)* | Neo4j password |
+| `NEO4J_DATABASE` | `neo4j` | Neo4j database name |
 | `LLM_MODEL` | `openai/gpt-oss-120b` | Primary LLM model |
 | `LLM_MODEL_QUALITY` | `openai/gpt-oss-20b` | Mid-tier model |
 | `LLM_MODEL_FAST` | `llama-3.1-8b-instant` | Fast/cheap model |

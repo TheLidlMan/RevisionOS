@@ -11,6 +11,7 @@ from models.module_job import ModuleJob
 from models.ai_request_lock import AiRequestLock
 from models.ai_usage_event import AiUsageEvent
 from models.user_stats import UserStats, Achievement
+from models.topic_progress import TopicProgress
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "AiUsageEvent",
     "UserStats",
     "Achievement",
+    "TopicProgress",
 ]

@@ -18,6 +18,7 @@ from models.module import Module
 from models.module_job import ModuleJob
 from services.content_indexer import backfill_document_summaries
 from services.pipeline_service import ACTIVE_JOB_STATUSES, PIPELINE_TOTAL_STEPS, create_module_job, process_document_pipeline, sync_module_pipeline_state
+from services.graph_service import sync_module_graph
 from services import ai_service
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
@@ -377,6 +378,7 @@ async def index_document_endpoint(
         raise HTTPException(status_code=400, detail="Document has no extracted text")
 
     concepts = await index_document(document_id, db)
+    sync_module_graph(db, doc.module_id, doc.user_id)
     return {"indexed": len(concepts), "concepts": concepts}
 
 
