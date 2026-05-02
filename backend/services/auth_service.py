@@ -109,10 +109,10 @@ def create_session(db: Session, user: User, request: Optional[Request] = None) -
 
 
 def revoke_session(db: Session, raw_token: str) -> bool:
-    """Revoke a session by its raw token. Returns True if found."""
+    """Delete a session row by its raw token. Returns True if found."""
     session = _query_session(db, raw_token, require_unexpired=False)
     if session:
-        session.revoked = True
+        db.delete(session)
         db.commit()
         return True
     return False
