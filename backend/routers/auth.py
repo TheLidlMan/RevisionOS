@@ -1,12 +1,12 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Annotated, Optional
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -19,6 +19,7 @@ from services.auth_service import (
     validate_return_to,
     SESSION_COOKIE_NAME,
 )
+from services.security import enforce_rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -113,6 +114,10 @@ class SessionResponse(BaseModel):
     user: Optional[dict] = None
 
 
+class ProfileUpdate(BaseModel):
+    display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
 # ---------- Session endpoints ----------
 
 @router.get("/session", response_model=SessionResponse)
@@ -153,14 +158,13 @@ def get_me(user: User = Depends(get_current_user)):
 
 @router.patch("/me")
 def update_profile(
-    body: dict,
+    body: ProfileUpdate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if "display_name" in body:
-        user.display_name = body["display_name"]
+    user.display_name = body.display_name
     db.commit()
     db.refresh(user)
     return {"id": user.id, "email": user.email, "display_name": user.display_name}
@@ -169,8 +173,9 @@ def update_profile(
 # ---------- Google OAuth ----------
 
 @router.get("/google/start")
-def google_start(return_to: Optional[str] = None, redirect: bool = False):
+def google_start(request: Request, return_to: Optional[str] = None, redirect: bool = False):
     """Initiate Google OAuth2 authorization code flow with PKCE."""
+    enforce_rate_limit(request, scope="auth:google-start", limit=10, window_seconds=60)
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Google login is not configured")
 
@@ -224,6 +229,7 @@ async def google_callback(
     db: Session = Depends(get_db),
 ):
     """Handle Google OAuth2 callback — exchange code, upsert user, set session."""
+    enforce_rate_limit(request, scope="auth:google-callback", limit=10, window_seconds=60)
     login_url = settings.PUBLIC_LOGIN_URL
 
     if error:

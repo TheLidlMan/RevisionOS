@@ -808,7 +808,18 @@ class QuizStatusResponse(BaseModel):
 
 
 @router.get("/api/modules/{module_id}/quiz-status", response_model=QuizStatusResponse)
-def get_quiz_status(module_id: str, db: Session = Depends(get_db)):
+def get_quiz_status(
+    module_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    module = (
+        db.query(Module)
+        .filter(Module.id == module_id, Module.user_id == user.id)
+        .first()
+    )
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
     count = db.query(QuizQuestion).filter(QuizQuestion.module_id == module_id).count()
     if count == 0:
         status = "no_questions"
