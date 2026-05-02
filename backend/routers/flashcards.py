@@ -163,15 +163,20 @@ def _card_to_response(card: Flashcard, fields: Optional[set] = None) -> Flashcar
     return resp
 
 
+def _user_owns_card_condition(user_id: str, owned_module_ids):
+    """Return SQLAlchemy condition for flashcard ownership, handling legacy NULL user_id rows."""
+    return or_(
+        Flashcard.user_id == user_id,
+        and_(Flashcard.user_id.is_(None), Flashcard.module_id.in_(owned_module_ids)),
+    )
+
+
 def _owned_card_filter(db: Session, card_id: str, user_id: str):
     """Return a query that finds a flashcard by ID owned by user_id, handling legacy NULL user_id rows."""
     owned_module_ids = db.query(Module.id).filter(Module.user_id == user_id)
     return db.query(Flashcard).filter(
         Flashcard.id == card_id,
-        or_(
-            Flashcard.user_id == user_id,
-            and_(Flashcard.user_id.is_(None), Flashcard.module_id.in_(owned_module_ids)),
-        ),
+        _user_owns_card_condition(user_id, owned_module_ids),
     )
 
 
@@ -236,10 +241,7 @@ def list_flashcards(
 ):
     owned_module_ids = db.query(Module.id).filter(Module.user_id == current_user.id)
     query = db.query(Flashcard).filter(
-        or_(
-            Flashcard.user_id == current_user.id,
-            and_(Flashcard.user_id.is_(None), Flashcard.module_id.in_(owned_module_ids)),
-        )
+        _user_owns_card_condition(current_user.id, owned_module_ids)
     )
     if module_id:
         query = query.filter(Flashcard.module_id == module_id)

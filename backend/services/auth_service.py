@@ -118,17 +118,6 @@ def revoke_session(db: Session, raw_token: str) -> bool:
     return False
 
 
-def delete_session(db: Session, raw_token: str) -> bool:
-    """Soft revoke a session by its raw token. Returns True if found."""
-    session = _query_session(db, raw_token, require_unexpired=False)
-    if session:
-        session.revoked = True
-        db.add(session)
-        db.commit()
-        return True
-    return False
-
-
 def get_user_from_session_token(db: Session, raw_token: str) -> Optional[User]:
     """Look up a valid (non-revoked, non-expired) session and return its user."""
     try:

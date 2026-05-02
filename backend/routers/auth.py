@@ -15,7 +15,7 @@ from models.user import User
 from services.auth_service import (
     get_current_user,
     create_session,
-    delete_session,
+    revoke_session,
     validate_return_to,
     SESSION_COOKIE_NAME,
 )
@@ -130,7 +130,7 @@ def logout(
 ):
     session_token = request.cookies.get(SESSION_COOKIE_NAME)
     if session_token:
-        delete_session(db, session_token)
+        revoke_session(db, session_token)
     _clear_session_cookie(response)
     return {"ok": True}
 
