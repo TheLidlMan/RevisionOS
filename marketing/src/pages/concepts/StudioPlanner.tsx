@@ -7,7 +7,7 @@ import FlashcardDemo from '../../components/FlashcardDemo'
 import ForgettingCurveDemo from '../../components/ForgettingCurveDemo'
 import QuizDemo from '../../components/QuizDemo'
 import { config } from '../../config'
-import { demoStudyPlan, demoModules } from '../../data/demo'
+import { demoStudyPlan } from '../../data/demo'
 
 const typeColors: Record<string, string> = {
   review: '#a5c47b',
