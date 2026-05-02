@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
+from cache import cache_get, cache_set
 from database import get_db
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
@@ -102,6 +103,11 @@ def list_sessions(
 
 @router.get("/api/analytics/overview", response_model=OverviewResponse)
 def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    cache_key = f"cache:analytics:{user.id if user else 'anonymous'}:overview"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     mod_query = db.query(Module)
     card_query = db.query(Flashcard)
     session_query_base = db.query(StudySession)
@@ -152,13 +158,15 @@ def analytics_overview(db: Session = Depends(get_db), user: OptionalType[User] =
     else:
         overall_mastery = 0.0
 
-    return OverviewResponse(
+    response = OverviewResponse(
         total_modules=total_modules,
         total_cards=total_cards,
         due_today=due_today,
         streak=streak,
         overall_mastery=overall_mastery,
     )
+    cache_set(cache_key, response.model_dump(mode="json"), ttl=60)
+    return response
 
 
 @router.get("/api/analytics/streaks", response_model=StreakResponse)
