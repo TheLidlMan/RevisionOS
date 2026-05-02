@@ -57,4 +57,4 @@ jobs:
             export ALEMBIC_DATABASE_URL="$DATABASE_URL"
             echo "Using DATABASE_URL for Alembic migrations."
           fi
-          alembic upgrade head
+          alembic upgrade heads
