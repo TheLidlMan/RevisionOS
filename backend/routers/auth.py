@@ -36,7 +36,7 @@ def _prune_oauth_states(now: Optional[datetime] = None) -> None:
     cutoff = current_time - OAUTH_STATE_TTL
     expired_states = []
 
-    for state, payload in _oauth_states.items():
+    for state, payload in list(_oauth_states.items()):
         created_at = payload.get("created_at")
         if isinstance(created_at, str):
             try:

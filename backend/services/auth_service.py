@@ -119,10 +119,11 @@ def revoke_session(db: Session, raw_token: str) -> bool:
 
 
 def delete_session(db: Session, raw_token: str) -> bool:
-    """Delete a session by its raw token. Returns True if found."""
+    """Soft revoke a session by its raw token. Returns True if found."""
     session = _query_session(db, raw_token, require_unexpired=False)
     if session:
-        db.delete(session)
+        session.revoked = True
+        db.add(session)
         db.commit()
         return True
     return False

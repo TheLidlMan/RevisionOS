@@ -81,5 +81,49 @@ def record_ai_usage(user_id: str | None, kind: str) -> None:
 
 
 def check_and_record_ai_usage(user_id: str | None, kind: str) -> None:
-    check_ai_usage_limit(user_id)
-    record_ai_usage(user_id, kind)
+    """Atomically check quota and record usage in a single transaction."""
+    if not user_id:
+        return
+
+    daily_limit = settings.DAILY_NEW_CARDS_LIMIT
+    if daily_limit <= 0:
+        # No limit enforced
+        record_ai_usage(user_id, kind)
+        return
+
+    now = datetime.now(timezone.utc)
+    window_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc).replace(tzinfo=None)
+    window_end = (datetime.combine(now.date(), time.min, tzinfo=timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+
+    db = SessionLocal()
+    try:
+        # Lock the rows we're counting to prevent concurrent race conditions
+        # Use SELECT FOR UPDATE on the user's usage records for today
+        usage_count = (
+            db.query(AiUsageEvent)
+            .filter(
+                AiUsageEvent.user_id == user_id,
+                AiUsageEvent.kind.in_(_NEW_CARD_KINDS),
+                AiUsageEvent.created_at >= window_start,
+                AiUsageEvent.created_at < window_end,
+            )
+            .with_for_update()
+            .count()
+        )
+
+        if usage_count >= daily_limit:
+            raise AiQuotaExceededError(
+                f"Daily new-card generation limit reached ({daily_limit} requests per day)."
+            )
+
+        # Record the usage within the same transaction
+        db.add(AiUsageEvent(user_id=user_id, kind=kind, created_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        db.commit()
+    except AiQuotaExceededError:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
