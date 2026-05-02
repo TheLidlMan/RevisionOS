@@ -8,6 +8,7 @@ import type { Flashcard, Rating, ElaborationResponse, ReviewResponse } from '../
 import axios from 'axios';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import DOMPurify from 'dompurify';
 import { formatDays } from '../utils/formatters';
 import AITutorPanel from '../components/AITutorPanel';
 import AchievementToast from '../components/AchievementToast';
@@ -101,7 +102,7 @@ const RichText = memo(function RichText({ text }: { text: string }) {
 
   return (
     <div
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
       style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.25rem', lineHeight: 1.7 }}
       className="text-center whitespace-pre-wrap"
     />
