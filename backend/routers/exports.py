@@ -281,6 +281,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         if isinstance(options, list):
             options = json.dumps(options)
         question = QuizQuestion(
+            user_id=module.user_id,
             module_id=module.id,
             question_text=q_data.get("question_text", ""),
             question_type=q_data.get("question_type", "MCQ"),

@@ -21,7 +21,7 @@ from models.module import Module
 from models.document import Document
 from models.user import User
 from services import ai_service
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from services.quota_service import ai_quota_scope
 
 router = APIRouter(tags=["quizzes"])
@@ -269,8 +269,9 @@ def list_questions(
     difficulty: Optional[str] = None,
     type: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
-    query = db.query(QuizQuestion)
+    query = db.query(QuizQuestion).filter(QuizQuestion.user_id == current_user.id)
     if module_id:
         query = query.filter(QuizQuestion.module_id == module_id)
     if difficulty:
@@ -339,6 +340,7 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
 
         question = QuizQuestion(
+            user_id=module_user_id,
             module_id=body.module_id,
             question_text=qdata.get("question_text", qdata.get("question", "")),
             question_type=q_type,
@@ -428,6 +430,7 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
                             options_json = json.dumps(options) if options else None
                             diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
                             question = QuizQuestion(
+                                user_id=module_user_id,
                                 module_id=body.module_id,
                                 question_text=qdata.get("question_text", qdata.get("question", "")),
                                 question_type=q_type,
