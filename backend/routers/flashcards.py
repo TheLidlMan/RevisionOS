@@ -86,6 +86,24 @@ class ReviewRequest(BaseModel):
     rating: str  # AGAIN, HARD, GOOD, EASY
 
 
+class ReviewResponse(BaseModel):
+    id: str
+    due: datetime
+    stability: float
+    difficulty: float
+    elapsed_days: int
+    scheduled_days: int
+    reps: int
+    lapses: int
+    state: str
+    last_review: Optional[datetime] = None
+    xp_earned: int = 0
+    xp_total: int = 0
+    level: int = 1
+    level_up: bool = False
+    new_achievements: list[dict] = []
+
+
 class BatchReviewItem(BaseModel):
     id: str
     rating: str
@@ -101,9 +119,6 @@ class PaginatedFlashcardsResponse(BaseModel):
     items: list[FlashcardResponse]
     total: int
     has_more: bool
-
-
-class ReviewResponse(BaseModel):
     id: str
     due: datetime
     stability: float
