@@ -19,6 +19,7 @@ const QuizMode = lazy(() => import('./pages/QuizMode'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 const CurriculumPage = lazy(() => import('./pages/CurriculumPage'));
 const StudyCoachPage = lazy(() => import('./pages/StudyCoachPage'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 import { useAuthStore } from './store/auth';
 import Skeleton from './components/Skeleton';
 
@@ -95,6 +96,7 @@ export default function App() {
             <Route path="/curriculum" element={<Suspense fallback={<PageFallback />}><CurriculumPage /></Suspense>} />
             <Route path="/forgetting-curve" element={<ForgettingCurve />} />
             <Route path="/forgetting-curve/:cardId" element={<ForgettingCurve />} />
+            <Route path="*" element={<Suspense fallback={<PageFallback />}><NotFound /></Suspense>} />
           </Routes>
         </main>
         <MobileBottomNav />

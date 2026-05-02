@@ -80,7 +80,9 @@ async def etag_middleware(request: Request, call_next):
     return response
 
 
-
+@fastapi_app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    """Log slow requests and pool pressure warnings."""
     path = request.url.path
     if not settings.REQUEST_TIMING_LOG_ENABLED or not _should_log_request_timing(path):
         return await call_next(request)
@@ -116,6 +118,7 @@ async def etag_middleware(request: Request, call_next):
             pool_after,
             error_name,
         )
+
 
 # Include routers
 fastapi_app.include_router(auth.router)
@@ -160,6 +163,14 @@ def root():
 @fastapi_app.get("/api/health")
 def health_check():
     return {"status": "ok"}
+
+
+# Global exception handler for unhandled errors
+@fastapi_app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch unhandled exceptions and return a safe 500 response."""
+    logger.exception("Unhandled exception: %s", exc)
+    return {"detail": "An internal error occurred. Please try again later."}
 
 
 app = CORSMiddleware(
