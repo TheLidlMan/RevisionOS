@@ -137,7 +137,7 @@ export default function FlashcardReview() {
 
   const { data: cards, isLoading } = useQuery({
     queryKey: ['flashcards', moduleId, 'due'],
-    queryFn: () => getFlashcards({ module_id: moduleId!, due: true }),
+    queryFn: async () => (await getFlashcards({ module_id: moduleId!, due: true, limit: 1000 })).items,
     enabled: !!moduleId,
   });
 

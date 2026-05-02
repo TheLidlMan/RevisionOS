@@ -4,10 +4,11 @@ import time
 import threading
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
@@ -72,9 +73,11 @@ class FlashcardResponse(BaseModel):
     scheduled_days: int = 0
     reps: int = 0
     lapses: int = 0
+    generation_source: str = "MANUAL"
     state: str = "NEW"
     last_review: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -156,9 +159,11 @@ def _card_to_response(card: Flashcard, fields: Optional[set] = None) -> Flashcar
         scheduled_days=card.scheduled_days,
         reps=card.reps,
         lapses=card.lapses,
+        generation_source=card.generation_source,
         state=card.state,
         last_review=card.last_review,
         created_at=card.created_at,
+        updated_at=card.updated_at,
     )
     return resp
 
@@ -233,9 +238,12 @@ def _allocate_card_targets(docs: list[Document], requested_total: Optional[int])
 def list_flashcards(
     module_id: Optional[str] = None,
     due: Optional[bool] = None,
+    generation_source: Optional[str] = None,
+    state: Optional[str] = None,
+    search: Optional[str] = None,
+    sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"] = "updated_desc",
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    fields: Optional[str] = Query(default=None, description="Comma-separated field names to include, e.g. front,back"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
@@ -245,15 +253,31 @@ def list_flashcards(
     )
     if module_id:
         query = query.filter(Flashcard.module_id == module_id)
+    if generation_source:
+        query = query.filter(Flashcard.generation_source == generation_source.upper())
+    if state:
+        query = query.filter(Flashcard.state == state.upper())
     if due:
         now = datetime.utcnow()
         query = query.filter(Flashcard.due <= now)
+    if search:
+        term = f"%{search.strip()}%"
+        if term != "%%":
+            query = query.filter(or_(Flashcard.front.ilike(term), Flashcard.back.ilike(term)))
 
-    total = query.count()
-    cards = query.order_by(Flashcard.due.asc()).offset(skip).limit(limit).all()
+    total = query.with_entities(func.count(Flashcard.id)).scalar() or 0
 
-    requested_fields = set(fields.split(",")) if fields else None
-    items = [_card_to_response(c, requested_fields) for c in cards]
+    if sort == "created_desc":
+        query = query.order_by(Flashcard.created_at.desc(), Flashcard.id.desc())
+    elif sort == "created_asc":
+        query = query.order_by(Flashcard.created_at.asc(), Flashcard.id.asc())
+    elif sort == "front_asc":
+        query = query.order_by(Flashcard.front.asc(), Flashcard.created_at.asc(), Flashcard.id.asc())
+    else:
+        query = query.order_by(Flashcard.updated_at.desc(), Flashcard.id.desc())
+
+    cards = query.offset(skip).limit(limit).all()
+    items = [_card_to_response(card) for card in cards]
     return PaginatedFlashcardsResponse(items=items, total=total, has_more=(skip + len(items)) < total)
 
 

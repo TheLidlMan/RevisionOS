@@ -111,7 +111,7 @@ function CardBrowser() {
 
   const cardsQuery = useQuery<Flashcard[]>({
     queryKey: ['flashcards', moduleId || 'all'],
-    queryFn: () => getFlashcards({ module_id: moduleId || undefined }),
+    queryFn: async () => (await getFlashcards({ module_id: moduleId || undefined, limit: 1000 })).items,
   });
 
   const cards = (cardsQuery.data || []).filter((card) => {
