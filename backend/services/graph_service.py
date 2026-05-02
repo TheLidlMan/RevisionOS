@@ -11,20 +11,31 @@ from models.module import Module
 from models.review_log import ReviewLog
 from models.topic_progress import TopicProgress
 
+GraphDatabase = None
 _neo4j_import_error: Exception | None = None
-try:
-    from neo4j import GraphDatabase
-except Exception as exc:  # pragma: no cover - optional dependency import safeguard
-    GraphDatabase = None
-    _neo4j_import_error = exc
 
 logger = logging.getLogger(__name__)
-if _neo4j_import_error is not None:
-    logger.warning("Neo4j driver import failed; graph sync will fall back to SQL only: %s", _neo4j_import_error)
+
+
+def _load_neo4j_driver():
+    global GraphDatabase, _neo4j_import_error
+    if GraphDatabase is not None:
+        return GraphDatabase
+    if _neo4j_import_error is not None:
+        return None
+    try:  # pragma: no cover - optional dependency import safeguard
+        from neo4j import GraphDatabase as Neo4jGraphDatabase
+
+        GraphDatabase = Neo4jGraphDatabase
+    except Exception as exc:
+        _neo4j_import_error = exc
+        logger.warning("Neo4j driver import failed; graph sync will fall back to SQL only: %s", exc)
+        return None
+    return GraphDatabase
 
 
 def neo4j_enabled() -> bool:
-    return bool(settings.NEO4J_URI and settings.NEO4J_PASSWORD and GraphDatabase is not None)
+    return bool(settings.NEO4J_URI and settings.NEO4J_PASSWORD and _load_neo4j_driver() is not None)
 
 
 def graph_backend_name() -> str:
@@ -165,9 +176,10 @@ def build_module_graph_snapshot(db: Session, module_id: str, user_id: Optional[s
 
 
 def _neo4j_driver():
-    if not neo4j_enabled():
+    driver_cls = _load_neo4j_driver()
+    if not settings.NEO4J_URI or not settings.NEO4J_PASSWORD or driver_cls is None:
         return None
-    return GraphDatabase.driver(
+    return driver_cls.driver(
         settings.NEO4J_URI,
         auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
     )
