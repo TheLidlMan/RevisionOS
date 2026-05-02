@@ -4,9 +4,10 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Optional
+from urllib.parse import urlparse
 
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -28,6 +29,16 @@ def _get_secret_key() -> str:
     secret_key = settings.JWT_SECRET.strip()
     if len(secret_key) < 32:
         raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
+    character_classes = sum(
+        (
+            any(char.islower() for char in secret_key),
+            any(char.isupper() for char in secret_key),
+            any(char.isdigit() for char in secret_key),
+            any(not char.isalnum() for char in secret_key),
+        )
+    )
+    if character_classes < 3:
+        raise RuntimeError("JWT_SECRET must include upper, lower, numeric, or symbol characters from at least 3 classes")
     return secret_key
 
 
@@ -156,11 +167,27 @@ ALLOWED_REDIRECT_PREFIXES = [
 
 
 def validate_return_to(url: Optional[str]) -> Optional[str]:
-    """Return *url* only if it starts with one of the approved prefixes."""
+    """Return *url* only if it matches one of the approved redirect origins."""
     if not url:
         return None
+
+    candidate = urlparse(url)
+    if candidate.scheme not in {"http", "https"} or not candidate.netloc:
+        return None
+    if candidate.username or candidate.password:
+        return None
+
+    candidate_host = candidate.hostname.lower() if candidate.hostname else ""
+    candidate_port = candidate.port
+
     for prefix in ALLOWED_REDIRECT_PREFIXES:
-        if url.startswith(prefix):
+        allowed = urlparse(prefix)
+        allowed_host = allowed.hostname.lower() if allowed.hostname else ""
+        if (
+            allowed.scheme == candidate.scheme
+            and allowed_host == candidate_host
+            and allowed.port == candidate_port
+        ):
             return url
     return None
 
@@ -243,3 +270,29 @@ def require_user(user: Optional[User] = Depends(get_current_user)) -> User:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def get_current_user_from_websocket(
+    websocket: WebSocket,
+    db: Session,
+) -> Optional[User]:
+    session_token = websocket.cookies.get(SESSION_COOKIE_NAME)
+    if session_token:
+        user = get_user_from_session_token(db, session_token)
+        if user:
+            return user
+
+    authorization = websocket.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+
+    try:
+        payload = jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
+    except JWTError:
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    return db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()

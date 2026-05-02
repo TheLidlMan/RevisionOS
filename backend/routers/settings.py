@@ -3,15 +3,19 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from config import reload_runtime_settings, settings
+from models.user import User
 from services.ai_service import validate_api_key
+from services.auth_service import require_user
+from services.security import enforce_rate_limit
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 SETTINGS_FILE = Path(__file__).resolve().parent.parent / "settings.json"
+SENSITIVE_SETTINGS_KEYS = {"groq_api_key"}
 
 DEFAULT_SETTINGS = {
     "groq_api_key": "",
@@ -55,11 +59,11 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    groq_api_key: Optional[str] = None
-    llm_model_fast: Optional[str] = None
-    llm_model: Optional[str] = None
-    llm_model_quality: Optional[str] = None
-    llm_fallback_model: Optional[str] = None
+    groq_api_key: Optional[str] = Field(default=None, max_length=512)
+    llm_model_fast: Optional[str] = Field(default=None, max_length=255)
+    llm_model: Optional[str] = Field(default=None, max_length=255)
+    llm_model_quality: Optional[str] = Field(default=None, max_length=255)
+    llm_fallback_model: Optional[str] = Field(default=None, max_length=255)
     llm_temperature: Optional[float] = None
     llm_top_p: Optional[float] = None
     llm_max_completion_tokens: Optional[int] = None
@@ -85,35 +89,44 @@ class ValidateKeyResponse(BaseModel):
 # ---------- Helpers ----------
 
 def _load_settings() -> dict:
+    persisted: dict = {}
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            merged = {**DEFAULT_SETTINGS, **data}
-            return merged
-    return dict(DEFAULT_SETTINGS)
+            persisted = json.load(f)
+
+    merged = {**DEFAULT_SETTINGS, **persisted}
+    if settings.GROQ_API_KEY:
+        merged["groq_api_key"] = settings.GROQ_API_KEY
+    return merged
 
 
 def _save_settings(data: dict) -> None:
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    persisted = {key: value for key, value in data.items() if key not in SENSITIVE_SETTINGS_KEYS}
+    fd = os.open(SETTINGS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(persisted, f, indent=2)
+
+
+def _mask_api_key(key: str) -> str:
+    if key and len(key) > 8:
+        return key[:4] + "..." + key[-4:]
+    return key
 
 
 # ---------- Endpoints ----------
 
 @router.get("", response_model=SettingsResponse)
-def get_settings():
+def get_settings(user: User = Depends(require_user)):
     data = _load_settings()
-    # Mask API key for display
-    key = data.get("groq_api_key", "")
-    if key and len(key) > 8:
-        data["groq_api_key"] = key[:4] + "..." + key[-4:]
+    data["groq_api_key"] = _mask_api_key(data.get("groq_api_key", ""))
     return SettingsResponse(**data)
 
 
 @router.patch("", response_model=SettingsResponse)
-def update_settings(body: SettingsUpdate):
+def update_settings(body: SettingsUpdate, user: User = Depends(require_user)):
     current = _load_settings()
     update_data = body.model_dump(exclude_none=True)
+    api_key = update_data.pop("groq_api_key", None)
 
     if "cards_per_document" in update_data:
         update_data["cards_per_document"] = max(
@@ -133,19 +146,24 @@ def update_settings(body: SettingsUpdate):
         update_data["llm_top_p"] = max(0.0, min(float(update_data["llm_top_p"]), 1.0))
 
     current.update(update_data)
+    if api_key is not None:
+        settings.GROQ_API_KEY = api_key.strip()
+        current["groq_api_key"] = settings.GROQ_API_KEY
     _save_settings(current)
     reload_runtime_settings()
 
-    # Mask key in response
     resp = dict(current)
-    key = resp.get("groq_api_key", "")
-    if key and len(key) > 8:
-        resp["groq_api_key"] = key[:4] + "..." + key[-4:]
+    resp["groq_api_key"] = _mask_api_key(resp.get("groq_api_key", ""))
     return SettingsResponse(**resp)
 
 
 @router.post("/validate-api-key", response_model=ValidateKeyResponse)
-async def validate_key(body: ValidateKeyRequest):
+async def validate_key(
+    body: ValidateKeyRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    enforce_rate_limit(request, scope="settings:validate-api-key", limit=5, window_seconds=60)
     if not body.api_key:
         return ValidateKeyResponse(valid=False, message="API key is empty")
     is_valid = await validate_api_key(body.api_key)

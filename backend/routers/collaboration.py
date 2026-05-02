@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import User
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, get_current_user_from_websocket, require_user
 
 router = APIRouter(prefix="/api/collab", tags=["collaboration"])
 
@@ -34,15 +34,18 @@ class RoomResponse(BaseModel):
     created_at: str
 
 
+def _can_access_room(room: dict, user: User) -> bool:
+    if room.get("host_id") == user.id:
+        return True
+    return any(participant.get("user_id") == user.id for participant in room.get("participants", []))
+
+
 @router.post("/rooms", response_model=RoomResponse)
 def create_room(
     body: CreateRoomRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     room_id = str(uuid.uuid4())[:8]
     room = {
         "id": room_id,
@@ -61,15 +64,18 @@ def create_room(
 
 
 @router.get("/rooms")
-def list_rooms():
-    return list(_rooms.values())
+def list_rooms(user: User = Depends(require_user)):
+    return [room for room in _rooms.values() if _can_access_room(room, user)]
 
 
 @router.get("/rooms/{room_id}")
-def get_room(room_id: str):
+def get_room(room_id: str, user: User = Depends(require_user)):
     if room_id not in _rooms:
         raise HTTPException(status_code=404, detail="Room not found")
-    return _rooms[room_id]
+    room = _rooms[room_id]
+    if not _can_access_room(room, user):
+        raise HTTPException(status_code=404, detail="Room not found")
+    return room
 
 
 @router.delete("/rooms/{room_id}")
@@ -85,10 +91,24 @@ def delete_room(room_id: str, user: User = Depends(get_current_user)):
 
 
 @router.websocket("/rooms/{room_id}/ws")
-async def websocket_room(websocket: WebSocket, room_id: str):
+async def websocket_room(
+    websocket: WebSocket,
+    room_id: str,
+    db: Session = Depends(get_db),
+):
     """WebSocket endpoint for real-time study collaboration."""
     if room_id not in _rooms:
         await websocket.close(code=4004, reason="Room not found")
+        return
+
+    user = get_current_user_from_websocket(websocket, db)
+    if not user:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
+
+    room = _rooms[room_id]
+    if not _can_access_room(room, user):
+        await websocket.close(code=4404, reason="Room not found")
         return
 
     await websocket.accept()
@@ -108,8 +128,10 @@ async def websocket_room(websocket: WebSocket, room_id: str):
             msg_type = data.get("type", "")
 
             if msg_type == "join":
-                user_info = data.get("user", {})
-                _rooms[room_id]["participants"].append(user_info)
+                user_info = {"user_id": user.id, "display_name": user.display_name}
+                participants = _rooms[room_id]["participants"]
+                if not any(participant.get("user_id") == user.id for participant in participants):
+                    participants.append(user_info)
                 for ws in _connections[room_id]:
                     try:
                         await ws.send_json({
