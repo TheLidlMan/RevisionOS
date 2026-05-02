@@ -260,6 +260,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         if isinstance(tags, list):
             tags = json.dumps(tags)
         card = Flashcard(
+            user_id=module.user_id,
             module_id=module.id,
             front=f_data.get("front", ""),
             back=f_data.get("back", ""),
