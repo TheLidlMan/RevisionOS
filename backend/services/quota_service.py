@@ -29,11 +29,17 @@ def get_current_ai_user_id() -> str | None:
     return _current_user_id.get()
 
 
+_NEW_CARD_KINDS = frozenset({"flashcards", "synthesis_cards", "concept_flashcards"})
+
+
 def check_ai_usage_limit(user_id: str | None) -> None:
     if not user_id:
         return
 
     daily_limit = settings.DAILY_NEW_CARDS_LIMIT
+    if daily_limit <= 0:
+        return
+
     now = datetime.now(timezone.utc)
     window_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc).replace(tzinfo=None)
     window_end = (datetime.combine(now.date(), time.min, tzinfo=timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
@@ -44,6 +50,7 @@ def check_ai_usage_limit(user_id: str | None) -> None:
             db.query(AiUsageEvent)
             .filter(
                 AiUsageEvent.user_id == user_id,
+                AiUsageEvent.kind.in_(_NEW_CARD_KINDS),
                 AiUsageEvent.created_at >= window_start,
                 AiUsageEvent.created_at < window_end,
             )
@@ -54,7 +61,7 @@ def check_ai_usage_limit(user_id: str | None) -> None:
 
     if usage_count >= daily_limit:
         raise AiQuotaExceededError(
-            f"Daily AI usage limit reached ({daily_limit} requests per day)."
+            f"Daily new-card generation limit reached ({daily_limit} requests per day)."
         )
 
 
