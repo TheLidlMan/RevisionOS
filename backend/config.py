@@ -144,6 +144,13 @@ def reload_runtime_settings() -> None:
             logger.warning("Ignoring masked Groq API key found in persisted settings")
             continue
 
+        if attr_name == "DAILY_NEW_CARDS_LIMIT":
+            try:
+                value = max(0, int(value))
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid persisted daily_new_cards_limit value: %r", value)
+                continue
+
         if attr_name == "CARDS_PER_DOCUMENT":
             try:
                 value = max(1, min(int(value), settings.MAX_CARDS_PER_REQUEST))

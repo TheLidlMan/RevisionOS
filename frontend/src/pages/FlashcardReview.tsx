@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +12,7 @@ import { formatDays } from '../utils/formatters';
 import AITutorPanel from '../components/AITutorPanel';
 import AchievementToast from '../components/AchievementToast';
 import XPPopup from '../components/XPPopup';
+import Skeleton from '../components/Skeleton';
 import confetti from 'canvas-confetti';
 
 const RATINGS: { label: string; value: Rating; key: string; color: string; bg: string; hoverBg: string }[] = [
@@ -68,7 +69,7 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function RichText({ text }: { text: string }) {
+const RichText = memo(function RichText({ text }: { text: string }) {
   const html = useMemo(() => {
     let result = escapeHtml(text);
 
@@ -105,7 +106,7 @@ function RichText({ text }: { text: string }) {
       className="text-center whitespace-pre-wrap"
     />
   );
-}
+});
 
 export default function FlashcardReview() {
   const { moduleId } = useParams<{ moduleId: string }>();
@@ -136,9 +137,17 @@ export default function FlashcardReview() {
 
   const { data: cards, isLoading } = useQuery({
     queryKey: ['flashcards', moduleId, 'due'],
-    queryFn: () => getFlashcards({ module_id: moduleId!, due: true }),
+    queryFn: async () => (await getFlashcards({ module_id: moduleId!, due: true, limit: 1000 })).items,
     enabled: !!moduleId,
   });
+
+  // Memoized derived values — avoid recomputing on every render
+  const totalCards = useMemo(() => cards?.length ?? 0, [cards]);
+  const remainingCount = useMemo(() => Math.max(0, totalCards - currentIdx), [totalCards, currentIdx]);
+  const progressPct = useMemo(
+    () => (totalCards > 0 ? (currentIdx / totalCards) * 100 : 0),
+    [totalCards, currentIdx],
+  );
 
   const { data: gamStats } = useQuery({
     queryKey: ['gamification-stats'],
@@ -199,7 +208,7 @@ export default function FlashcardReview() {
       setShowElaboration(false);
       setShowTutor(false);
       elaborationLoadingRef.current = false;
-      if (cards && currentIdx + 1 >= cards.length) {
+      if (cards && currentIdx + 1 >= totalCards) {
         if (typeof performance !== 'undefined') {
           setCompletedDurationSec(Math.round((performance.now() - startTimeRef.current) / 1000));
         }
@@ -285,8 +294,16 @@ export default function FlashcardReview() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <SpinnerGap className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
+        <div className="flex items-center justify-between mb-8">
+          <Skeleton style={{ height: 20, width: 60 }} />
+          <Skeleton style={{ height: 20, width: 100 }} />
+        </div>
+        <Skeleton style={{ height: 3, marginBottom: 32 }} />
+        <Skeleton style={{ height: 300, borderRadius: 16, marginBottom: 32 }} />
+        <div className="flex justify-center gap-3">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} style={{ height: 48, width: 90, borderRadius: 8 }} />)}
+        </div>
       </div>
     );
   }
@@ -424,7 +441,7 @@ export default function FlashcardReview() {
             </span>
           )}
           <span style={{ color: 'var(--text-secondary)', fontWeight: 300, fontSize: '0.9rem' }}>
-            {currentIdx + 1} / {cards.length}
+            {currentIdx + 1} / {totalCards} ({remainingCount} remaining)
           </span>
         </div>
       </div>
@@ -440,7 +457,7 @@ export default function FlashcardReview() {
             background: 'var(--accent)',
             borderRadius: '4px',
             transition: 'width 0.3s ease',
-            width: `${((currentIdx) / cards.length) * 100}%`,
+            width: `${progressPct}%`,
           }}
         />
       </div>

@@ -2,10 +2,12 @@ import os
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
+from cache import cache_get, cache_set, cache_invalidate_prefix
 from database import get_db
 from models.document import Document
 from models.flashcard import Flashcard
@@ -81,6 +83,12 @@ class ModuleStatsResponse(BaseModel):
     manual_cards: int = 0
 
 
+class PaginatedModulesResponse(BaseModel):
+    items: list[ModuleResponse]
+    total: int
+    has_more: bool
+
+
 def _apply_module_scope(query, user: OptionalType[User]):
     if user:
         return query.filter(Module.user_id == user.id)
@@ -88,27 +96,37 @@ def _apply_module_scope(query, user: OptionalType[User]):
 
 
 def _compute_module_stats(db: Session, module: Module) -> dict:
+    """Compute module statistics using SQL aggregates instead of loading all cards."""
     now = datetime.utcnow()
-    cards = db.query(Flashcard).filter(Flashcard.module_id == module.id).all()
-    total_cards = len(cards)
-    due_cards = sum(1 for c in cards if c.due is not None and c.due <= now)
-    new_cards = sum(1 for c in cards if c.state == "NEW")
-    learning_cards = sum(1 for c in cards if c.state in ("LEARNING", "RELEARNING"))
-    review_cards = sum(1 for c in cards if c.state == "REVIEW")
-    mastered = sum(1 for c in cards if c.state == "REVIEW" and c.lapses == 0 and c.reps >= 2)
+
+    # Single query: counts by state and due
+    from sqlalchemy import case, and_
+
+    stats_row = db.query(
+        func.count(Flashcard.id).label("total_cards"),
+        func.sum(case((and_(Flashcard.due.isnot(None), Flashcard.due <= now), 1), else_=0)).label("due_cards"),
+        func.sum(case((Flashcard.state == "NEW", 1), else_=0)).label("new_cards"),
+        func.sum(case((Flashcard.state.in_(["LEARNING", "RELEARNING"]), 1), else_=0)).label("learning_cards"),
+        func.sum(case((Flashcard.state == "REVIEW", 1), else_=0)).label("review_cards"),
+        func.sum(case((and_(Flashcard.state == "REVIEW", Flashcard.lapses == 0, Flashcard.reps >= 2), 1), else_=0)).label("mastered"),
+        func.sum(case((Flashcard.generation_source == "AUTO", 1), else_=0)).label("auto_cards"),
+        func.sum(case((Flashcard.generation_source != "AUTO", 1), else_=0)).label("manual_cards"),
+    ).filter(Flashcard.module_id == module.id).one()
+
+    total_cards = stats_row.total_cards or 0
+    due_cards = int(stats_row.due_cards or 0)
+    new_cards = int(stats_row.new_cards or 0)
+    learning_cards = int(stats_row.learning_cards or 0)
+    review_cards = int(stats_row.review_cards or 0)
+    mastered = int(stats_row.mastered or 0)
+    auto_cards = int(stats_row.auto_cards or 0)
+    manual_cards = int(stats_row.manual_cards or 0)
     mastery_pct = (mastered / total_cards * 100) if total_cards > 0 else 0.0
-    total_documents = db.query(Document).filter(
+
+    total_documents = db.query(func.count(Document.id)).filter(
         Document.module_id == module.id,
         Document.delete_requested_at.is_(None),
-    ).count()
-    auto_cards = db.query(Flashcard).filter(
-        Flashcard.module_id == module.id,
-        Flashcard.generation_source == "AUTO",
-    ).count()
-    manual_cards = db.query(Flashcard).filter(
-        Flashcard.module_id == module.id,
-        Flashcard.generation_source != "AUTO",
-    ).count()
+    ).scalar() or 0
 
     return {
         "total_cards": total_cards,
@@ -156,10 +174,27 @@ def _serialize_document_summary(document: Document) -> dict[str, Any]:
     }
 
 
-@router.get("", response_model=list[ModuleResponse])
-def list_modules(db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    modules = _apply_module_scope(db.query(Module), user).order_by(Module.created_at.desc()).all()
-    return [_module_to_response(module, _compute_module_stats(db, module)) for module in modules]
+@router.get("", response_model=PaginatedModulesResponse)
+def list_modules(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    user_id = user.id if user else "anonymous"
+    cache_key = f"cache:module:{user_id}:list:{skip}:{limit}"
+
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    base_query = _apply_module_scope(db.query(Module), user).order_by(Module.created_at.desc())
+    total = base_query.count()
+    modules = base_query.offset(skip).limit(limit).all()
+    items = [_module_to_response(m, _compute_module_stats(db, m)) for m in modules]
+    response = PaginatedModulesResponse(items=items, total=total, has_more=(skip + len(items)) < total)
+    cache_set(cache_key, response.model_dump(mode="json"))
+    return response
 
 
 @router.post("", response_model=ModuleResponse, status_code=201)
@@ -174,6 +209,8 @@ def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: Optio
     db.add(module)
     db.commit()
     db.refresh(module)
+    user_id = user.id if user else "anonymous"
+    cache_invalidate_prefix(f"cache:module:{user_id}:")
     return _module_to_response(module, _compute_module_stats(db, module))
 
 
@@ -236,6 +273,8 @@ def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_
     rebuild_module_outputs(db, module)
     db.commit()
     db.refresh(module)
+    user_id = user.id if user else "anonymous"
+    cache_invalidate_prefix(f"cache:module:{user_id}:")
     return _module_to_response(module, _compute_module_stats(db, module))
 
 
@@ -251,6 +290,8 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalT
 
     db.delete(module)
     db.commit()
+    user_id = user.id if user else "anonymous"
+    cache_invalidate_prefix(f"cache:module:{user_id}:")
     return None
 
 

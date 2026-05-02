@@ -8,6 +8,7 @@ import type {
   AIStreamEvent,
   Document,
   Flashcard,
+  FlashcardListResponse,
   FlashcardCreate,
   FlashcardUpdate,
   ReviewResponse,
@@ -299,7 +300,11 @@ export const getFlashcards = (params?: {
   due?: boolean;
   generation_source?: string;
   state?: string;
-}) => client.get<Flashcard[]>('/flashcards', { params }).then((r) => r.data);
+  search?: string;
+  sort?: 'updated_desc' | 'created_desc' | 'created_asc' | 'front_asc';
+  limit?: number;
+  offset?: number;
+}) => client.get<FlashcardListResponse>('/flashcards', { params }).then((r) => r.data);
 
 export const createFlashcard = (data: FlashcardCreate) =>
   client.post<Flashcard>('/flashcards', data).then((r) => r.data);

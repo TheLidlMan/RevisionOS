@@ -119,6 +119,14 @@ export interface Flashcard {
   updated_at: string;
 }
 
+export interface FlashcardListResponse {
+  items: Flashcard[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
 export interface FlashcardCreate {
   module_id: string;
   front: string;

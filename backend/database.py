@@ -6,9 +6,15 @@ from sqlalchemy.schema import CreateColumn
 
 from config import settings
 
-engine_kwargs = {"echo": False}
+engine_kwargs: dict[str, Any] = {"echo": False}
 if settings.DATABASE_URL.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # Configure connection pooling for production databases (PostgreSQL, MySQL, etc.)
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_recycle"] = 1800  # recycle connections every 30 minutes
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 

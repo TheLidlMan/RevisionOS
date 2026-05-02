@@ -1,196 +1,209 @@
-# Revise OS — AI-Powered Adaptive Study Platform
+# Revise OS
 
-Revise OS transforms folders of lecture transcripts, PDFs, and slides into an intelligent, adaptive revision engine. It ingests study materials organised by module, generates flashcards and quizzes using AI, tracks per-question mastery with the FSRS spaced repetition algorithm, and only surfaces material you haven't yet mastered.
+**AI-powered adaptive study. Turn your lecture notes into exam performance.**
+
+[![Deploy with Railway](https://railway.app/button.svg)](https://railway.app)
+[![Deploy with Cloudflare](https://img.shields.io/badge/Cloudflare_Pages-frontend-orange)](https://dash.cloudflare.com)
+
+Revise OS transforms folders of lecture transcripts, PDFs, and slides into an intelligent, adaptive revision engine. Upload your materials, get AI-generated flashcards and quizzes, and let the FSRS spaced repetition algorithm handle the rest — surfacing only what you haven't yet mastered, exactly when you need to see it.
+
+**[Visit reviseos.co.uk](https://reviseos.co.uk)** — use the live app free, no setup required.
+
+---
+
+## What it looks like
+
+Screenshots and full feature demos are available at **[reviseos.co.uk](https://reviseos.co.uk)**:
+
+| | |
+|---|
+| ![Study Dashboard](https://reviseos.co.uk/screenshots/dashboard.png) | ![Flashcard Review](https://reviseos.co.uk/screenshots/flashcards.png) |
+| *Dashboard — track mastery across every module* | *Flashcard review with FSRS scheduling* |
+| ![Quiz Mode](https://reviseos.co.uk/screenshots/quiz.png) | ![Knowledge Graph](https://reviseos.co.uk/screenshots/graph.png) |
+| *AI-generated quizzes with explanations* | *Visualise how concepts connect* |
+| ![Study Planner](https://reviseos.co.uk/screenshots/planner.png) | |
+| *Science-backed weekly planner* | |
+
+---
 
 ## Features
 
-- **Smart File Processing** — Upload PDFs and text files; AI extracts key concepts automatically
-- **AI Flashcard Generation** — Generates high-quality flashcards from your study materials using Groq with production-stable model routing
-- **FSRS Spaced Repetition** — Industry-standard scheduling algorithm ensures you review cards at optimal intervals
-- **Quiz Mode** — Multiple choice questions with instant feedback and explanations
-- **Module Organisation** — Organise materials by course/subject with colour coding
-- **Mastery Tracking** — Track your progress per module with mastery percentages
-- **Neo4j Knowledge Graph** — Sync uploaded documents and extracted concepts into a graph database for richer topic relationships
-- **Study Coach** — Build graph-aware topic checklists, answer AI-marked questions, and persist per-topic progress in the UI
-- **Settings** — Configurable AI parameters, daily card limits, and study preferences
+### Adaptive Flashcards
+Upload any PDF or text file. Revise OS extracts key concepts and generates high-quality flashcards using AI. No manual card creation required.
+
+### FSRS Spaced Repetition
+Industry-standard FSRS algorithm schedules reviews at the optimal moment — just before you'd forget. More efficient than traditional flashcard apps, backed by research.
+
+### AI Quiz Mode
+Multiple choice questions generated from your materials. Instant feedback with explanations so you understand why you got something wrong — not just whether you did.
+
+### Knowledge Graph *(Neo4j)*
+When Neo4j is configured, Revise OS syncs your documents and extracted concepts into a graph database, building a living map of how topics connect. Surface isolated gaps, discover hidden relationships, and understand the structure of your knowledge spatially.
+
+### Smart Study Planner
+A personalised weekly schedule that balances new learning with review sessions, tuned to your performance. Rest days included — science says so.
+
+### Module Organisation
+Organise by subject, course, or topic. Colour-coded modules keep everything tidy. One click to upload, one click to generate.
+
+### Bring Your Own API Key
+Uses the Groq API — bring your own key, use the free tier, never get locked in. Full control, no hidden costs.
+
+---
+
+## Live App
+
+The easiest way to use Revise OS is the hosted version — no setup, no configuration, ready in seconds.
+
+**👉 [app.reviseos.co.uk](https://app.reviseos.co.uk)**
+
+Free to start. Groq API key required (free tier available at [console.groq.com](https://console.groq.com)).
+
+---
+
+## Self-Host Quick Start
+
+Want to run it on your own machine or server? You'll need:
+
+- **Python 3.11+**
+- **Node.js 18+**
+- A **Groq API key** — sign up free at [console.groq.com](https://console.groq.com)
+
+### Option 1 — Docker (recommended)
+
+```bash
+git clone https://github.com/TheLidlMan/RevisionOS.git
+cd RevisionOS
+
+# Add your Groq API key
+cp .env.example .env
+# Edit .env and set GROQ_API_KEY=your_key_here
+
+# Start everything (frontend + backend; optionally Neo4j if NEO4J_URI is set)
+docker compose up --build
+```
+
+Open **[http://localhost:3000](http://localhost:3000)** in your browser. If Neo4j is configured, the Neo4j Browser is at **http://localhost:7474**.
+
+### Option 2 — Manual
+
+**Backend:**
+
+```bash
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+export GROQ_API_KEY=your_key_here
+uvicorn main:app --reload --port 8000
+```
+
+**Frontend:**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend runs at **http://localhost:5173**, proxying API calls to the backend at **http://localhost:8000**.
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
+|-------|------------|
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Tailwind CSS v4 |
 | Backend | FastAPI (Python 3.11+) |
 | Database | SQLite/Postgres via SQLAlchemy + optional Neo4j graph database |
-| AI/LLM | Groq API (`openai/gpt-oss-120b` primary, routed by task) |
-| Spaced Repetition | py-fsrs v4 |
+| AI/LLM | Groq API (`openai/gpt-oss-120b` primary) |
+| Spaced Repetition | [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs) v4 |
 
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- A [Groq API key](https://console.groq.com/) (free tier available)
-
-### Option 1: Docker (Recommended)
-
-```bash
-# Clone the repository
-git clone https://github.com/TheLidlMan/RevisionOS.git
-cd RevisionOS
-
-# Set your Groq API key
-cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
-
-# Start everything
-docker compose up --build
-```
-
-The app will be available at **http://localhost:3000** and Neo4j Browser at **http://localhost:7474**.
-
-### Option 2: Manual Setup
-
-#### Backend
-
-```bash
-cd backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export GROQ_API_KEY=gsk_your_key_here
-
-# Start the server
-uvicorn main:app --reload --port 8000
-```
-
-#### Frontend
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start dev server (proxies API calls to backend)
-npm run dev
-```
-
-The frontend will be at **http://localhost:5173** and the API at **http://localhost:8000**.
-
-## Usage
-
-1. **Add your Groq API key** in Settings (`/settings`)
-2. **Create a module** from the Dashboard (e.g., "Corporate Finance")
-3. **Upload documents** — PDFs or text files via the Upload Center; the backend now syncs extracted concepts into Neo4j when configured
-4. **Generate flashcards** — Click "Generate Flashcards" on the module page
-5. **Open Study Coach** — Pick a topic, generate a graph-aware checklist, answer coach questions, and save topic progress
-6. **Start reviewing** — Click "Start Review" to begin FSRS-scheduled flashcard sessions
-7. **Take quizzes** — Test yourself with AI-generated multiple choice questions
-
-## API Documentation
-
-Once the backend is running, visit **http://localhost:8000/docs** for the interactive Swagger UI with all available endpoints.
-
-### Key Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/modules` | List all modules with stats |
-| `POST /api/documents/upload` | Upload a document |
-| `POST /api/modules/{id}/generate-cards` | Generate AI flashcards |
-| `GET /api/flashcards?module_id=&due=true` | Get due flashcards |
-| `POST /api/flashcards/{id}/review` | Submit FSRS review rating |
-| `POST /api/quizzes/sessions` | Start a quiz session |
-| `GET /api/analytics/overview` | Dashboard statistics |
+---
 
 ## Project Structure
 
 ```
-ReviseOS/
+RevisionOS/
 ├── backend/
-│   ├── main.py              # FastAPI app entry
-│   ├── config.py            # Settings & env vars
-│   ├── database.py          # SQLAlchemy setup
-│   ├── models/              # ORM models (7 tables)
-│   ├── routers/             # API endpoints (7 routers)
-│   ├── services/            # Business logic
-│   │   ├── ai_service.py    # Groq API integration
-│   │   ├── file_processor.py # PDF/text extraction
-│   │   └── fsrs_service.py  # Spaced repetition
-│   └── alembic/             # DB migrations
+│   ├── main.py              # FastAPI entry point
+│   ├── models/              # ORM models
+│   ├── routers/             # API endpoints
+│   └── services/
+│       ├── ai_service.py   # Groq API integration
+│       ├── file_processor.py # PDF/text extraction
+│       └── fsrs_service.py  # Spaced repetition engine
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/           # 6 page components
-│   │   ├── components/      # Reusable UI components
+│   │   ├── pages/           # Page components
+│   │   ├── components/      # Reusable UI
 │   │   ├── api/             # Typed API client
-│   │   ├── store/           # Zustand state
-│   │   └── types/           # TypeScript interfaces
+│   │   └── store/           # Zustand state management
 │   └── vite.config.ts
+├── marketing/               # Landing page (reviseos.co.uk)
 ├── docker-compose.yml
 └── .env.example
 ```
 
-## Environment Variables
+---
+
+## API Docs
+
+With the backend running, visit **[http://localhost:8000/docs](http://localhost:8000/docs)** for the interactive Swagger UI.
+
+### Key Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/modules` | List all modules with stats |
+| `POST` | `/api/documents/upload` | Upload a PDF or text file |
+| `POST` | `/api/modules/{id}/generate-cards` | Generate AI flashcards |
+| `GET` | `/api/flashcards?module_id=&due=true` | Get cards due for review |
+| `POST` | `/api/flashcards/{id}/review` | Submit a review rating |
+| `POST` | `/api/quizzes/sessions` | Start a quiz session |
+| `GET` | `/api/analytics/overview` | Dashboard statistics |
+
+---
+
+## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GROQ_API_KEY` | *(required)* | Your Groq API key |
 | `DATABASE_URL` | `sqlite:///./revisionos.db` | Database connection |
-| `NEO4J_URI` | *(optional)* | Neo4j Bolt connection string, e.g. `bolt://localhost:7687` |
+| `NEO4J_URI` | *(optional)* | Neo4j Bolt connection, e.g. `bolt://localhost:7687` |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | *(optional)* | Neo4j password |
 | `NEO4J_DATABASE` | `neo4j` | Neo4j database name |
-| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,https://revisionos-frontend.pages.dev,https://reviseos.co.uk,https://login.reviseos.co.uk,https://app.reviseos.co.uk,https://api.reviseos.co.uk` | Comma-separated allowed frontend origins |
-| `CORS_ORIGIN_REGEX` | `https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)` | Optional regex for Cloudflare Pages previews and ReviseOS subdomains |
-| `LLM_MODEL` | `openai/gpt-oss-120b` | Primary high-quality LLM model |
-| `LLM_MODEL_QUALITY` | `openai/gpt-oss-20b` | Mid-tier model for cheaper structured tasks |
-| `LLM_MODEL_FAST` | `llama-3.1-8b-instant` | Fast low-cost model for simple tasks |
-| `LLM_FALLBACK_MODEL` | `llama-3.3-70b-versatile` | Fallback when the primary model fails |
-| `UPLOAD_DIR` | `./uploads` | File upload directory |
-| `DAILY_NEW_CARDS_LIMIT` | `20` | Max new cards per day |
-| `CARDS_PER_DOCUMENT` | `200` | Flashcards generated per doc |
-| `QUESTIONS_PER_DOCUMENT` | `10` | Quiz questions per doc |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | Primary LLM model |
+| `LLM_MODEL_QUALITY` | `openai/gpt-oss-20b` | Mid-tier model |
+| `LLM_MODEL_FAST` | `llama-3.1-8b-instant` | Fast/cheap model |
+| `DAILY_NEW_CARDS_LIMIT` | `20` | New cards introduced per day |
+| `CARDS_PER_DOCUMENT` | `200` | Max flashcards generated per document |
+| `QUESTIONS_PER_DOCUMENT` | `10` | Quiz questions generated per document |
 | `DESIRED_RETENTION` | `0.9` | FSRS target retention rate |
 
-## GitHub Auto-Deploy (Main Branch)
+---
 
-This repository includes a GitHub Actions workflow at `.github/workflows/deploy-main.yml`.
+## Production Deploy
 
-On every push to `main`, it will:
-1. Run Alembic migrations against your production Supabase/Postgres database.
+### Frontend (Cloudflare Pages)
 
-Backend deploys are handled directly by Railway from the connected GitHub repository, so the GitHub Action no longer deploys the backend service.
+1. Connect the repo to Cloudflare Pages
+2. Set root directory to `frontend`
+3. Build command: `npm run build` → output: `dist`
+4. Add environment variable: `VITE_API_BASE_URL` = your backend URL
 
-Frontend deploys should also be handled directly by Cloudflare Pages via GitHub integration (build on push), so the GitHub Action no longer deploys the frontend.
+### Backend (Railway)
 
-For Railway direct GitHub deploys, the repository root includes a production Dockerfile that builds the backend from `backend/`, so the Railway service can continue watching `main` without needing a separate GitHub Action deploy step.
+Connect the repo to Railway and point it at the `backend/` directory. Add your `GROQ_API_KEY` and optionally `DATABASE_URL` (for a hosted Postgres instead of SQLite).
 
-### Required GitHub Secrets
+### Database Migrations
 
-Add these in GitHub: **Settings -> Secrets and variables -> Actions -> New repository secret**.
+A GitHub Action runs Alembic migrations on every push to `main`. Requires `DATABASE_URL` set as a repository secret.
 
-| Secret | Description |
-|---|---|
-| `DATABASE_URL` | Production Postgres URL used for Alembic migrations |
-
-### Cloudflare Pages Direct GitHub Deploy
-
-Connect your frontend repo to Cloudflare Pages and set:
-1. Production branch: `main`
-2. Root directory: `frontend`
-3. Build command: `npm run build`
-4. Build output directory: `dist`
-5. Environment variable: `VITE_API_BASE_URL` = your Railway backend URL (for example `https://revisionos-api-production.up.railway.app/api`)
-
-After `DATABASE_URL` is set in GitHub Actions and Cloudflare Pages is connected to this repo, pushes to `main` will run DB migrations and trigger frontend deploys automatically.
+---
 
 ## License
 

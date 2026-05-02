@@ -1,9 +1,11 @@
+import hashlib
 import logging
 import os
 from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from config import settings, get_cors_origins, get_cors_origin_regex
 from database import create_tables, get_pool_snapshot, is_pool_under_pressure
@@ -21,6 +23,9 @@ fastapi_app = FastAPI(
     description="AI-Powered Adaptive Study Platform Backend",
     version="1.0.0",
 )
+
+# Compress responses larger than 500 bytes with gzip
+fastapi_app.add_middleware(GZipMiddleware, minimum_size=500)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +52,35 @@ def _should_log_request_timing(path: str) -> bool:
 
 
 @fastapi_app.middleware("http")
-async def log_targeted_request_timing(request: Request, call_next):
+async def etag_middleware(request: Request, call_next):
+    """Add ETag headers on GET responses for cacheable API endpoints."""
+    response = await call_next(request)
+    if (
+        request.method == "GET"
+        and response.status_code == 200
+        and request.url.path.startswith("/api/")
+        and "text/event-stream" not in response.headers.get("content-type", "")
+    ):
+        body_chunks = []
+        async for chunk in response.body_iterator:
+            body_chunks.append(chunk)
+        body = b"".join(body_chunks)
+        etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
+        if_none_match = request.headers.get("if-none-match", "")
+        if if_none_match == etag:
+            from fastapi.responses import Response as FResponse
+            return FResponse(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+        from starlette.responses import Response as SResponse
+        return SResponse(
+            content=body,
+            status_code=response.status_code,
+            headers={**dict(response.headers), "ETag": etag, "Cache-Control": "no-cache"},
+            media_type=response.media_type,
+        )
+    return response
+
+
+
     path = request.url.path
     if not settings.REQUEST_TIMING_LOG_ENABLED or not _should_log_request_timing(path):
         return await call_next(request)
