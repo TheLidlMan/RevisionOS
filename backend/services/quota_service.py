@@ -1,8 +1,9 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from fastapi import HTTPException
+from config import settings
 from database import SessionLocal
 from models.ai_usage_event import AiUsageEvent
 
@@ -29,7 +30,32 @@ def get_current_ai_user_id() -> str | None:
 
 
 def check_ai_usage_limit(user_id: str | None) -> None:
-    return
+    if not user_id:
+        return
+
+    daily_limit = settings.DAILY_NEW_CARDS_LIMIT
+    now = datetime.now(timezone.utc)
+    window_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc).replace(tzinfo=None)
+    window_end = (datetime.combine(now.date(), time.min, tzinfo=timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+
+    db = SessionLocal()
+    try:
+        usage_count = (
+            db.query(AiUsageEvent)
+            .filter(
+                AiUsageEvent.user_id == user_id,
+                AiUsageEvent.created_at >= window_start,
+                AiUsageEvent.created_at < window_end,
+            )
+            .count()
+        )
+    finally:
+        db.close()
+
+    if usage_count >= daily_limit:
+        raise AiQuotaExceededError(
+            f"Daily AI usage limit reached ({daily_limit} requests per day)."
+        )
 
 
 def record_ai_usage(user_id: str | None, kind: str) -> None:
