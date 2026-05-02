@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from database import get_db
@@ -75,7 +75,7 @@ def list_sessions(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    query = db.query(StudySession)
+    query = db.query(StudySession).options(joinedload(StudySession.module))
     if user:
         query = query.filter(StudySession.user_id == user.id)
     if module_id:
@@ -84,15 +84,10 @@ def list_sessions(
 
     results = []
     for s in sessions:
-        module_name = None
-        if s.module_id:
-            mod = db.query(Module).filter(Module.id == s.module_id).first()
-            if mod:
-                module_name = mod.name
         results.append(SessionListItem(
             id=s.id,
             module_id=s.module_id,
-            module_name=module_name,
+            module_name=s.module.name if s.module else None,
             session_type=s.session_type,
             started_at=s.started_at,
             ended_at=s.ended_at,
