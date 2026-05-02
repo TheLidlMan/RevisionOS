@@ -65,7 +65,7 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
         value=raw_token,
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite="lax",
+        samesite="strict",
         domain=settings.SESSION_COOKIE_DOMAIN if settings.SESSION_COOKIE_SECURE else None,
         max_age=settings.SESSION_MAX_AGE_DAYS * 86400,
         path="/",
@@ -77,7 +77,7 @@ def _clear_session_cookie(response: Response) -> None:
         key=SESSION_COOKIE_NAME,
         httponly=True,
         secure=settings.SESSION_COOKIE_SECURE,
-        samesite="lax",
+        samesite="strict",
         domain=settings.SESSION_COOKIE_DOMAIN if settings.SESSION_COOKIE_SECURE else None,
         path="/",
     )

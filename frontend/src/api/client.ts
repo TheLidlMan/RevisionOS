@@ -53,9 +53,6 @@ import type {
   StudyCoachEvaluationResult,
 } from '../types';
 
-const AUTH_TOKEN_KEY = 'reviseos_token';
-const LEGACY_AUTH_TOKEN_KEY = 'revisionos_token';
-
 const normalizeApiBaseUrl = (rawBaseUrl?: string) => {
   const fallbackBaseUrl = '/api';
   const baseUrl = rawBaseUrl?.trim();
@@ -102,18 +99,6 @@ const runSearch = (
       params: { q: query, module_id: moduleId, type, limit },
     })
     .then((r) => r.data);
-
-// Auth interceptor — bearer token as fallback for non-cookie clients
-client.interceptors.request.use((config) => {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-const getAuthToken = () =>
-  localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(LEGACY_AUTH_TOKEN_KEY);
 
 const getApiUrl = (path: string) => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
@@ -197,14 +182,10 @@ const streamJson = async <T>(
   body: unknown,
   onEvent?: (event: AIStreamEvent<T>) => void,
 ) => {
-  const token = getAuthToken();
   const response = await fetch(getApiUrl(path), {
     method: 'POST',
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return consumeEventStream<T>(response, onEvent);
@@ -215,11 +196,9 @@ const streamFormData = async <T>(
   form: FormData,
   onEvent?: (event: AIStreamEvent<T>) => void,
 ) => {
-  const token = getAuthToken();
   const response = await fetch(getApiUrl(path), {
     method: 'POST',
     credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: form,
   });
   return consumeEventStream<T>(response, onEvent);
