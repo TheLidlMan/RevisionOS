@@ -38,7 +38,7 @@ def _get_secret_key() -> str:
         )
     )
     if character_classes < 3:
-        raise RuntimeError("JWT_SECRET must include upper, lower, numeric, or symbol characters from at least 3 classes")
+        raise RuntimeError("JWT_SECRET must include characters from at least 3 of these classes: upper, lower, numeric, and symbol")
     return secret_key
 
 
