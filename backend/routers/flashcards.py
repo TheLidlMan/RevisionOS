@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import or_, and_
 
 from cache import cache_get, cache_set, cache_invalidate_prefix
 from config import settings
@@ -20,7 +20,7 @@ from models.document import Document
 from services.fsrs_service import schedule_review
 from services import ai_service
 from services.quota_service import ai_quota_scope
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from models.user import User
 
 router = APIRouter(tags=["flashcards"])
@@ -163,6 +163,23 @@ def _card_to_response(card: Flashcard, fields: Optional[set] = None) -> Flashcar
     return resp
 
 
+def _user_owns_card_condition(user_id: str, owned_module_ids):
+    """Return SQLAlchemy condition for flashcard ownership, handling legacy NULL user_id rows."""
+    return or_(
+        Flashcard.user_id == user_id,
+        and_(Flashcard.user_id.is_(None), Flashcard.module_id.in_(owned_module_ids)),
+    )
+
+
+def _owned_card_filter(db: Session, card_id: str, user_id: str):
+    """Return a query that finds a flashcard by ID owned by user_id, handling legacy NULL user_id rows."""
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == user_id)
+    return db.query(Flashcard).filter(
+        Flashcard.id == card_id,
+        _user_owns_card_condition(user_id, owned_module_ids),
+    )
+
+
 def _allocate_card_targets(docs: list[Document], requested_total: Optional[int]) -> dict[str, int]:
     if not docs:
         return {}
@@ -220,13 +237,14 @@ def list_flashcards(
     limit: int = Query(default=50, ge=1, le=200),
     fields: Optional[str] = Query(default=None, description="Comma-separated field names to include, e.g. front,back"),
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_user),
 ):
-    query = db.query(Flashcard)
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == current_user.id)
+    query = db.query(Flashcard).filter(
+        _user_owns_card_condition(current_user.id, owned_module_ids)
+    )
     if module_id:
         query = query.filter(Flashcard.module_id == module_id)
-    if user:
-        query = query.filter(Flashcard.user_id == user.id)
     if due:
         now = datetime.utcnow()
         query = query.filter(Flashcard.due <= now)
@@ -240,12 +258,17 @@ def list_flashcards(
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
-def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+def create_flashcard(
+    body: FlashcardCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == current_user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
     card = Flashcard(
+        user_id=current_user.id,
         module_id=body.module_id,
         front=body.front,
         back=body.back,
@@ -265,8 +288,13 @@ def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/api/flashcards/{card_id}", response_model=FlashcardResponse)
-def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(get_db)):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
+def update_flashcard(
+    card_id: str,
+    body: FlashcardUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    card = _owned_card_filter(db, card_id, current_user.id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     if body.front is not None:
@@ -285,8 +313,12 @@ def update_flashcard(card_id: str, body: FlashcardUpdate, db: Session = Depends(
 
 
 @router.delete("/api/flashcards/{card_id}", status_code=204)
-def delete_flashcard(card_id: str, db: Session = Depends(get_db)):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
+def delete_flashcard(
+    card_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    card = _owned_card_filter(db, card_id, current_user.id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     db.delete(card)
@@ -299,9 +331,9 @@ def review_flashcard(
     card_id: str,
     body: ReviewRequest,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    card = db.query(Flashcard).filter(Flashcard.id == card_id).first()
+    card = _owned_card_filter(db, card_id, user.id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
 

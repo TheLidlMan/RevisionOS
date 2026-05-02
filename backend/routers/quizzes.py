@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 
 from config import settings
 from database import get_db, get_pool_snapshot, is_pool_under_pressure
@@ -21,7 +21,7 @@ from models.module import Module
 from models.document import Document
 from models.user import User
 from services import ai_service
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from services.quota_service import ai_quota_scope
 
 router = APIRouter(tags=["quizzes"])
@@ -132,6 +132,17 @@ def _get_owned_session(db: Session, session_id: str, user: Optional[User]) -> St
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+def _owned_questions_filter(db: Session, user_id: str):
+    """Return a base query for questions owned by user_id, handling legacy NULL user_id rows."""
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == user_id)
+    return db.query(QuizQuestion).filter(
+        or_(
+            QuizQuestion.user_id == user_id,
+            and_(QuizQuestion.user_id.is_(None), QuizQuestion.module_id.in_(owned_module_ids)),
+        )
+    )
 
 
 def _run_generate_quiz_for_module_background(module_id: str, user_id: Optional[str] = None):
@@ -269,8 +280,9 @@ def list_questions(
     difficulty: Optional[str] = None,
     type: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
-    query = db.query(QuizQuestion)
+    query = _owned_questions_filter(db, current_user.id)
     if module_id:
         query = query.filter(QuizQuestion.module_id == module_id)
     if difficulty:
@@ -282,8 +294,8 @@ def list_questions(
 
 
 @router.post("/api/quizzes/generate", response_model=GenerateQuizResponse)
-async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db), current_user: User = Depends(require_user)):
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == current_user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -339,6 +351,7 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
         diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
 
         question = QuizQuestion(
+            user_id=module_user_id,
             module_id=body.module_id,
             question_text=qdata.get("question_text", qdata.get("question", "")),
             question_type=q_type,
@@ -362,8 +375,8 @@ async def generate_quiz(body: GenerateQuizRequest, db: Session = Depends(get_db)
 
 
 @router.post("/api/quizzes/generate/stream")
-async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(get_db)):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(get_db), current_user: User = Depends(require_user)):
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == current_user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     module_name = module.name
@@ -428,6 +441,7 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
                             options_json = json.dumps(options) if options else None
                             diff = _normalize_question_difficulty(qdata.get("difficulty", body.difficulty), default="MEDIUM")
                             question = QuizQuestion(
+                                user_id=module_user_id,
                                 module_id=body.module_id,
                                 question_text=qdata.get("question_text", qdata.get("question", "")),
                                 question_type=q_type,
@@ -490,12 +504,25 @@ def start_quiz_session(
 
     questions = []
     if body.question_ids:
-        questions = (
-            db.query(QuizQuestion)
-            .filter(QuizQuestion.id.in_(body.question_ids))
-            .all()
-        )
+        # Only load questions that belong to the authenticated user (or their modules for legacy rows)
+        if user:
+            questions = (
+                _owned_questions_filter(db, user.id)
+                .filter(QuizQuestion.id.in_(body.question_ids))
+                .all()
+            )
+        else:
+            questions = (
+                db.query(QuizQuestion)
+                .filter(QuizQuestion.id.in_(body.question_ids))
+                .all()
+            )
     elif body.module_id:
+        if user:
+            # Verify the module belongs to this user before loading questions
+            module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == user.id).first()
+            if not module:
+                raise HTTPException(status_code=404, detail="Module not found")
         questions = (
             db.query(QuizQuestion)
             .filter(QuizQuestion.module_id == body.module_id)

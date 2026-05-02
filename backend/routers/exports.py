@@ -223,6 +223,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
     doc_map: dict[int, str] = {}  # index -> new doc id for linking
     for i, d_data in enumerate(data.get("documents", [])):
         doc = Document(
+            user_id=module.user_id,
             module_id=module.id,
             filename=d_data.get("filename", "imported_doc"),
             file_type=d_data.get("file_type", "TXT"),
@@ -242,6 +243,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
     concept_map: dict[int, str] = {}
     for i, c_data in enumerate(data.get("concepts", [])):
         concept = Concept(
+            user_id=module.user_id,
             module_id=module.id,
             name=c_data.get("name", ""),
             definition=c_data.get("definition", ""),
@@ -260,6 +262,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         if isinstance(tags, list):
             tags = json.dumps(tags)
         card = Flashcard(
+            user_id=module.user_id,
             module_id=module.id,
             front=f_data.get("front", ""),
             back=f_data.get("back", ""),
@@ -280,6 +283,7 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         if isinstance(options, list):
             options = json.dumps(options)
         question = QuizQuestion(
+            user_id=module.user_id,
             module_id=module.id,
             question_text=q_data.get("question_text", ""),
             question_type=q_data.get("question_type", "MCQ"),
