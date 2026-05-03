@@ -33,7 +33,7 @@ DEFAULT_SETTINGS = {
     "questions_per_document": 10,
     "weakness_threshold": 0.7,
     "desired_retention": 0.9,
-    "theme": "dark",
+    "theme": "system",
 }
 
 
@@ -55,7 +55,7 @@ class SettingsResponse(BaseModel):
     questions_per_document: int = 10
     weakness_threshold: float = 0.7
     desired_retention: float = 0.9
-    theme: str = "dark"
+    theme: str = "system"
 
 
 class SettingsUpdate(BaseModel):

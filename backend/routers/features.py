@@ -202,7 +202,6 @@ class DocumentOut(BaseModel):
     module_id: str
     filename: str
     file_type: str
-    file_path: str
     raw_text: str = ""
     processed: bool = False
     processing_status: str = "pending"

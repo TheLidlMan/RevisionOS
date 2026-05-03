@@ -3,6 +3,7 @@ export interface Module {
   name: string;
   description: string;
   color: string;
+  sort_order: number;
   created_at: string;
   updated_at: string;
   exam_date?: string;
@@ -60,7 +61,6 @@ export interface Document {
   module_id: string;
   filename: string;
   file_type: string;
-  file_path: string;
   processed: boolean;
   processing_status: 'pending' | 'processing' | 'done' | 'failed' | 'cancelling' | 'cancelled';
   processing_stage: string;
@@ -105,6 +105,9 @@ export interface Flashcard {
   source_document_id?: string;
   source_excerpt?: string;
   tags: string[];
+  study_difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  is_bookmarked: boolean;
+  assets: FlashcardAsset[];
   generation_source: GenerationSource;
   due?: string;
   stability: number;
@@ -127,6 +130,14 @@ export interface FlashcardListResponse {
   has_more: boolean;
 }
 
+export interface FlashcardAsset {
+  id: string;
+  mime_type: string;
+  original_filename?: string;
+  content_url: string;
+  created_at: string;
+}
+
 export interface FlashcardCreate {
   module_id: string;
   front: string;
@@ -137,6 +148,8 @@ export interface FlashcardCreate {
   source_document_id?: string;
   source_excerpt?: string;
   tags?: string[];
+  study_difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
+  is_bookmarked?: boolean;
 }
 
 export interface FlashcardUpdate {
@@ -145,6 +158,8 @@ export interface FlashcardUpdate {
   card_type?: CardType;
   cloze_text?: string;
   tags?: string[];
+  study_difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
+  is_bookmarked?: boolean;
 }
 
 export interface ReviewResponse {
@@ -270,6 +285,33 @@ export interface StudySession {
   incorrect: number;
   skipped: number;
   score_pct: number;
+  active_duration_sec: number;
+  timer_state: string;
+}
+
+export interface SessionTimerState {
+  id: string;
+  module_id?: string;
+  session_type: string;
+  status: string;
+  timer_state: string;
+  active_duration_sec: number;
+  paused_at?: string;
+  resumed_at?: string;
+  started_at: string;
+  ended_at?: string;
+}
+
+export interface CardImportPreview {
+  columns: string[];
+  preview_rows: Record<string, unknown>[];
+  total_rows: number;
+  suggested_mapping: Record<string, string | null>;
+}
+
+export interface CardImportCommitResponse {
+  imported: number;
+  skipped: number;
 }
 
 export interface AnalyticsOverview {

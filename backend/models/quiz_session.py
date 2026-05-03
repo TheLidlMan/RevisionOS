@@ -28,6 +28,10 @@ class StudySession(Base):
     skipped = Column(Integer, default=0)
     score_pct = Column(Float, default=0.0)
     status = Column(String(20), default="in_progress", nullable=False)  # ready, generating, in_progress, completed
+    active_duration_sec = Column(Integer, default=0, nullable=False)
+    paused_at = Column(DateTime, nullable=True)
+    resumed_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    timer_state = Column(String(20), default="running", nullable=False)
 
     module = relationship("Module", back_populates="study_sessions")
     review_logs = relationship("ReviewLog", back_populates="session", cascade="all, delete-orphan")

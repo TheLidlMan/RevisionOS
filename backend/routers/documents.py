@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Response, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -22,7 +22,8 @@ from services.pipeline_service import ACTIVE_JOB_STATUSES, PIPELINE_TOTAL_STEPS,
 from services.graph_service import sync_module_graph
 from services import ai_service
 from typing import Optional as OptionalType
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
+from services.security import enforce_rate_limit
 from models.user import User
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -37,7 +38,6 @@ class DocumentResponse(BaseModel):
     module_id: str
     filename: str
     file_type: str
-    file_path: str
     processed: bool
     processing_status: str
     processing_stage: str
@@ -77,6 +77,7 @@ SUPPORTED_EXTENSIONS = {
     ".jpg": "IMAGE",
     ".jpeg": "IMAGE",
 }
+SUPPORTED_UPLOAD_EXTENSIONS = tuple(sorted(SUPPORTED_EXTENSIONS.keys()))
 
 
 def _get_file_type(filename: str) -> str:
@@ -91,7 +92,6 @@ def _document_to_response(doc: Document) -> DocumentResponse:
         module_id=doc.module_id,
         filename=doc.filename,
         file_type=doc.file_type,
-        file_path=doc.file_path,
         processed=doc.processed,
         processing_status=doc.processing_status,
         processing_stage=doc.processing_stage or "uploaded",
@@ -119,18 +119,38 @@ def _get_active_job(db: Session, document_id: str) -> Optional[ModuleJob]:
     )
 
 
-def _save_uploaded_file_sync(module_id: str, filename: str | None, uploaded_file) -> tuple[str, str, str, int, str]:
+def _owned_document_query(db: Session, user: User, document_id: str):
+    return (
+        db.query(Document)
+        .join(Module, Module.id == Document.module_id)
+        .filter(Document.id == document_id, Module.user_id == user.id)
+    )
+
+
+def _assert_within_directory(candidate_path: str, allowed_root: str) -> None:
+    normalized_candidate = os.path.realpath(candidate_path)
+    normalized_root = os.path.realpath(allowed_root)
+    try:
+        if os.path.commonpath([normalized_candidate, normalized_root]) != normalized_root:
+            raise HTTPException(status_code=403, detail="Path is outside the allowed import directory")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path is outside the allowed import directory")
+
+
+def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str, int, str]:
     base_upload = os.path.realpath(settings.UPLOAD_DIR)
     upload_dir = os.path.join(base_upload, module_id)
     os.makedirs(upload_dir, exist_ok=True)
 
     file_id = str(uuid.uuid4())
-    file_type = _get_file_type(filename or "unknown.txt")
-    allowed_extensions = {".pdf", ".txt", ".md", ".pptx", ".docx", ".mp3", ".mp4", ".png", ".jpg", ".jpeg"}
-    safe_basename = os.path.basename(filename or "unknown.txt")
+    file_type = _get_file_type(file.filename or "unknown.txt")
+    safe_basename = os.path.basename(file.filename or "unknown.txt")
     ext = os.path.splitext(safe_basename)[1].lower()
-    if ext not in allowed_extensions:
-        ext = ".bin"
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed extensions: {', '.join(SUPPORTED_UPLOAD_EXTENSIONS)}",
+        )
 
     saved_filename = f"{file_id}{ext}"
     file_path = os.path.join(upload_dir, saved_filename)
@@ -144,7 +164,7 @@ def _save_uploaded_file_sync(module_id: str, filename: str | None, uploaded_file
     try:
         with open(tmp_path, "wb") as f:
             while True:
-                chunk = uploaded_file.read(1024 * 1024)
+                chunk = file.file.read(1024 * 1024)
                 if not chunk:
                     break
                 total_bytes += len(chunk)
@@ -165,10 +185,6 @@ def _save_uploaded_file_sync(module_id: str, filename: str | None, uploaded_file
         raise
 
     return file_id, file_type, file_path, total_bytes, digest.hexdigest()
-
-
-async def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str, int, str]:
-    return await asyncio.to_thread(_save_uploaded_file_sync, module_id, file.filename, file.file)
 
 
 def _run_document_pipeline_background(
@@ -200,7 +216,7 @@ async def upload_document(
     resolved_module_id = module.id
     resolved_user_id = user.id if user else None
 
-    file_id, file_type, file_path, file_size_bytes, file_sha256 = await _save_uploaded_file(resolved_module_id, file)
+    file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
 
     # Create document record
     doc = Document(
@@ -371,10 +387,11 @@ async def upload_document_stream(
 async def index_document_endpoint(
     document_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     """Trigger topic extraction for a document."""
     from services.content_indexer import index_document
-    doc = db.query(Document).filter(Document.id == document_id).first()
+    doc = _owned_document_query(db, current_user, document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     if not doc.raw_text:
@@ -386,11 +403,8 @@ async def index_document_endpoint(
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
-def get_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
+def get_document(document_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    doc = _owned_document_query(db, user, document_id).first()
     if not doc or doc.delete_requested_at:
         raise HTTPException(status_code=404, detail="Document not found")
     backfill_document_summaries([doc], db)
@@ -398,11 +412,8 @@ def get_document(document_id: str, db: Session = Depends(get_db), user: Optional
 
 
 @router.get("/{document_id}/text", response_model=DocumentTextResponse)
-def get_document_text(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
+def get_document_text(document_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    doc = _owned_document_query(db, user, document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return DocumentTextResponse(
@@ -413,11 +424,8 @@ def get_document_text(document_id: str, db: Session = Depends(get_db), user: Opt
 
 
 @router.delete("/{document_id}", status_code=204)
-def delete_document(document_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
+def delete_document(document_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    doc = _owned_document_query(db, user, document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -470,12 +478,9 @@ def delete_document(document_id: str, db: Session = Depends(get_db), user: Optio
 def cancel_document_processing(
     document_id: str,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    query = db.query(Document).filter(Document.id == document_id)
-    if user:
-        query = query.filter(Document.user_id == user.id)
-    doc = query.first()
+    doc = _owned_document_query(db, user, document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -535,28 +540,25 @@ FOLDER_IMPORT_EXTENSIONS = {
 def import_folder(
     module_id: str,
     body: FolderImportRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """Import supported files from a local folder recursively."""
-    module = db.query(Module).filter(Module.id == module_id).first()
+    enforce_rate_limit(request, scope="documents:import-folder", limit=5, window_seconds=60)
+    module = db.query(Module).filter(Module.id == module_id, Module.user_id == user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
     resolved_module_id = module.id
-    resolved_user_id = user.id if user else None
+    resolved_user_id = user.id
 
     # Validate and resolve the folder path
-    folder_path = os.path.realpath(body.path)
-
-    # Block access to sensitive system directories
-    BLOCKED_PREFIXES = ("/etc", "/proc", "/sys", "/dev", "/boot", "/root", "/var/run")
-    for prefix in BLOCKED_PREFIXES:
-        if folder_path.startswith(prefix):
-            raise HTTPException(status_code=403, detail="Access to system directories is not allowed")
-
-    if not os.path.exists(folder_path):
+    if not os.path.exists(body.path):
         raise HTTPException(status_code=400, detail="Path does not exist")
+    folder_path = os.path.realpath(body.path)
+    allowed_import_root = os.path.realpath(settings.FOLDER_IMPORT_ROOT)
+    _assert_within_directory(folder_path, allowed_import_root)
     if not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
@@ -571,8 +573,11 @@ def import_folder(
     for root, _dirs, filenames in os.walk(folder_path):
         for fname in filenames:
             src_path = os.path.realpath(os.path.join(root, fname))
-            # Ensure resolved source is still within the folder_path (no symlink escape)
-            if not src_path.startswith(folder_path):
+            try:
+                within_folder = os.path.commonpath([src_path, folder_path]) == folder_path
+            except ValueError:
+                within_folder = False
+            if not within_folder:
                 continue
 
             ext = os.path.splitext(fname)[1].lower()

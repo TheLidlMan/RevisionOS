@@ -30,6 +30,17 @@ fastapi_app.add_middleware(GZipMiddleware, minimum_size=500)
 logger = logging.getLogger(__name__)
 MAX_ETAG_BODY_BYTES = 1_000_000
 
+ALLOWED_CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+ALLOWED_CORS_HEADERS = ["Authorization", "Content-Type", "If-None-Match", "X-Requested-With"]
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' https: wss:;",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
 
 def _should_log_request_timing(path: str) -> bool:
     interesting_fragments = (
@@ -50,6 +61,14 @@ def _should_log_request_timing(path: str) -> bool:
         "/import-folder/",
     )
     return any(fragment in path for fragment in interesting_fragments)
+
+
+@fastapi_app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    for header_name, header_value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header_name, header_value)
+    return response
 
 
 @fastapi_app.middleware("http")
@@ -151,6 +170,7 @@ async def on_startup():
     validate_auth_settings()
     create_tables()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    os.makedirs(settings.FOLDER_IMPORT_ROOT, exist_ok=True)
     await ensure_document_retry_worker_started()
 
 
@@ -182,6 +202,6 @@ app = CORSMiddleware(
     allow_origins=get_cors_origins(),
     allow_origin_regex=get_cors_origin_regex(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=ALLOWED_CORS_METHODS,
+    allow_headers=ALLOWED_CORS_HEADERS,
 )

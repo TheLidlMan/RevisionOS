@@ -25,7 +25,7 @@ export default function LoginPage() {
 
   const nextPath = useMemo(() => {
     const next = searchParams.get('next');
-    if (!next || !next.startsWith('/')) {
+    if (!next || !next.startsWith('/') || next.startsWith('//') || next.includes('\\')) {
       return '/';
     }
     return next;

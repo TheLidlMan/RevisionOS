@@ -4,6 +4,8 @@ import { CheckCircle, FloppyDisk, GearSix, SpinnerGap, WarningCircle } from '@ph
 import { getSettings, updateSettings, validateApiKey } from '../api/client';
 import type { SettingsUpdate } from '../types';
 import Skeleton from '../components/Skeleton';
+import ThemeToggle from '../components/ThemeToggle';
+import type { ThemeMode } from '../utils/theme';
 import { useAutosaveDraft } from '../hooks/useAutosaveDraft';
 import { formatAutosaveStatus } from '../utils/formatters';
 
@@ -61,6 +63,7 @@ export default function SettingsPage() {
               questions_per_document: settingsQuery.data.questions_per_document,
               daily_new_cards_limit: settingsQuery.data.daily_new_cards_limit,
               desired_retention: settingsQuery.data.desired_retention,
+              theme: settingsQuery.data.theme,
             },
       }));
     }
@@ -266,6 +269,22 @@ export default function SettingsPage() {
               {saveMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <FloppyDisk size={18} />}
               Save Settings
             </button>
+          </div>
+        </section>
+
+        <section className="p-5" style={glass}>
+          <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.1rem', marginBottom: 12 }}>
+            Appearance
+          </h2>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p style={{ color: 'var(--text)', fontSize: '0.95rem' }}>Theme mode</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Choose light, dark, or follow the system preference.</p>
+            </div>
+            <ThemeToggle
+              value={(form.theme as ThemeMode | undefined) ?? 'system'}
+              onChange={(theme) => setDraft((current) => ({ ...current, form: { ...current.form, theme } }))}
+            />
           </div>
         </section>
 

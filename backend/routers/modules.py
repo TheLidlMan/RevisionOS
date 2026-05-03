@@ -43,6 +43,7 @@ class ModuleResponse(BaseModel):
     name: str
     description: Optional[str]
     color: str
+    sort_order: int = 0
     created_at: datetime
     updated_at: datetime
     exam_date: Optional[datetime] = None
@@ -87,6 +88,10 @@ class PaginatedModulesResponse(BaseModel):
     items: list[ModuleResponse]
     total: int
     has_more: bool
+
+
+class ModuleReorderRequest(BaseModel):
+    ordered_ids: list[str]
 
 
 def _apply_module_scope(query, user: OptionalType[User]):
@@ -147,6 +152,7 @@ def _module_to_response(module: Module, stats: dict) -> ModuleResponse:
         name=module.name,
         description=module.description,
         color=module.color,
+        sort_order=module.sort_order,
         created_at=module.created_at,
         updated_at=module.updated_at,
         exam_date=module.exam_date,
@@ -188,7 +194,7 @@ def list_modules(
     if cached is not None:
         return cached
 
-    base_query = _apply_module_scope(db.query(Module), user).order_by(Module.created_at.desc())
+    base_query = _apply_module_scope(db.query(Module), user).order_by(Module.sort_order.asc(), Module.created_at.desc())
     total = base_query.count()
     modules = base_query.offset(skip).limit(limit).all()
     items = [_module_to_response(m, _compute_module_stats(db, m)) for m in modules]
@@ -199,12 +205,14 @@ def list_modules(
 
 @router.post("", response_model=ModuleResponse, status_code=201)
 def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    max_sort_order = _apply_module_scope(db.query(func.max(Module.sort_order)), user).scalar()
     module = Module(
         name=body.name,
         description=body.description,
         color=body.color,
         exam_date=body.exam_date,
         user_id=user.id if user else None,
+        sort_order=(int(max_sort_order) + 1) if max_sort_order is not None else 0,
     )
     db.add(module)
     db.commit()
@@ -234,7 +242,6 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
             "module_id": d.module_id,
             "filename": d.filename,
             "file_type": d.file_type,
-            "file_path": d.file_path,
             "processed": d.processed,
             "processing_status": d.processing_status,
             "processing_stage": d.processing_stage,
@@ -293,6 +300,36 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalT
     user_id = user.id if user else "anonymous"
     cache_invalidate_prefix(f"cache:module:{user_id}:")
     return None
+
+
+@router.post("/reorder", response_model=list[ModuleResponse])
+def reorder_modules(
+    body: ModuleReorderRequest,
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    if not body.ordered_ids:
+        return []
+
+    modules = _apply_module_scope(
+        db.query(Module).filter(Module.id.in_(body.ordered_ids)),
+        user,
+    ).all()
+    module_by_id = {module.id: module for module in modules}
+    missing_ids = [module_id for module_id in body.ordered_ids if module_id not in module_by_id]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail="One or more modules were not found")
+
+    for index, module_id in enumerate(body.ordered_ids):
+        module_by_id[module_id].sort_order = index
+
+    db.commit()
+
+    user_id = user.id if user else "anonymous"
+    cache_invalidate_prefix(f"cache:module:{user_id}:")
+
+    reordered = _apply_module_scope(db.query(Module), user).order_by(Module.sort_order.asc(), Module.created_at.desc()).all()
+    return [_module_to_response(module, _compute_module_stats(db, module)) for module in reordered]
 
 
 @router.post("/{module_id}/cancel-processing")

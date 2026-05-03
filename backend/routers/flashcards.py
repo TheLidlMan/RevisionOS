@@ -1,12 +1,14 @@
 import json
 import logging
+import os
 import time
 import threading
 import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -15,6 +17,7 @@ from sqlalchemy import or_, and_
 from cache import cache_get, cache_set, cache_invalidate_prefix
 from config import settings
 from database import get_db
+from models.flashcard_asset import FlashcardAsset
 from models.flashcard import Flashcard
 from models.module import Module
 from models.document import Document
@@ -22,6 +25,7 @@ from services.fsrs_service import schedule_review
 from services import ai_service
 from services.quota_service import ai_quota_scope
 from services.auth_service import get_current_user, require_user
+from services.file_processor import _validate_path
 from models.user import User
 
 router = APIRouter(tags=["flashcards"])
@@ -45,6 +49,8 @@ class FlashcardCreate(BaseModel):
     source_document_id: Optional[str] = None
     source_excerpt: Optional[str] = None
     tags: list[str] = []
+    study_difficulty: str = "MEDIUM"
+    is_bookmarked: bool = False
 
 
 class FlashcardUpdate(BaseModel):
@@ -53,6 +59,18 @@ class FlashcardUpdate(BaseModel):
     card_type: Optional[str] = None
     cloze_text: Optional[str] = None
     tags: Optional[list[str]] = None
+    study_difficulty: Optional[str] = None
+    is_bookmarked: Optional[bool] = None
+
+
+class FlashcardAssetResponse(BaseModel):
+    id: str
+    mime_type: str
+    original_filename: Optional[str] = None
+    content_url: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class FlashcardResponse(BaseModel):
@@ -66,6 +84,9 @@ class FlashcardResponse(BaseModel):
     source_document_id: Optional[str] = None
     source_excerpt: Optional[str] = None
     tags: list[str] = []
+    study_difficulty: str = "MEDIUM"
+    is_bookmarked: bool = False
+    assets: list[FlashcardAssetResponse] = []
     due: Optional[datetime] = None
     stability: float = 0.0
     difficulty: float = 0.0
@@ -118,22 +139,17 @@ class BatchReviewResponse(BaseModel):
 class PaginatedFlashcardsResponse(BaseModel):
     items: list[FlashcardResponse]
     total: int
+    limit: int
+    offset: int
     has_more: bool
-    id: str
-    due: datetime
-    stability: float
-    difficulty: float
-    elapsed_days: int
-    scheduled_days: int
-    reps: int
-    lapses: int
-    state: str
-    last_review: Optional[datetime] = None
-    xp_earned: int = 0
-    xp_total: int = 0
-    level: int = 1
-    level_up: bool = False
-    new_achievements: list[dict] = []
+
+
+class BookmarkRequest(BaseModel):
+    is_bookmarked: bool
+
+
+class FlashcardTagsResponse(BaseModel):
+    tags: list[str]
 
 
 class GenerateCardsRequest(BaseModel):
@@ -167,6 +183,18 @@ def _card_to_response(card: Flashcard, fields: Optional[set] = None) -> Flashcar
         source_document_id=card.source_document_id,
         source_excerpt=card.source_excerpt if (fields is None or "source_excerpt" in fields) else None,
         tags=tags,
+        study_difficulty=(card.study_difficulty or "MEDIUM").upper(),
+        is_bookmarked=bool(card.is_bookmarked),
+        assets=[
+            FlashcardAssetResponse(
+                id=asset.id,
+                mime_type=asset.mime_type,
+                original_filename=asset.original_filename,
+                content_url=f"/api/flashcards/assets/{asset.id}/content",
+                created_at=asset.created_at,
+            )
+            for asset in getattr(card, "assets", []) or []
+        ],
         due=card.due,
         stability=card.stability,
         difficulty=card.difficulty,
@@ -181,6 +209,19 @@ def _card_to_response(card: Flashcard, fields: Optional[set] = None) -> Flashcar
         updated_at=card.updated_at,
     )
     return resp
+
+
+def _normalize_tags(tags: Optional[list[str]]) -> list[str]:
+    if not tags:
+        return []
+    return sorted({tag.strip().lower() for tag in tags if isinstance(tag, str) and tag.strip()})
+
+
+def _normalize_study_difficulty(value: Optional[str]) -> str:
+    normalized = (value or "MEDIUM").strip().upper()
+    if normalized not in {"EASY", "MEDIUM", "HARD"}:
+        raise HTTPException(status_code=400, detail="study_difficulty must be EASY, MEDIUM, or HARD")
+    return normalized
 
 
 def _user_owns_card_condition(user_id: str, owned_module_ids):
@@ -255,6 +296,9 @@ def list_flashcards(
     due: Optional[bool] = None,
     generation_source: Optional[str] = None,
     state: Optional[str] = None,
+    study_difficulty: Optional[str] = None,
+    bookmarked_only: bool = False,
+    tags: Optional[list[str]] = Query(default=None),
     search: Optional[str] = None,
     sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"] = "updated_desc",
     skip: int = Query(default=0, ge=0),
@@ -272,9 +316,16 @@ def list_flashcards(
         query = query.filter(Flashcard.generation_source == generation_source.upper())
     if state:
         query = query.filter(Flashcard.state == state.upper())
+    if study_difficulty:
+        query = query.filter(Flashcard.study_difficulty == _normalize_study_difficulty(study_difficulty))
+    if bookmarked_only:
+        query = query.filter(Flashcard.is_bookmarked.is_(True))
     if due:
         now = datetime.utcnow()
         query = query.filter(Flashcard.due <= now)
+    normalized_tags = _normalize_tags(tags)
+    for tag in normalized_tags:
+        query = query.filter(Flashcard.tags.ilike(f'%"{tag}"%'))
     if search:
         term = f"%{search.strip()}%"
         if term != "%%":
@@ -293,7 +344,7 @@ def list_flashcards(
 
     cards = query.offset(skip).limit(limit).all()
     items = [_card_to_response(card) for card in cards]
-    return PaginatedFlashcardsResponse(items=items, total=total, has_more=(skip + len(items)) < total)
+    return PaginatedFlashcardsResponse(items=items, total=total, limit=limit, offset=skip, has_more=(skip + len(items)) < total)
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
@@ -316,7 +367,9 @@ def create_flashcard(
         concept_id=body.concept_id,
         source_document_id=body.source_document_id,
         source_excerpt=body.source_excerpt,
-        tags=json.dumps(body.tags),
+        tags=json.dumps(_normalize_tags(body.tags)),
+        study_difficulty=_normalize_study_difficulty(body.study_difficulty),
+        is_bookmarked=body.is_bookmarked,
         due=datetime.utcnow(),
         state="NEW",
     )
@@ -345,10 +398,164 @@ def update_flashcard(
     if body.cloze_text is not None:
         card.cloze_text = body.cloze_text
     if body.tags is not None:
-        card.tags = json.dumps(body.tags)
+        card.tags = json.dumps(_normalize_tags(body.tags))
+    if body.study_difficulty is not None:
+        card.study_difficulty = _normalize_study_difficulty(body.study_difficulty)
+    if body.is_bookmarked is not None:
+        card.is_bookmarked = body.is_bookmarked
     db.commit()
     db.refresh(card)
     return _card_to_response(card)
+
+
+@router.get("/api/flashcards/tags", response_model=FlashcardTagsResponse)
+def list_flashcard_tags(
+    module_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == current_user.id)
+    query = db.query(Flashcard.tags).filter(_user_owns_card_condition(current_user.id, owned_module_ids))
+    if module_id:
+        query = query.filter(Flashcard.module_id == module_id)
+
+    tag_set: set[str] = set()
+    for raw_tags, in query.all():
+        try:
+            parsed = json.loads(raw_tags or "[]")
+        except (json.JSONDecodeError, TypeError):
+            parsed = []
+        tag_set.update(_normalize_tags(parsed))
+
+    return FlashcardTagsResponse(tags=sorted(tag_set))
+
+
+@router.post("/api/flashcards/{card_id}/bookmark", response_model=FlashcardResponse)
+def set_flashcard_bookmark(
+    card_id: str,
+    body: BookmarkRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    card = _owned_card_filter(db, card_id, current_user.id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+    card.is_bookmarked = body.is_bookmarked
+    db.commit()
+    db.refresh(card)
+    return _card_to_response(card)
+
+
+def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str]:
+    base_upload = os.path.realpath(settings.UPLOAD_DIR)
+    upload_dir = os.path.join(base_upload, module_id, "flashcard-assets")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    file_id = str(uuid.uuid4())
+    safe_basename = os.path.basename(file.filename or "image.png")
+    ext = os.path.splitext(safe_basename)[1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+        ext = ".png"
+    file_path = os.path.join(upload_dir, f"{file_id}{ext}")
+    tmp_path = f"{file_path}.part"
+
+    if not os.path.realpath(file_path).startswith(base_upload):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    total_bytes = 0
+    try:
+        with open(tmp_path, "wb") as handle:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                handle.write(chunk)
+        if total_bytes <= 0:
+            raise HTTPException(status_code=400, detail="Empty uploads are not allowed")
+        os.replace(tmp_path, file_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise
+
+    return file_path, safe_basename
+
+
+@router.post("/api/flashcards/{card_id}/assets", response_model=FlashcardAssetResponse, status_code=201)
+def upload_flashcard_asset(
+    card_id: str,
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    card = _owned_card_filter(db, card_id, current_user.id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Flashcard not found")
+    if not (image.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported")
+
+    file_path, original_filename = _save_flashcard_asset(card.module_id, image)
+    asset = FlashcardAsset(
+        flashcard_id=card.id,
+        file_path=file_path,
+        mime_type=image.content_type or "image/png",
+        original_filename=original_filename,
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return FlashcardAssetResponse(
+        id=asset.id,
+        mime_type=asset.mime_type,
+        original_filename=asset.original_filename,
+        content_url=f"/api/flashcards/assets/{asset.id}/content",
+        created_at=asset.created_at,
+    )
+
+
+@router.get("/api/flashcards/assets/{asset_id}/content")
+def get_flashcard_asset_content(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    asset = (
+        db.query(FlashcardAsset)
+        .join(Flashcard, Flashcard.id == FlashcardAsset.flashcard_id)
+        .filter(FlashcardAsset.id == asset_id)
+        .filter(_user_owns_card_condition(current_user.id, db.query(Module.id).filter(Module.user_id == current_user.id)))
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    safe_path = _validate_path(asset.file_path)
+    return FileResponse(path=safe_path, media_type=asset.mime_type, filename=asset.original_filename)
+
+
+@router.delete("/api/flashcards/assets/{asset_id}", status_code=204)
+def delete_flashcard_asset(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    asset = (
+        db.query(FlashcardAsset)
+        .join(Flashcard, Flashcard.id == FlashcardAsset.flashcard_id)
+        .filter(FlashcardAsset.id == asset_id)
+        .filter(_user_owns_card_condition(current_user.id, db.query(Module.id).filter(Module.user_id == current_user.id)))
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    file_path = asset.file_path
+    db.delete(asset)
+    db.commit()
+    if file_path and os.path.exists(file_path):
+        os.remove(file_path)
+    return None
 
 
 @router.delete("/api/flashcards/{card_id}", status_code=204)
@@ -386,6 +593,7 @@ def review_flashcard(
         "lapses": card.lapses,
         "state": card.state,
         "last_review": card.last_review,
+        "study_difficulty": card.study_difficulty,
     }
 
     try:
@@ -448,7 +656,7 @@ def review_flashcard(
 def review_flashcards_batch(
     items: list[BatchReviewItem],
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """
     Submit multiple flashcard reviews in a single database transaction.
@@ -458,7 +666,19 @@ def review_flashcards_batch(
         return BatchReviewResponse(reviewed=0, results=[])
 
     card_ids = [item.id for item in items]
-    cards = {c.id: c for c in db.query(Flashcard).filter(Flashcard.id.in_(card_ids)).all()}
+    cards = {
+        c.id: c
+        for c in (
+            db.query(Flashcard)
+            .filter(
+                Flashcard.id.in_(card_ids),
+                _user_owns_card_condition(user.id, db.query(Module.id).filter(Module.user_id == user.id)),
+            )
+            .all()
+        )
+    }
+    if len(cards) != len(set(card_ids)):
+        raise HTTPException(status_code=404, detail="One or more flashcards were not found")
 
     results: list[ReviewResponse] = []
     errors: list[str] = []
@@ -479,6 +699,7 @@ def review_flashcards_batch(
             "lapses": card.lapses,
             "state": card.state,
             "last_review": card.last_review,
+            "study_difficulty": card.study_difficulty,
         }
         try:
             result = schedule_review(card_data, item.rating)
@@ -515,7 +736,7 @@ def review_flashcards_batch(
         logger.warning("Batch review had %d error(s): %s", len(errors), "; ".join(errors))
 
     # Award XP once for the whole batch
-    if user and results:
+    if results:
         try:
             from routers.gamification import process_card_review
             for _r in results:
@@ -524,8 +745,7 @@ def review_flashcards_batch(
             logger.warning("Failed to award batch gamification XP: %s", exc)
 
     # Invalidate cache for this user's due flashcards
-    if user:
-        cache_invalidate_prefix(f"cache:flashcards:{user.id}:")
+    cache_invalidate_prefix(f"cache:flashcards:{user.id}:")
 
     return BatchReviewResponse(reviewed=len(results), results=results)
 
@@ -640,10 +860,11 @@ async def _do_generate_cards(module_id: str, body: Optional[GenerateCardsRequest
             cloze_text=card_data.get("cloze_text"),
             source_document_id=card_data.get("source_document_id"),
             source_excerpt=card_data.get("source_excerpt"),
-            tags=json.dumps(tags),
+            tags=json.dumps(_normalize_tags(tags)),
             due=datetime.utcnow(),
             state="NEW",
             generation_source="AUTO",
+            study_difficulty="MEDIUM",
         )
         db.add(card)
         created_cards.append(card)

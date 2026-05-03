@@ -5,6 +5,7 @@ import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
+import { getStoredThemeMode, resolveTheme } from './utils/theme';
 import LoginPage from './pages/LoginPage';
 // Lazily loaded — defer heavier authenticated routes until navigation
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -45,6 +46,22 @@ export default function App() {
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
+
+  useEffect(() => {
+    const applyTheme = () => {
+      const theme = getStoredThemeMode();
+      document.body.classList.toggle('theme-light', resolveTheme(theme) === 'light');
+    };
+
+    applyTheme();
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    mediaQuery.addEventListener('change', applyTheme);
+    window.addEventListener('storage', applyTheme);
+    return () => {
+      mediaQuery.removeEventListener('change', applyTheme);
+      window.removeEventListener('storage', applyTheme);
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
