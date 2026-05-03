@@ -234,7 +234,6 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
             "module_id": d.module_id,
             "filename": d.filename,
             "file_type": d.file_type,
-            "file_path": d.file_path,
             "processed": d.processed,
             "processing_status": d.processing_status,
             "processing_stage": d.processing_stage,

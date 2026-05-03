@@ -489,14 +489,22 @@ async def generate_quiz_stream(body: GenerateQuizRequest, db: Session = Depends(
 def start_quiz_session(
     body: StartSessionRequest,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
+    if not body.module_id and not body.question_ids:
+        raise HTTPException(status_code=400, detail="A module_id or question_ids list is required")
+
+    if body.module_id:
+        module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == user.id).first()
+        if not module:
+            raise HTTPException(status_code=404, detail="Module not found")
+
     session = StudySession(
         module_id=body.module_id,
         session_type=body.session_type.upper(),
         started_at=datetime.utcnow(),
         total_items=len(body.question_ids),
-        user_id=user.id if user else None,
+        user_id=user.id,
     )
     db.add(session)
     db.commit()
@@ -504,27 +512,16 @@ def start_quiz_session(
 
     questions = []
     if body.question_ids:
-        # Only load questions that belong to the authenticated user (or their modules for legacy rows)
-        if user:
-            questions = (
-                _owned_questions_filter(db, user.id)
-                .filter(QuizQuestion.id.in_(body.question_ids))
-                .all()
-            )
-        else:
-            questions = (
-                db.query(QuizQuestion)
-                .filter(QuizQuestion.id.in_(body.question_ids))
-                .all()
-            )
-    elif body.module_id:
-        if user:
-            # Verify the module belongs to this user before loading questions
-            module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == user.id).first()
-            if not module:
-                raise HTTPException(status_code=404, detail="Module not found")
         questions = (
-            db.query(QuizQuestion)
+            _owned_questions_filter(db, user.id)
+            .filter(QuizQuestion.id.in_(body.question_ids))
+            .all()
+        )
+        if len(questions) != len(set(body.question_ids)):
+            raise HTTPException(status_code=404, detail="One or more questions were not found")
+    elif body.module_id:
+        questions = (
+            _owned_questions_filter(db, user.id)
             .filter(QuizQuestion.module_id == body.module_id)
             .limit(20)
             .all()

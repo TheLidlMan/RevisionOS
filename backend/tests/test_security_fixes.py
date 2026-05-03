@@ -21,6 +21,8 @@ from fastapi.testclient import TestClient
 import database
 from database import SessionLocal, create_tables
 from main import app, fastapi_app
+from models.document import Document
+from models.flashcard import Flashcard
 from models.module import Module
 from models.quiz_question import QuizQuestion
 from models.user import User
@@ -88,6 +90,44 @@ class SecurityFixesTestCase(unittest.TestCase):
             )
             db.commit()
             return module.id
+
+    def _create_module_with_document(self, user_id: str):
+        with SessionLocal() as db:
+            module = Module(user_id=user_id, name="History")
+            db.add(module)
+            db.flush()
+            document = Document(
+                user_id=user_id,
+                module_id=module.id,
+                filename="notes.txt",
+                file_type="TXT",
+                file_path="/tmp/private/notes.txt",
+                raw_text="Important notes",
+                processed=True,
+                processing_status="done",
+                word_count=2,
+            )
+            db.add(document)
+            db.commit()
+            return module.id, document.id
+
+    def _create_module_with_flashcard(self, user_id: str):
+        with SessionLocal() as db:
+            module = Module(user_id=user_id, name="Physics")
+            db.add(module)
+            db.flush()
+            card = Flashcard(
+                user_id=user_id,
+                module_id=module.id,
+                front="Question",
+                back="Answer",
+                card_type="BASIC",
+                state="NEW",
+            )
+            db.add(card)
+            db.commit()
+            db.refresh(card)
+            return module.id, card.id
 
     def test_profile_update_rejects_blank_display_name(self):
         _, token = self._create_user("profile@example.com")
@@ -250,6 +290,162 @@ class SecurityFixesTestCase(unittest.TestCase):
                 _get_secret_key()
         finally:
             settings.JWT_SECRET = original_secret
+
+    def test_security_headers_are_set(self):
+        response = self.client.get("/api/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-frame-options"], "DENY")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertIn("default-src 'self'", response.headers["content-security-policy"])
+
+    def test_cors_preflight_uses_explicit_allowlists(self):
+        response = self.client.options(
+            "/api/health",
+            headers={
+                "Origin": "https://app.reviseos.co.uk",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.headers["access-control-allow-methods"], "*")
+        self.assertNotEqual(response.headers["access-control-allow-headers"], "*")
+
+    def test_integration_imports_require_owned_module(self):
+        owner_id, _owner_token = self._create_user("integration-owner@example.com")
+        _, attacker_token = self._create_user("integration-attacker@example.com")
+        module_id = self._create_module_with_question(owner_id)
+
+        anonymous = self.client.post(
+            "/api/integrations/notion/import",
+            json={"notion_token": "token", "page_id": "page", "module_id": module_id},
+        )
+        attacker = self.client.post(
+            "/api/integrations/google-drive/import",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json={"access_token": "token", "file_id": "file", "module_id": module_id},
+        )
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(attacker.status_code, 404)
+
+    def test_document_index_requires_document_owner(self):
+        owner_id, owner_token = self._create_user("docs-owner@example.com")
+        _, attacker_token = self._create_user("docs-attacker@example.com")
+        _, document_id = self._create_module_with_document(owner_id)
+
+        anonymous = self.client.post(f"/api/documents/{document_id}/index")
+        attacker = self.client.post(
+            f"/api/documents/{document_id}/index",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+        )
+        owner = self.client.post(
+            f"/api/documents/{document_id}/index",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(attacker.status_code, 404)
+        self.assertNotEqual(owner.status_code, 401)
+
+    def test_batch_review_requires_flashcard_owner(self):
+        owner_id, owner_token = self._create_user("card-owner@example.com")
+        _, attacker_token = self._create_user("card-attacker@example.com")
+        _, card_id = self._create_module_with_flashcard(owner_id)
+
+        anonymous = self.client.post(
+            "/api/flashcards/review/batch",
+            json=[{"id": card_id, "rating": "GOOD"}],
+        )
+        attacker = self.client.post(
+            "/api/flashcards/review/batch",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json=[{"id": card_id, "rating": "GOOD"}],
+        )
+        owner = self.client.post(
+            "/api/flashcards/review/batch",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            json=[{"id": card_id, "rating": "GOOD"}],
+        )
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(attacker.status_code, 404)
+        self.assertEqual(owner.status_code, 200)
+        self.assertEqual(owner.json()["reviewed"], 1)
+
+    def test_quiz_session_creation_requires_owned_questions(self):
+        owner_id, owner_token = self._create_user("quiz-owner@example.com")
+        _, attacker_token = self._create_user("quiz-attacker@example.com")
+        module_id = self._create_module_with_question(owner_id)
+        with SessionLocal() as db:
+            question_id = db.query(QuizQuestion.id).filter(QuizQuestion.module_id == module_id).scalar()
+
+        anonymous = self.client.post(
+            "/api/quizzes/sessions",
+            json={"question_ids": [question_id]},
+        )
+        attacker = self.client.post(
+            "/api/quizzes/sessions",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json={"question_ids": [question_id]},
+        )
+        owner = self.client.post(
+            "/api/quizzes/sessions",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            json={"question_ids": [question_id]},
+        )
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(attacker.status_code, 404)
+        self.assertEqual(owner.status_code, 200)
+        self.assertEqual(len(owner.json()["questions"]), 1)
+
+    def test_folder_import_requires_safe_root_and_owned_module(self):
+        owner_id, owner_token = self._create_user("folder-owner@example.com")
+        _, attacker_token = self._create_user("folder-attacker@example.com")
+        module_id = self._create_module_with_question(owner_id)
+
+        safe_dir = Path(settings.FOLDER_IMPORT_ROOT)
+        safe_dir.mkdir(parents=True, exist_ok=True)
+        external_dir = self.test_dir / "outside-import-root"
+        external_dir.mkdir(parents=True, exist_ok=True)
+
+        anonymous = self.client.post(
+            f"/api/documents/import-folder/{module_id}",
+            json={"path": str(safe_dir)},
+        )
+        attacker = self.client.post(
+            f"/api/documents/import-folder/{module_id}",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json={"path": str(safe_dir)},
+        )
+        owner = self.client.post(
+            f"/api/documents/import-folder/{module_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            json={"path": str(external_dir)},
+        )
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(attacker.status_code, 404)
+        self.assertEqual(owner.status_code, 403)
+
+    def test_document_responses_hide_internal_file_paths(self):
+        owner_id, owner_token = self._create_user("response-owner@example.com")
+        module_id, document_id = self._create_module_with_document(owner_id)
+
+        document_response = self.client.get(
+            f"/api/documents/{document_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+        module_response = self.client.get(
+            f"/api/modules/{module_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+
+        self.assertEqual(document_response.status_code, 200)
+        self.assertEqual(module_response.status_code, 200)
+        self.assertNotIn("file_path", document_response.json())
+        self.assertNotIn("file_path", module_response.json()["documents"][0])
 
 
 if __name__ == "__main__":

@@ -60,7 +60,6 @@ export interface Document {
   module_id: string;
   filename: string;
   file_type: string;
-  file_path: string;
   processed: boolean;
   processing_status: 'pending' | 'processing' | 'done' | 'failed' | 'cancelling' | 'cancelled';
   processing_stage: string;

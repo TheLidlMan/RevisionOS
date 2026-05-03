@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     MAX_CONTEXT_TOKENS: int = 800000
     MAX_PROMPT_CHARS: int = 120000
     UPLOAD_DIR: str = "./uploads"
+    FOLDER_IMPORT_ROOT: str = "./uploads/folder-imports"
     DAILY_NEW_CARDS_LIMIT: int = 50
     AI_MONTHLY_REQUEST_LIMIT: int = 500
     CARDS_PER_DOCUMENT: int = 200
@@ -91,6 +92,7 @@ class Settings(BaseSettings):
     SESSION_COOKIE_DOMAIN: str = ".reviseos.co.uk"
     SESSION_COOKIE_SECURE: bool = True
     SESSION_MAX_AGE_DAYS: int = 7
+    TRUSTED_PROXY_IPS: str = ""
 
     model_config = {
         "env_file": ".env",

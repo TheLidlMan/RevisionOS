@@ -448,7 +448,7 @@ def review_flashcard(
 def review_flashcards_batch(
     items: list[BatchReviewItem],
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """
     Submit multiple flashcard reviews in a single database transaction.
@@ -458,7 +458,19 @@ def review_flashcards_batch(
         return BatchReviewResponse(reviewed=0, results=[])
 
     card_ids = [item.id for item in items]
-    cards = {c.id: c for c in db.query(Flashcard).filter(Flashcard.id.in_(card_ids)).all()}
+    cards = {
+        c.id: c
+        for c in (
+            db.query(Flashcard)
+            .filter(
+                Flashcard.id.in_(card_ids),
+                _user_owns_card_condition(user.id, db.query(Module.id).filter(Module.user_id == user.id)),
+            )
+            .all()
+        )
+    }
+    if len(cards) != len(set(card_ids)):
+        raise HTTPException(status_code=404, detail="One or more flashcards were not found")
 
     results: list[ReviewResponse] = []
     errors: list[str] = []
@@ -515,7 +527,7 @@ def review_flashcards_batch(
         logger.warning("Batch review had %d error(s): %s", len(errors), "; ".join(errors))
 
     # Award XP once for the whole batch
-    if user and results:
+    if results:
         try:
             from routers.gamification import process_card_review
             for _r in results:
@@ -524,8 +536,7 @@ def review_flashcards_batch(
             logger.warning("Failed to award batch gamification XP: %s", exc)
 
     # Invalidate cache for this user's due flashcards
-    if user:
-        cache_invalidate_prefix(f"cache:flashcards:{user.id}:")
+    cache_invalidate_prefix(f"cache:flashcards:{user.id}:")
 
     return BatchReviewResponse(reviewed=len(results), results=results)
 
