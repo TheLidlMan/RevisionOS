@@ -1,3 +1,4 @@
+import asyncio
 import json
 import ast
 import logging
@@ -12,6 +13,16 @@ from services import quota_service
 from services.quota_service import AiQuotaExceededError
 
 logger = logging.getLogger(__name__)
+
+def _read_json_cache_file(path: str) -> Any:
+    with open(path, "r", encoding="utf-8") as cache_file:
+        return json.load(cache_file)
+
+
+def _write_json_cache_file(path: str, payload: Any) -> None:
+    with open(path, "w", encoding="utf-8") as cache_file:
+        json.dump(payload, cache_file)
+
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 JSON_RESPONSE_FORMAT = {"type": "json_object"}
@@ -1043,8 +1054,7 @@ async def generate_flashcards(
     _cache_file = os.path.join(_cache_dir, f"{_cache_hash}.json")
     if os.path.exists(_cache_file):
         try:
-            with open(_cache_file, "r", encoding="utf-8") as _f:
-                cached_result = json.load(_f)
+            cached_result = await asyncio.to_thread(_read_json_cache_file, _cache_file)
             if isinstance(cached_result, list):
                 logger.debug("AI cache hit for flashcard generation (hash=%s)", _cache_hash[:8])
                 return cached_result
@@ -1112,8 +1122,7 @@ async def generate_flashcards(
     # Write to cache
     if result:
         try:
-            with open(_cache_file, "w", encoding="utf-8") as _f:
-                json.dump(result, _f)
+            await asyncio.to_thread(_write_json_cache_file, _cache_file, result)
         except Exception as _exc:
             logger.debug("AI cache write error: %s", _exc)
 

@@ -14,7 +14,6 @@ import AITutorPanel from '../components/AITutorPanel';
 import AchievementToast from '../components/AchievementToast';
 import XPPopup from '../components/XPPopup';
 import Skeleton from '../components/Skeleton';
-import confetti from 'canvas-confetti';
 
 const RATINGS: { label: string; value: Rating; key: string; color: string; bg: string; hoverBg: string }[] = [
   { label: 'Again', value: 'AGAIN', key: '1', color: '#fff', bg: 'rgba(220,120,100,0.8)', hoverBg: 'rgba(220,120,100,1)' },
@@ -70,13 +69,46 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+const katexRenderCache = new Map<string, string>();
+let confettiLoader: Promise<Awaited<typeof import('canvas-confetti')>> | null = null;
+
+function renderMathExpression(tex: string, displayMode: boolean): string {
+  const normalized = tex.trim();
+  const cacheKey = `${displayMode ? 'display' : 'inline'}:${normalized}`;
+  const cached = katexRenderCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const rendered = katex.renderToString(normalized, { displayMode, throwOnError: false });
+  katexRenderCache.set(cacheKey, rendered);
+  if (katexRenderCache.size > 500) {
+    const oldestKey = katexRenderCache.keys().next().value;
+    if (oldestKey) {
+      katexRenderCache.delete(oldestKey);
+    }
+  }
+  return rendered;
+}
+
+async function fireConfetti(options: {
+  particleCount: number;
+  spread: number;
+  origin: { y: number };
+  colors?: string[];
+}) {
+  confettiLoader ??= import('canvas-confetti');
+  const confettiModule = await confettiLoader;
+  confettiModule.default(options);
+}
+
 const RichText = memo(function RichText({ text }: { text: string }) {
   const html = useMemo(() => {
     let result = escapeHtml(text);
 
     result = result.replace(/\$\$([^$]+)\$\$/g, (_match, tex) => {
       try {
-        return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
+        return renderMathExpression(tex, true);
       } catch {
         return `$$${tex}$$`;
       }
@@ -84,7 +116,7 @@ const RichText = memo(function RichText({ text }: { text: string }) {
 
     result = result.replace(/\$([^$]+)\$/g, (_match, tex) => {
       try {
-        return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
+        return renderMathExpression(tex, false);
       } catch {
         return `$${tex}$`;
       }
@@ -178,7 +210,7 @@ export default function FlashcardReview() {
 
       // Fire confetti on correct answers
       if (!isWrong) {
-        confetti({ particleCount: 30, spread: 50, origin: { y: 0.7 }, colors: ['#c4956a', '#f5f0e8', '#78b478'] });
+        void fireConfetti({ particleCount: 30, spread: 50, origin: { y: 0.7 }, colors: ['#c4956a', '#f5f0e8', '#78b478'] });
       }
 
       // XP popup
@@ -214,7 +246,7 @@ export default function FlashcardReview() {
           setCompletedDurationSec(Math.round((performance.now() - startTimeRef.current) / 1000));
         }
         // Full confetti celebration on completion
-        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        void fireConfetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
         setDone(true);
       } else {
         setCurrentIdx((i) => i + 1);

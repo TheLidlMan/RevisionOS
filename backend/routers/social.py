@@ -1,13 +1,15 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
+from cache import cache_get, cache_set
 from database import get_db
+from models.module import Module
 from models.user import User
 from models.quiz_session import StudySession
 from models.flashcard import Flashcard
@@ -47,7 +49,13 @@ def get_leaderboard(
     user: Optional[User] = Depends(get_current_user),
 ):
     """Global leaderboard ranked by total reviews."""
-    users = db.query(User).filter(User.is_active == True).all()
+    user_id = user.id if user else "anonymous"
+    cache_key = f"cache:social:leaderboard:{timeframe}:{user_id}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    users = db.query(User.id, User.display_name).filter(User.is_active.is_(True)).all()
 
     cutoff = _get_timeframe_cutoff(timeframe)
 
@@ -75,22 +83,46 @@ def get_leaderboard(
 
     streak_dates: dict[str, set] = defaultdict(set)
     for session_user_id, started_at in (
-        db.query(StudySession.user_id, StudySession.started_at)
+        db.query(StudySession.user_id, func.date(StudySession.started_at))
         .filter(StudySession.user_id.isnot(None), StudySession.started_at.isnot(None))
+        .distinct()
         .all()
     ):
-        streak_dates[session_user_id].add(started_at.date())
+        if started_at is None:
+            continue
+        if isinstance(started_at, datetime):
+            streak_dates[session_user_id].add(started_at.date())
+        elif isinstance(started_at, date):
+            streak_dates[session_user_id].add(started_at)
+        else:
+            streak_dates[session_user_id].add(datetime.fromisoformat(str(started_at)).date())
 
-    card_totals: dict[str, int] = defaultdict(int)
-    mastered_totals: dict[str, int] = defaultdict(int)
-    for card_user_id, state, lapses, reps in (
-        db.query(Flashcard.user_id, Flashcard.state, Flashcard.lapses, Flashcard.reps)
+    mastery_rows = (
+        db.query(
+            Flashcard.user_id,
+            func.count(Flashcard.id).label("total"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            Flashcard.state == "REVIEW",
+                            Flashcard.lapses == 0,
+                            Flashcard.reps >= 2,
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("mastered"),
+        )
         .filter(Flashcard.user_id.isnot(None))
+        .group_by(Flashcard.user_id)
         .all()
-    ):
-        card_totals[card_user_id] += 1
-        if state == "REVIEW" and lapses == 0 and reps >= 2:
-            mastered_totals[card_user_id] += 1
+    )
+    mastery_by_user = {
+        row.user_id: (int(row.total or 0), int(row.mastered or 0))
+        for row in mastery_rows
+    }
 
     entries = []
     for u in users:
@@ -113,8 +145,9 @@ def get_leaderboard(
                 break
 
         mastery_pct = 0.0
-        if card_totals.get(u.id):
-            mastery_pct = round((mastered_totals.get(u.id, 0) / card_totals[u.id]) * 100, 1)
+        card_total, mastered_total = mastery_by_user.get(u.id, (0, 0))
+        if card_total:
+            mastery_pct = round((mastered_total / card_total) * 100, 1)
 
         entries.append(LeaderboardEntry(
             rank=0,
@@ -137,7 +170,9 @@ def get_leaderboard(
                 your_rank = entry.rank
                 break
 
-    return LeaderboardResponse(entries=entries[:50], your_rank=your_rank)
+    response = LeaderboardResponse(entries=entries[:50], your_rank=your_rank)
+    cache_set(cache_key, response.model_dump(mode="json"), ttl=120)
+    return response
 
 
 class SharedModuleCreate(BaseModel):
@@ -164,18 +199,28 @@ def share_module(
 @router.get("/shared-modules")
 def list_shared_modules(db: Session = Depends(get_db)):
     """List publicly shared modules (stub — returns all modules with user info)."""
-    from models.module import Module
-
-    modules = db.query(Module).filter(Module.user_id.isnot(None)).limit(20).all()
-    results = []
-    for m in modules:
-        owner = db.query(User).filter(User.id == m.user_id).first()
-        results.append({
-            "id": m.id,
-            "name": m.name,
-            "description": m.description,
-            "color": m.color,
-            "owner_name": owner.display_name if owner else "Unknown",
-            "created_at": m.created_at.isoformat() if m.created_at else None,
-        })
-    return results
+    modules = (
+        db.query(
+            Module.id,
+            Module.name,
+            Module.description,
+            Module.color,
+            Module.created_at,
+            User.display_name.label("owner_name"),
+        )
+        .outerjoin(User, User.id == Module.user_id)
+        .filter(Module.user_id.isnot(None))
+        .limit(20)
+        .all()
+    )
+    return [
+        {
+            "id": module.id,
+            "name": module.name,
+            "description": module.description,
+            "color": module.color,
+            "owner_name": module.owner_name or "Unknown",
+            "created_at": module.created_at.isoformat() if module.created_at else None,
+        }
+        for module in modules
+    ]

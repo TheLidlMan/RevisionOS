@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import load_only, selectinload
 
+from cache import cache_get, cache_set
 from database import get_db
 from models.concept import Concept
 from models.flashcard import Flashcard
@@ -55,7 +57,7 @@ class OptimalSessionResponse(BaseModel):
 
 # ---------- Helpers ----------
 
-def _compute_concept_confidence(db: Session, concept: Concept) -> ConceptConfidence:
+def _compute_concept_confidence(concept: Concept, logs_by_item_id: dict[str, list]) -> ConceptConfidence:
     """Compute confidence metrics for a single concept."""
     # Gather linked item IDs
     flashcard_ids = [f.id for f in concept.flashcards]
@@ -71,12 +73,10 @@ def _compute_concept_confidence(db: Session, concept: Concept) -> ConceptConfide
         )
 
     # Get review logs for these items
-    logs = (
-        db.query(ReviewLog)
-        .filter(ReviewLog.item_id.in_(all_item_ids))
-        .order_by(ReviewLog.answered_at.desc())
-        .all()
-    )
+    logs = []
+    for item_id in all_item_ids:
+        logs.extend(logs_by_item_id.get(item_id, []))
+    logs.sort(key=lambda log: log.answered_at, reverse=True)
 
     review_count = len(logs)
     correct_count = sum(1 for lg in logs if lg.was_correct)
@@ -146,19 +146,58 @@ def get_weakness_map(
             raise HTTPException(status_code=404, detail="Module not found")
         query = query.filter(Concept.module_id == module_id)
 
-    concepts = query.order_by(Concept.importance_score.desc()).all()
+    user_id = user.id if user else "anonymous"
+    cache_key = f"cache:weakness-map:{user_id}:{module_id or 'all'}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
 
-    results = [_compute_concept_confidence(db, c) for c in concepts]
+    concepts = (
+        query.options(
+            load_only(Concept.id, Concept.name, Concept.definition, Concept.importance_score),
+            selectinload(Concept.flashcards).load_only(Flashcard.id),
+            selectinload(Concept.quiz_questions).load_only(
+                QuizQuestion.id,
+                QuizQuestion.times_answered,
+                QuizQuestion.times_correct,
+            ),
+        )
+        .order_by(Concept.importance_score.desc())
+        .all()
+    )
+
+    item_ids = [
+        item_id
+        for concept in concepts
+        for item_id in (
+            [flashcard.id for flashcard in concept.flashcards]
+            + [question.id for question in concept.quiz_questions]
+        )
+    ]
+    logs_by_item_id: dict[str, list] = {}
+    if item_ids:
+        logs = (
+            db.query(ReviewLog.item_id, ReviewLog.answered_at, ReviewLog.was_correct)
+            .filter(ReviewLog.item_id.in_(item_ids))
+            .order_by(ReviewLog.item_id.asc(), ReviewLog.answered_at.desc())
+            .all()
+        )
+        for log in logs:
+            logs_by_item_id.setdefault(log.item_id, []).append(log)
+
+    results = [_compute_concept_confidence(c, logs_by_item_id) for c in concepts]
 
     weak_count = sum(1 for r in results if r.confidence_score < 40)
     mastered_count = sum(1 for r in results if r.confidence_score >= 80)
 
-    return WeaknessMapResponse(
+    response = WeaknessMapResponse(
         concepts=results,
         total_concepts=len(results),
         weak_count=weak_count,
         mastered_count=mastered_count,
     )
+    cache_set(cache_key, response.model_dump(mode="json"), ttl=60)
+    return response
 
 
 @router.get("/optimal-session", response_model=OptimalSessionResponse)
@@ -178,11 +217,41 @@ def get_optimal_session(
             raise HTTPException(status_code=404, detail="Module not found")
         query = query.filter(Concept.module_id == module_id)
 
-    concepts = query.all()
+    concepts = (
+        query.options(
+            load_only(Concept.id, Concept.name, Concept.definition, Concept.importance_score),
+            selectinload(Concept.flashcards).load_only(Flashcard.id),
+            selectinload(Concept.quiz_questions).load_only(
+                QuizQuestion.id,
+                QuizQuestion.times_answered,
+                QuizQuestion.times_correct,
+            ),
+        )
+        .all()
+    )
     if not concepts:
         return OptimalSessionResponse(items=[], total_items=0)
 
-    scored = [(_compute_concept_confidence(db, c), c) for c in concepts]
+    item_ids = [
+        item_id
+        for concept in concepts
+        for item_id in (
+            [flashcard.id for flashcard in concept.flashcards]
+            + [question.id for question in concept.quiz_questions]
+        )
+    ]
+    logs_by_item_id: dict[str, list] = {}
+    if item_ids:
+        logs = (
+            db.query(ReviewLog.item_id, ReviewLog.answered_at, ReviewLog.was_correct)
+            .filter(ReviewLog.item_id.in_(item_ids))
+            .order_by(ReviewLog.item_id.asc(), ReviewLog.answered_at.desc())
+            .all()
+        )
+        for log in logs:
+            logs_by_item_id.setdefault(log.item_id, []).append(log)
+
+    scored = [(_compute_concept_confidence(c, logs_by_item_id), c) for c in concepts]
     scored.sort(key=lambda x: x[0].confidence_score)
 
     # Take bottom 20% or at least 1

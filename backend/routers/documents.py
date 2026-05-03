@@ -119,15 +119,15 @@ def _get_active_job(db: Session, document_id: str) -> Optional[ModuleJob]:
     )
 
 
-def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str, int, str]:
+def _save_uploaded_file_sync(module_id: str, filename: str | None, uploaded_file) -> tuple[str, str, str, int, str]:
     base_upload = os.path.realpath(settings.UPLOAD_DIR)
     upload_dir = os.path.join(base_upload, module_id)
     os.makedirs(upload_dir, exist_ok=True)
 
     file_id = str(uuid.uuid4())
-    file_type = _get_file_type(file.filename or "unknown.txt")
+    file_type = _get_file_type(filename or "unknown.txt")
     allowed_extensions = {".pdf", ".txt", ".md", ".pptx", ".docx", ".mp3", ".mp4", ".png", ".jpg", ".jpeg"}
-    safe_basename = os.path.basename(file.filename or "unknown.txt")
+    safe_basename = os.path.basename(filename or "unknown.txt")
     ext = os.path.splitext(safe_basename)[1].lower()
     if ext not in allowed_extensions:
         ext = ".bin"
@@ -144,7 +144,7 @@ def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str
     try:
         with open(tmp_path, "wb") as f:
             while True:
-                chunk = file.file.read(1024 * 1024)
+                chunk = uploaded_file.read(1024 * 1024)
                 if not chunk:
                     break
                 total_bytes += len(chunk)
@@ -165,6 +165,10 @@ def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str
         raise
 
     return file_id, file_type, file_path, total_bytes, digest.hexdigest()
+
+
+async def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str, int, str]:
+    return await asyncio.to_thread(_save_uploaded_file_sync, module_id, file.filename, file.file)
 
 
 def _run_document_pipeline_background(
@@ -196,7 +200,7 @@ async def upload_document(
     resolved_module_id = module.id
     resolved_user_id = user.id if user else None
 
-    file_id, file_type, file_path, file_size_bytes, file_sha256 = _save_uploaded_file(resolved_module_id, file)
+    file_id, file_type, file_path, file_size_bytes, file_sha256 = await _save_uploaded_file(resolved_module_id, file)
 
     # Create document record
     doc = Document(

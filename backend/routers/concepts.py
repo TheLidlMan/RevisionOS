@@ -3,8 +3,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -88,6 +89,8 @@ async def get_content_map(module_id: str, db: Session = Depends(get_db)):
 @router.get("", response_model=list[ConceptResponse])
 def list_concepts(
     module_id: Optional[str] = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
@@ -96,7 +99,22 @@ def list_concepts(
         query = query.filter(Concept.user_id == user.id)
     if module_id:
         query = query.filter(Concept.module_id == module_id)
-    concepts = query.order_by(Concept.importance_score.desc()).all()
+    concepts = (
+        query.with_entities(
+            Concept.id,
+            Concept.module_id,
+            Concept.name,
+            Concept.definition,
+            Concept.explanation,
+            Concept.importance_score,
+            Concept.study_weight,
+            Concept.created_at,
+        )
+        .order_by(Concept.importance_score.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
     return [
         ConceptResponse(
             id=c.id,
@@ -122,8 +140,23 @@ def get_concept_detail(concept_id: str, db: Session = Depends(get_db), user: Opt
     if not concept:
         raise HTTPException(status_code=404, detail="Concept not found")
 
-    flashcards = db.query(Flashcard).filter(Flashcard.concept_id == concept_id).all()
-    questions = db.query(QuizQuestion).filter(QuizQuestion.concept_id == concept_id).all()
+    flashcards = (
+        db.query(Flashcard.id, Flashcard.front, Flashcard.back, Flashcard.state)
+        .filter(Flashcard.concept_id == concept_id)
+        .all()
+    )
+    questions = (
+        db.query(
+            QuizQuestion.id,
+            QuizQuestion.question_text,
+            QuizQuestion.question_type,
+            QuizQuestion.difficulty,
+            QuizQuestion.times_answered,
+            QuizQuestion.times_correct,
+        )
+        .filter(QuizQuestion.concept_id == concept_id)
+        .all()
+    )
 
     fc_briefs = [
         FlashcardBrief(id=f.id, front=f.front, back=f.back, state=f.state)
@@ -146,11 +179,13 @@ def get_concept_detail(concept_id: str, db: Session = Depends(get_db), user: Opt
     total_reviews = 0
     accuracy_rate = 0.0
     if item_ids:
-        logs = db.query(ReviewLog).filter(ReviewLog.item_id.in_(item_ids)).all()
-        total_reviews = len(logs)
+        stats = db.query(
+            func.count(ReviewLog.id).label("total_reviews"),
+            func.sum(case((ReviewLog.was_correct.is_(True), 1), else_=0)).label("correct_reviews"),
+        ).filter(ReviewLog.item_id.in_(item_ids)).one()
+        total_reviews = int(stats.total_reviews or 0)
         if total_reviews > 0:
-            correct = sum(1 for lg in logs if lg.was_correct)
-            accuracy_rate = round(correct / total_reviews * 100, 1)
+            accuracy_rate = round((int(stats.correct_reviews or 0) / total_reviews) * 100, 1)
 
     return ConceptDetailResponse(
         id=concept.id,

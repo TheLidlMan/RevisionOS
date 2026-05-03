@@ -28,6 +28,7 @@ fastapi_app = FastAPI(
 fastapi_app.add_middleware(GZipMiddleware, minimum_size=500)
 
 logger = logging.getLogger(__name__)
+MAX_ETAG_BODY_BYTES = 1_000_000
 
 
 def _should_log_request_timing(path: str) -> bool:
@@ -55,28 +56,31 @@ def _should_log_request_timing(path: str) -> bool:
 async def etag_middleware(request: Request, call_next):
     """Add ETag headers on GET responses for cacheable API endpoints."""
     response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    content_length = response.headers.get("content-length")
+    parsed_length = int(content_length) if content_length and content_length.isdigit() else None
     if (
         request.method == "GET"
         and response.status_code == 200
         and request.url.path.startswith("/api/")
-        and "text/event-stream" not in response.headers.get("content-type", "")
+        and "text/event-stream" not in content_type
+        and "attachment" not in response.headers.get("content-disposition", "")
+        and response.headers.get("etag") is None
+        and ("application/json" in content_type or content_type.startswith("text/"))
+        and (parsed_length is None or parsed_length <= MAX_ETAG_BODY_BYTES)
     ):
-        body_chunks = []
-        async for chunk in response.body_iterator:
-            body_chunks.append(chunk)
-        body = b"".join(body_chunks)
+        body = getattr(response, "body", None)
+        if body is None:
+            return response
+        if len(body) > MAX_ETAG_BODY_BYTES:
+            return response
         etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
         if_none_match = request.headers.get("if-none-match", "")
         if if_none_match == etag:
             from fastapi.responses import Response as FResponse
             return FResponse(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
-        from starlette.responses import Response as SResponse
-        return SResponse(
-            content=body,
-            status_code=response.status_code,
-            headers={**dict(response.headers), "ETag": etag, "Cache-Control": "no-cache"},
-            media_type=response.media_type,
-        )
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 
