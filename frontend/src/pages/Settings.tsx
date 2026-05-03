@@ -4,7 +4,8 @@ import { CheckCircle, FloppyDisk, GearSix, SpinnerGap, WarningCircle } from '@ph
 import { getSettings, updateSettings, validateApiKey } from '../api/client';
 import type { SettingsUpdate } from '../types';
 import Skeleton from '../components/Skeleton';
-import ThemeToggle, { type ThemeMode } from '../components/ThemeToggle';
+import ThemeToggle from '../components/ThemeToggle';
+import type { ThemeMode } from '../utils/theme';
 import { useAutosaveDraft } from '../hooks/useAutosaveDraft';
 import { formatAutosaveStatus } from '../utils/formatters';
 

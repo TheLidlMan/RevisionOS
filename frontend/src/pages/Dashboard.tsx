@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CardsThree, ClockCountdown, FolderSimplePlus, Sparkle } from '@phosphor-icons/react';
 import { getAnalyticsOverview, getModules, reorderModules } from '../api/client';
@@ -8,8 +8,6 @@ import Skeleton from '../components/Skeleton';
 import GamificationBar from '../components/GamificationBar';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { formatRelativeTime } from '../utils/formatters';
-import type { Module } from '../types';
-
 const glass = {
   background: 'var(--surface)',
   border: '1px solid var(--border)',
@@ -40,8 +38,7 @@ function getPipelineRefetchInterval(
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
-  const [sortBy, setSortBy] = usePersistentState<'UPDATED' | 'NEWEST' | 'OLDEST' | 'NAME'>('dashboard:module-sort', 'UPDATED');
-  const [orderedModules, setOrderedModules] = useState<Module[]>([]);
+  const [sortBy, setSortBy] = usePersistentState<'ORDER' | 'UPDATED' | 'NEWEST' | 'OLDEST' | 'NAME'>('dashboard:module-sort', 'ORDER');
   const [draggedId, setDraggedId] = useState<string | null>(null);
 
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
@@ -55,12 +52,6 @@ export default function Dashboard() {
     refetchInterval: (query) => getPipelineRefetchInterval(query.state.data),
   });
 
-  useEffect(() => {
-    if (modules) {
-      setOrderedModules(modules);
-    }
-  }, [modules]);
-
   const reorderMutation = useMutation({
     mutationFn: reorderModules,
     onSuccess: (nextModules) => {
@@ -69,7 +60,7 @@ export default function Dashboard() {
   });
 
   const sortedModules = useMemo(() => {
-    const list = [...(orderedModules || [])];
+    const list = [...(modules || [])];
     if (sortBy === 'NAME') {
       return list.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -79,8 +70,11 @@ export default function Dashboard() {
     if (sortBy === 'OLDEST') {
       return list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
-    return list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  }, [orderedModules, sortBy]);
+    if (sortBy === 'UPDATED') {
+      return list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    }
+    return list.sort((a, b) => a.sort_order - b.sort_order);
+  }, [modules, sortBy]);
 
   const handleDrop = (targetId: string) => {
     if (!draggedId || draggedId === targetId) {
@@ -97,7 +91,7 @@ export default function Dashboard() {
     const [moved] = current.splice(fromIndex, 1);
     current.splice(toIndex, 0, moved);
     const nextModules = current.map((module, index) => ({ ...module, sort_order: index }));
-    setOrderedModules(nextModules);
+    queryClient.setQueryData(['modules'], nextModules);
     setDraggedId(null);
     reorderMutation.mutate(nextModules.map((module) => module.id));
   };
@@ -173,6 +167,7 @@ export default function Dashboard() {
             aria-label="Sort modules"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
           >
+            <option value="ORDER">Custom order</option>
             <option value="UPDATED">Recently updated</option>
             <option value="NEWEST">Newest</option>
             <option value="OLDEST">Oldest</option>

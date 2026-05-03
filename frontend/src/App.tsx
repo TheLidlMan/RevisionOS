@@ -5,7 +5,7 @@ import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
-import { getStoredThemeMode, resolveTheme } from './components/ThemeToggle';
+import { getStoredThemeMode, resolveTheme } from './utils/theme';
 import LoginPage from './pages/LoginPage';
 // Lazily loaded — defer heavier authenticated routes until navigation
 const Dashboard = lazy(() => import('./pages/Dashboard'));

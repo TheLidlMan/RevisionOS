@@ -13,8 +13,7 @@ import {
   UploadSimple,
   X,
 } from '@phosphor-icons/react';
-import { commitCardImport, deleteFlashcard, deleteFlashcardImage, exportCardsCsv, exportCardsJson, getFlashcardTags, getFlashcards, getModule, setFlashcardBookmark, updateFlashcard, uploadFlashcardImage } from '../api/client';
-import ShowMoreText from '../components/ShowMoreText';
+import { deleteFlashcard, deleteFlashcardImage, exportCardsCsv, exportCardsJson, getFlashcardTags, getFlashcards, getModule, setFlashcardBookmark, updateFlashcard, uploadFlashcardImage } from '../api/client';
 import Skeleton from '../components/Skeleton';
 import { useToast } from '../hooks/useToast';
 import { useAutosaveDraft } from '../hooks/useAutosaveDraft';
@@ -74,7 +73,7 @@ export default function ModuleFlashcards() {
     clearDraft: clearEditDraft,
   } = useAutosaveDraft(
     `module-flashcards:${id}:edit-draft`,
-    () => ({ cardId: '', front: '', back: '', tags: [] as string[], study_difficulty: 'MEDIUM' as const, is_bookmarked: false }),
+    () => ({ cardId: '', front: '', back: '', tags: [] as string[], study_difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD', is_bookmarked: false }),
     Boolean(editing),
   );
 

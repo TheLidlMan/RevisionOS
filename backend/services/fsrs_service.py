@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fsrs import Scheduler, Card, Rating, State
@@ -113,11 +113,10 @@ def schedule_review(card_data: dict, rating: str) -> dict:
         scheduled_days = max((nd - nr).days, 0)
 
     if new_last_review and bias != 0.0:
-        adjusted_days = max(1, round(scheduled_days * (1 - bias)))
-        scheduled_days = adjusted_days
-        new_due = new_last_review + (new_due - new_last_review) * (adjusted_days / max((new_due - new_last_review).days, 1))
-        if new_due.tzinfo is not None:
-            new_due = new_due.replace(tzinfo=None)
+        interval_seconds = max((new_due - new_last_review).total_seconds(), 86400)
+        adjusted_seconds = max(86400, round(interval_seconds * (1 - bias)))
+        new_due = new_last_review + timedelta(seconds=adjusted_seconds)
+        scheduled_days = max((new_due - new_last_review).days, 0)
 
     app_state = _to_app_state(updated_card.state)
 
