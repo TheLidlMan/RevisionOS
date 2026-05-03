@@ -201,7 +201,13 @@ async def import_from_google_drive(
         file_id = str(uuid.uuid4())
         ext = os.path.splitext(filename)[1].lower()
         if ext not in GOOGLE_DRIVE_ALLOWED_FILE_TYPES:
-            raise HTTPException(status_code=400, detail="Unsupported Google Drive file type")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unsupported Google Drive file type. "
+                    f"Allowed extensions: {', '.join(sorted(GOOGLE_DRIVE_ALLOWED_FILE_TYPES))}"
+                ),
+            )
 
         file_type = GOOGLE_DRIVE_ALLOWED_FILE_TYPES[ext]
 

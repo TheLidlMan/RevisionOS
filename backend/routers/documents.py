@@ -77,6 +77,7 @@ SUPPORTED_EXTENSIONS = {
     ".jpg": "IMAGE",
     ".jpeg": "IMAGE",
 }
+SUPPORTED_UPLOAD_EXTENSIONS = tuple(sorted(SUPPORTED_EXTENSIONS))
 
 
 def _get_file_type(filename: str) -> str:
@@ -141,11 +142,13 @@ def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str
 
     file_id = str(uuid.uuid4())
     file_type = _get_file_type(file.filename or "unknown.txt")
-    allowed_extensions = {".pdf", ".txt", ".md", ".pptx", ".docx", ".mp3", ".mp4", ".png", ".jpg", ".jpeg"}
     safe_basename = os.path.basename(file.filename or "unknown.txt")
     ext = os.path.splitext(safe_basename)[1].lower()
-    if ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed extensions: {', '.join(SUPPORTED_UPLOAD_EXTENSIONS)}",
+        )
 
     saved_filename = f"{file_id}{ext}"
     file_path = os.path.join(upload_dir, saved_filename)
