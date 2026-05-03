@@ -1,6 +1,7 @@
 import math
 import threading
 from collections import defaultdict, deque
+from functools import lru_cache
 from time import monotonic
 from typing import Deque
 import ipaddress
@@ -14,6 +15,7 @@ _RATE_LIMIT_LOCK = threading.Lock()
 NetworkType = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
+@lru_cache(maxsize=1)
 def _trusted_proxy_networks() -> list[NetworkType]:
     networks: list[NetworkType] = []
     for raw_value in settings.TRUSTED_PROXY_IPS.split(","):

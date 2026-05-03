@@ -77,7 +77,7 @@ SUPPORTED_EXTENSIONS = {
     ".jpg": "IMAGE",
     ".jpeg": "IMAGE",
 }
-SUPPORTED_UPLOAD_EXTENSIONS = tuple(sorted(SUPPORTED_EXTENSIONS))
+SUPPORTED_UPLOAD_EXTENSIONS = tuple(sorted(SUPPORTED_EXTENSIONS.keys()))
 
 
 def _get_file_type(filename: str) -> str:
@@ -554,12 +554,11 @@ def import_folder(
     resolved_user_id = user.id
 
     # Validate and resolve the folder path
+    if not os.path.exists(body.path):
+        raise HTTPException(status_code=400, detail="Path does not exist")
     folder_path = os.path.realpath(body.path)
     allowed_import_root = os.path.realpath(settings.FOLDER_IMPORT_ROOT)
     _assert_within_directory(folder_path, allowed_import_root)
-
-    if not os.path.exists(folder_path):
-        raise HTTPException(status_code=400, detail="Path does not exist")
     if not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
