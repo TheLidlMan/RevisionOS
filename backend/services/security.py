@@ -11,10 +11,11 @@ from config import settings
 
 _RATE_LIMIT_BUCKETS: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 _RATE_LIMIT_LOCK = threading.Lock()
+NetworkType = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
-def _trusted_proxy_networks() -> list[ipaddress._BaseNetwork]:
-    networks: list[ipaddress._BaseNetwork] = []
+def _trusted_proxy_networks() -> list[NetworkType]:
+    networks: list[NetworkType] = []
     for raw_value in settings.TRUSTED_PROXY_IPS.split(","):
         candidate = raw_value.strip()
         if not candidate:

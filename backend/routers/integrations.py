@@ -13,6 +13,13 @@ from models.user import User
 from services.auth_service import require_user
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
+GOOGLE_DRIVE_ALLOWED_FILE_TYPES = {
+    ".pdf": "PDF",
+    ".txt": "TXT",
+    ".md": "MD",
+    ".pptx": "PPTX",
+    ".docx": "DOCX",
+}
 
 
 class NotionImportRequest(BaseModel):
@@ -193,11 +200,10 @@ async def import_from_google_drive(
 
         file_id = str(uuid.uuid4())
         ext = os.path.splitext(filename)[1].lower()
-        if ext not in {".pdf", ".txt", ".md", ".pptx", ".docx"}:
+        if ext not in GOOGLE_DRIVE_ALLOWED_FILE_TYPES:
             raise HTTPException(status_code=400, detail="Unsupported Google Drive file type")
 
-        file_type_map = {".pdf": "PDF", ".txt": "TXT", ".md": "MD", ".pptx": "PPTX", ".docx": "DOCX"}
-        file_type = file_type_map.get(ext, "TXT")
+        file_type = GOOGLE_DRIVE_ALLOWED_FILE_TYPES[ext]
 
         saved_path = os.path.join(upload_dir, f"{file_id}{ext}")
         with open(saved_path, "wb") as f:
