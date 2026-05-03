@@ -42,7 +42,16 @@
     <meta name="twitter:image" content="https://app.reviseos.co.uk/icon-512.png" />
 
     <!-- Fonts -->
-    <link href="https://api.fontshare.com/v2/css?f[]=clash-display@200,300,400,500,600,700&f[]=general-sans@200,300,400,500,600,700&display=swap" rel="stylesheet" />
+    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+    <link
+      href="https://api.fontshare.com/v2/css?f[]=clash-display@200,300,400,500,600,700&f[]=general-sans@200,300,400,500,600,700&display=optional"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all';this.onload=null;"
+    />
+    <noscript>
+      <link href="https://api.fontshare.com/v2/css?f[]=clash-display@200,300,400,500,600,700&f[]=general-sans@200,300,400,500,600,700&display=swap" rel="stylesheet" />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

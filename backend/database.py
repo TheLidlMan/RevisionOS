@@ -10,11 +10,16 @@ engine_kwargs: dict[str, Any] = {"echo": False}
 if settings.DATABASE_URL.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
-    # Configure connection pooling for production databases (PostgreSQL, MySQL, etc.)
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
+    engine_kwargs["pool_size"] = settings.DB_POOL_SIZE
+    engine_kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
+    engine_kwargs["pool_timeout"] = settings.DB_POOL_TIMEOUT
     engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_recycle"] = 1800  # recycle connections every 30 minutes
+    engine_kwargs["pool_recycle"] = settings.DB_POOL_RECYCLE
+    engine_kwargs["pool_use_lifo"] = True
+    if settings.DATABASE_URL.startswith(("postgresql://", "postgresql+", "postgres://")):
+        engine_kwargs["connect_args"] = {
+            "options": f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS}",
+        }
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 

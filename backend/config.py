@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     REQUEST_TIMING_WARN_MS: int = 1000
     AUTH_SESSION_WARN_MS: int = 250
     POOL_PRESSURE_WARN_RATIO: float = 0.8
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
+    DB_STATEMENT_TIMEOUT_MS: int = 30000
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str = ""
