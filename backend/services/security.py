@@ -3,19 +3,47 @@ import threading
 from collections import defaultdict, deque
 from time import monotonic
 from typing import Deque
+import ipaddress
 
 from fastapi import HTTPException, Request
+
+from config import settings
 
 _RATE_LIMIT_BUCKETS: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 _RATE_LIMIT_LOCK = threading.Lock()
 
 
+def _trusted_proxy_networks() -> list[ipaddress._BaseNetwork]:
+    networks: list[ipaddress._BaseNetwork] = []
+    for raw_value in settings.TRUSTED_PROXY_IPS.split(","):
+        candidate = raw_value.strip()
+        if not candidate:
+            continue
+        try:
+            if "/" in candidate:
+                networks.append(ipaddress.ip_network(candidate, strict=False))
+            else:
+                networks.append(ipaddress.ip_network(f"{candidate}/32", strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in network for network in _trusted_proxy_networks())
+
+
 def _get_request_identifier(request: Request) -> str:
     forwarded_for = request.headers.get("x-forwarded-for", "").strip()
-    if forwarded_for:
+    client_host = request.client.host if request.client and request.client.host else ""
+    if forwarded_for and client_host and _is_trusted_proxy(client_host):
         return forwarded_for.split(",", 1)[0].strip() or "anonymous"
-    if request.client and request.client.host:
-        return request.client.host
+    if client_host:
+        return client_host
     return "anonymous"
 
 

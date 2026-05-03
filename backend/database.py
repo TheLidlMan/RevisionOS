@@ -89,7 +89,8 @@ def _add_missing_columns(conn, inspector, table_name: str, column_names: list[st
         if column_name in existing or column_name not in table.c:
             continue
         column_sql = str(CreateColumn(table.c[column_name]).compile(dialect=conn.dialect))
-        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
+        quoted_table_name = conn.dialect.identifier_preparer.quote(table_name)
+        conn.execute(text(f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_sql}"))
 
 
 def _ensure_runtime_schema():

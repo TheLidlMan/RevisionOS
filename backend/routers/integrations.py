@@ -2,13 +2,15 @@ import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
+from services.security import enforce_rate_limit
 from models.user import User
-from services.auth_service import get_current_user
+from services.auth_service import require_user
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
@@ -28,8 +30,9 @@ class GoogleDriveImportRequest(BaseModel):
 @router.post("/notion/import")
 async def import_from_notion(
     body: NotionImportRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """Import content from a Notion page into a module."""
     import httpx
@@ -37,12 +40,13 @@ async def import_from_notion(
     from models.module import Module
     from models.document import Document
 
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    enforce_rate_limit(request, scope="integrations:notion-import", limit=10, window_seconds=60)
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
     module_id = module.id
-    user_id = user.id if user else None
+    user_id = user.id
     db.close()
 
     headers = {
@@ -130,8 +134,9 @@ async def import_from_notion(
 @router.post("/google-drive/import")
 async def import_from_google_drive(
     body: GoogleDriveImportRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """Import a file from Google Drive into a module."""
     import httpx
@@ -139,14 +144,13 @@ async def import_from_google_drive(
     from models.module import Module
     from models.document import Document
     from services.file_processor import extract_text
-    from config import settings
-
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    enforce_rate_limit(request, scope="integrations:google-drive-import", limit=10, window_seconds=60)
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
     module_id = module.id
-    user_id = user.id if user else None
+    user_id = user.id
     db.close()
 
     headers = {"Authorization": f"Bearer {body.access_token}"}
@@ -189,6 +193,8 @@ async def import_from_google_drive(
 
         file_id = str(uuid.uuid4())
         ext = os.path.splitext(filename)[1].lower()
+        if ext not in {".pdf", ".txt", ".md", ".pptx", ".docx"}:
+            raise HTTPException(status_code=400, detail="Unsupported Google Drive file type")
 
         file_type_map = {".pdf": "PDF", ".txt": "TXT", ".md": "MD", ".pptx": "PPTX", ".docx": "DOCX"}
         file_type = file_type_map.get(ext, "TXT")
