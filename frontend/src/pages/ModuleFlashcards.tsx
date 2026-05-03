@@ -3,13 +3,17 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
+  BookmarkSimple,
   ChartLineDown,
+  DownloadSimple,
+  Funnel,
   MagnifyingGlass,
   PencilSimple,
   Trash,
+  UploadSimple,
   X,
 } from '@phosphor-icons/react';
-import { deleteFlashcard, getFlashcards, getModule, updateFlashcard } from '../api/client';
+import { commitCardImport, deleteFlashcard, deleteFlashcardImage, exportCardsCsv, exportCardsJson, getFlashcardTags, getFlashcards, getModule, setFlashcardBookmark, updateFlashcard, uploadFlashcardImage } from '../api/client';
 import ShowMoreText from '../components/ShowMoreText';
 import Skeleton from '../components/Skeleton';
 import { useToast } from '../hooks/useToast';
@@ -18,6 +22,11 @@ import { usePersistentState } from '../hooks/usePersistentState';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import type { Flashcard } from '../types';
 import { formatAutosaveStatus, formatDateTime, formatDays, formatRelativeTime, titleCase } from '../utils/formatters';
+import RichTextEditor from '../components/RichTextEditor';
+import RichTextPreview from '../components/RichTextPreview';
+import TagEditor from '../components/TagEditor';
+import CardImageUploader from '../components/CardImageUploader';
+import ImportCardsModal from '../components/ImportCardsModal';
 
 const glass = {
   background: 'var(--surface)',
@@ -52,6 +61,10 @@ export default function ModuleFlashcards() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Flashcard | null>(null);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
+  const [selectedTag, setSelectedTag] = usePersistentState<string>(`module-flashcards:${id}:tag`, '');
+  const [difficultyFilter, setDifficultyFilter] = usePersistentState<'ALL' | 'EASY' | 'MEDIUM' | 'HARD'>(`module-flashcards:${id}:difficulty`, 'ALL');
+  const [bookmarkedOnly, setBookmarkedOnly] = usePersistentState<boolean>(`module-flashcards:${id}:bookmarked`, false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const {
     draft: editDraft,
@@ -61,7 +74,7 @@ export default function ModuleFlashcards() {
     clearDraft: clearEditDraft,
   } = useAutosaveDraft(
     `module-flashcards:${id}:edit-draft`,
-    () => ({ cardId: '', front: '', back: '' }),
+    () => ({ cardId: '', front: '', back: '', tags: [] as string[], study_difficulty: 'MEDIUM' as const, is_bookmarked: false }),
     Boolean(editing),
   );
 
@@ -73,13 +86,22 @@ export default function ModuleFlashcards() {
     enabled: !!id,
   });
 
+  const tagsQuery = useQuery({
+    queryKey: ['flashcard-tags', id],
+    queryFn: () => getFlashcardTags(id),
+    enabled: !!id,
+  });
+
   const cardsQuery = useInfiniteQuery({
-    queryKey: ['flashcards', id, sourceFilter, stateFilter, sortBy, pageSize, trimmedSearch],
+    queryKey: ['flashcards', id, sourceFilter, stateFilter, difficultyFilter, bookmarkedOnly, selectedTag, sortBy, pageSize, trimmedSearch],
     queryFn: ({ pageParam }) =>
       getFlashcards({
         module_id: id!,
         generation_source: sourceFilter === 'ALL' ? undefined : sourceFilter,
         state: stateFilter === 'ALL' ? undefined : stateFilter,
+        study_difficulty: difficultyFilter === 'ALL' ? undefined : difficultyFilter,
+        bookmarked_only: bookmarkedOnly || undefined,
+        tags: selectedTag ? [selectedTag] : undefined,
         search: trimmedSearch || undefined,
         sort: sortBy,
         limit: pageSize,
@@ -91,8 +113,8 @@ export default function ModuleFlashcards() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ cardId, front, back }: { cardId: string; front: string; back: string }) =>
-      updateFlashcard(cardId, { front, back }),
+    mutationFn: ({ cardId, front, back, tags, study_difficulty, is_bookmarked }: { cardId: string; front: string; back: string; tags: string[]; study_difficulty: 'EASY' | 'MEDIUM' | 'HARD'; is_bookmarked: boolean }) =>
+      updateFlashcard(cardId, { front, back, tags, study_difficulty, is_bookmarked }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
       queryClient.invalidateQueries({ queryKey: ['module', id] });
@@ -102,6 +124,13 @@ export default function ModuleFlashcards() {
     },
     onError: () => {
       showToast({ title: 'Could not save flashcard', description: 'Your draft is still here.', tone: 'error' });
+    },
+  });
+
+  const bookmarkMutation = useMutation({
+    mutationFn: ({ cardId, next }: { cardId: string; next: boolean }) => setFlashcardBookmark(cardId, next),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
     },
   });
 
@@ -168,7 +197,14 @@ export default function ModuleFlashcards() {
       return;
     }
     if (editDraft.cardId !== editing.id) {
-      setEditDraft({ cardId: editing.id, front: editing.front, back: editing.back });
+      setEditDraft({
+        cardId: editing.id,
+        front: editing.front,
+        back: editing.back,
+        tags: editing.tags,
+        study_difficulty: editing.study_difficulty,
+        is_bookmarked: editing.is_bookmarked,
+      });
     }
   }, [editDraft.cardId, editing, setEditDraft]);
 
@@ -300,6 +336,42 @@ export default function ModuleFlashcards() {
           <span>{filteredCards.length} loaded</span>
           <span>{totalCards} total</span>
           <span className="hidden md:inline">Use `/` to search and arrow keys to move</span>
+          <button type="button" className="inline-flex items-center gap-1" onClick={() => setImportOpen(true)}>
+            <UploadSimple size={14} />
+            Import
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1"
+            onClick={async () => {
+              const blob = await exportCardsJson(id!);
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = `${moduleQuery.data?.name || 'module'}_cards.json`;
+              anchor.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <DownloadSimple size={14} />
+            JSON
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1"
+            onClick={async () => {
+              const blob = await exportCardsCsv(id!);
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = `${moduleQuery.data?.name || 'module'}_cards.csv`;
+              anchor.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <DownloadSimple size={14} />
+            CSV
+          </button>
         </div>
       </div>
 
@@ -353,6 +425,52 @@ export default function ModuleFlashcards() {
             {titleCase(value)}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setBookmarkedOnly((current) => !current)}
+          className="px-3 py-2 rounded-xl inline-flex items-center gap-2"
+          style={{
+            background: bookmarkedOnly ? 'var(--accent-soft)' : 'var(--surface)',
+            color: bookmarkedOnly ? 'var(--accent)' : 'var(--text-secondary)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <BookmarkSimple size={16} />
+          Bookmarked
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-3 mb-6">
+        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+          <Funnel size={16} style={{ color: 'var(--text-secondary)' }} />
+          <select value={difficultyFilter} onChange={(event) => setDifficultyFilter(event.target.value as typeof difficultyFilter)} style={{ background: 'transparent', color: 'var(--text)', border: 'none' }}>
+            <option value="ALL">All difficulties</option>
+            <option value="EASY">Easy</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HARD">Hard</option>
+          </select>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setSelectedTag('')}
+            className="px-2 py-1 rounded-full text-xs"
+            style={{ background: !selectedTag ? 'var(--accent-soft)' : 'var(--surface)', color: !selectedTag ? 'var(--accent)' : 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            All tags
+          </button>
+          {tagsQuery.data?.tags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => setSelectedTag(tag)}
+              className="px-2 py-1 rounded-full text-xs"
+              style={{ background: selectedTag === tag ? 'var(--accent-soft)' : 'var(--surface)', color: selectedTag === tag ? 'var(--accent)' : 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
       </div>
 
       {filteredCards.length > 0 ? (
@@ -379,8 +497,19 @@ export default function ModuleFlashcards() {
                       <span className="px-2 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>
                         {card.state}
                       </span>
+                      <span className="px-2 py-1 rounded-full" style={{ background: 'rgba(120,180,120,0.12)', color: 'var(--text-secondary)' }}>
+                        {card.study_difficulty}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => bookmarkMutation.mutate({ cardId: card.id, next: !card.is_bookmarked })}
+                        style={{ background: 'transparent', border: 'none', color: card.is_bookmarked ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', minWidth: 36, minHeight: 36 }}
+                        aria-label="Toggle bookmark"
+                      >
+                        <BookmarkSimple size={18} weight={card.is_bookmarked ? 'fill' : 'regular'} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => setEditing(card)}
@@ -399,10 +528,26 @@ export default function ModuleFlashcards() {
                       </button>
                     </div>
                   </div>
-                  <p style={{ color: 'var(--text)', fontSize: '0.98rem', marginBottom: 10 }}>{card.front}</p>
+                  <RichTextPreview text={card.front} className="mb-3" />
                   <div className="flex-1">
-                    <ShowMoreText text={card.back} collapsedLines={4} color="var(--text-secondary)" fontSize="0.92rem" />
+                    <RichTextPreview text={card.back} />
+                    {card.assets.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 mt-3">
+                        {card.assets.slice(0, 2).map((asset) => (
+                          <img key={asset.id} src={asset.content_url} alt={asset.original_filename || 'Flashcard asset'} className="w-full h-24 object-cover rounded-lg" />
+                        ))}
+                      </div>
+                    )}
                   </div>
+                  {card.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {card.tags.map((tag) => (
+                        <span key={tag} className="px-2 py-1 rounded-full text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-4 pt-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
                     <div className="flex items-center justify-between text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
                       <span>Stability: {formatDays(card.stability)}</span>
@@ -463,26 +608,43 @@ export default function ModuleFlashcards() {
               </button>
             </div>
             <div className="space-y-4">
-              <div>
-                <label className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>Front</label>
-                <textarea
-                  value={editDraft.front}
-                  onChange={(event) => setEditDraft((current) => ({ ...current, front: event.target.value }))}
-                  rows={4}
-                  className="w-full px-3 py-3"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)', resize: 'vertical' }}
+              <RichTextEditor label="Front" value={editDraft.front} onChange={(front) => setEditDraft((current) => ({ ...current, front }))} rows={5} />
+              <RichTextEditor label="Back" value={editDraft.back} onChange={(back) => setEditDraft((current) => ({ ...current, back }))} rows={7} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <TagEditor
+                  value={editDraft.tags}
+                  suggestions={tagsQuery.data?.tags || []}
+                  onChange={(tags) => setEditDraft((current) => ({ ...current, tags }))}
                 />
+                <div className="space-y-4">
+                  <label>
+                    <span className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>Study difficulty</span>
+                    <select
+                      value={editDraft.study_difficulty}
+                      onChange={(event) => setEditDraft((current) => ({ ...current, study_difficulty: event.target.value as 'EASY' | 'MEDIUM' | 'HARD' }))}
+                      className="w-full px-3 py-3"
+                      style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
+                    >
+                      <option value="EASY">Easy</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HARD">Hard</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={editDraft.is_bookmarked}
+                      onChange={(event) => setEditDraft((current) => ({ ...current, is_bookmarked: event.target.checked }))}
+                    />
+                    Bookmarked
+                  </label>
+                </div>
               </div>
-              <div>
-                <label className="block mb-2" style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>Back</label>
-                <textarea
-                  value={editDraft.back}
-                  onChange={(event) => setEditDraft((current) => ({ ...current, back: event.target.value }))}
-                  rows={4}
-                  className="w-full px-3 py-3"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)', resize: 'vertical' }}
-                />
-              </div>
+              <CardImageUploader
+                assets={editing.assets}
+                onUpload={(file) => uploadFlashcardImage(editing.id, file).then(() => queryClient.invalidateQueries({ queryKey: ['flashcards', id] }))}
+                onDelete={(assetId) => deleteFlashcardImage(assetId).then(() => queryClient.invalidateQueries({ queryKey: ['flashcards', id] }))}
+              />
             </div>
             {!editCanSave ? (
               <p style={{ color: 'var(--danger)', fontSize: '0.82rem', marginTop: 10 }}>Both sides need content before you can save.</p>
@@ -494,18 +656,35 @@ export default function ModuleFlashcards() {
               }} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className="scholar-btn"
-                disabled={!editCanSave}
-                onClick={() => updateMutation.mutate({ cardId: editing.id, front: editDraft.front.trim(), back: editDraft.back.trim() })}
-              >
-                Save Changes
-              </button>
+                <button
+                  type="button"
+                  className="scholar-btn"
+                  disabled={!editCanSave}
+                  onClick={() => updateMutation.mutate({
+                    cardId: editing.id,
+                    front: editDraft.front.trim(),
+                    back: editDraft.back.trim(),
+                    tags: editDraft.tags,
+                    study_difficulty: editDraft.study_difficulty,
+                    is_bookmarked: editDraft.is_bookmarked,
+                  })}
+                >
+                  Save Changes
+                </button>
             </div>
           </div>
         </div>
       )}
+      <ImportCardsModal
+        moduleId={id!}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          queryClient.invalidateQueries({ queryKey: ['flashcards', id] });
+          queryClient.invalidateQueries({ queryKey: ['flashcard-tags', id] });
+          queryClient.invalidateQueries({ queryKey: ['module', id] });
+        }}
+      />
     </div>
   );
 }

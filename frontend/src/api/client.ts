@@ -226,6 +226,9 @@ export const getModules = () =>
 export const createModule = (data: ModuleCreate) =>
   client.post<Module>('/modules', data).then((r) => r.data);
 
+export const reorderModules = (orderedIds: string[]) =>
+  client.post<Module[]>('/modules/reorder', { ordered_ids: orderedIds }).then((r) => r.data);
+
 export const getModule = (id: string) =>
   client.get<ModuleDetail>(`/modules/${id}`).then((r) => r.data);
 
@@ -279,6 +282,9 @@ export const getFlashcards = (params?: {
   due?: boolean;
   generation_source?: string;
   state?: string;
+  study_difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
+  bookmarked_only?: boolean;
+  tags?: string[];
   search?: string;
   sort?: 'updated_desc' | 'created_desc' | 'created_asc' | 'front_asc';
   limit?: number;
@@ -290,6 +296,23 @@ export const createFlashcard = (data: FlashcardCreate) =>
 
 export const updateFlashcard = (id: string, data: FlashcardUpdate) =>
   client.patch<Flashcard>(`/flashcards/${id}`, data).then((r) => r.data);
+
+export const getFlashcardTags = (moduleId?: string) =>
+  client.get<{ tags: string[] }>('/flashcards/tags', { params: { module_id: moduleId } }).then((r) => r.data);
+
+export const setFlashcardBookmark = (id: string, isBookmarked: boolean) =>
+  client.post<Flashcard>(`/flashcards/${id}/bookmark`, { is_bookmarked: isBookmarked }).then((r) => r.data);
+
+export const uploadFlashcardImage = (id: string, file: File) => {
+  const form = new FormData();
+  form.append('image', file);
+  return client.post<import('../types').FlashcardAsset>(`/flashcards/${id}/assets`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data);
+};
+
+export const deleteFlashcardImage = (assetId: string) =>
+  client.delete(`/flashcards/assets/${assetId}`).then((r) => r.data);
 
 export const deleteFlashcard = (id: string) =>
   client.delete(`/flashcards/${id}`).then((r) => r.data);
@@ -320,6 +343,48 @@ export const generateCardsStream = (
     numCards ? { num_cards: numCards } : {},
     onEvent,
   );
+
+export const exportCardsJson = async (moduleId: string) => {
+  const response = await client.get(`/modules/${moduleId}/export-cards-json`, { responseType: 'blob' });
+  return response.data as Blob;
+};
+
+export const exportCardsCsv = async (moduleId: string) => {
+  const response = await client.get(`/modules/${moduleId}/export-cards-csv`, { responseType: 'blob' });
+  return response.data as Blob;
+};
+
+export const previewCardImport = (moduleId: string, file: File) => {
+  const form = new FormData();
+  form.append('file', file);
+  return client.post<import('../types').CardImportPreview>(`/modules/${moduleId}/import-cards/preview`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data);
+};
+
+export const commitCardImport = (moduleId: string, file: File, mapping: Record<string, string | null>) => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('mapping', JSON.stringify(mapping));
+  return client.post<import('../types').CardImportCommitResponse>(`/modules/${moduleId}/import-cards`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data);
+};
+
+export const startFlashcardSession = (moduleId: string, totalItems: number) =>
+  client.post<import('../types').SessionTimerState>('/sessions/flashcards', { module_id: moduleId, total_items: totalItems }).then((r) => r.data);
+
+export const getSessionTimer = (sessionId: string) =>
+  client.get<import('../types').SessionTimerState>(`/sessions/${sessionId}`).then((r) => r.data);
+
+export const pauseSessionTimer = (sessionId: string) =>
+  client.post<import('../types').SessionTimerState>(`/sessions/${sessionId}/pause`).then((r) => r.data);
+
+export const resumeSessionTimer = (sessionId: string) =>
+  client.post<import('../types').SessionTimerState>(`/sessions/${sessionId}/resume`).then((r) => r.data);
+
+export const completeSessionTimer = (sessionId: string) =>
+  client.post<import('../types').SessionTimerState>(`/sessions/${sessionId}/complete`).then((r) => r.data);
 
 // Quizzes
 export const getQuestions = (params?: {

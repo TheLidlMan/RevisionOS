@@ -111,6 +111,7 @@ def _ensure_runtime_schema():
             "delete_requested_at",
         ],
         "modules": [
+            "sort_order",
             "exam_date",
             "pipeline_status",
             "pipeline_stage",
@@ -122,7 +123,7 @@ def _ensure_runtime_schema():
             "study_plan_generated_at",
         ],
         "concepts": ["study_weight"],
-        "flashcards": ["generation_source", "updated_at"],
+        "flashcards": ["generation_source", "updated_at", "study_difficulty", "is_bookmarked"],
         "users": ["auth_provider", "google_subject", "avatar_url", "email_verified_at", "last_login_at"],
         "topic_progress": [
             "status",
@@ -143,7 +144,7 @@ def _ensure_runtime_schema():
             _add_missing_columns(conn, inspector, table_name, columns)
 
         existing_tables = set(inspector.get_table_names())
-        for table_name in ["module_jobs", "auth_sessions", "ai_usage_events", "ai_request_locks", "user_stats", "achievements", "topic_progress"]:
+        for table_name in ["module_jobs", "auth_sessions", "ai_usage_events", "ai_request_locks", "user_stats", "achievements", "topic_progress", "flashcard_assets"]:
             if table_name in existing_tables:
                 continue
             Base.metadata.tables[table_name].create(bind=conn)
@@ -155,9 +156,16 @@ def _ensure_runtime_schema():
             "module_jobs",
             ["started_at", "finished_at", "cancel_requested_at", "cancelled_at"],
         )
+        _add_missing_columns(
+            conn,
+            inspector,
+            "study_sessions",
+            ["active_duration_sec", "paused_at", "resumed_at", "timer_state"],
+        )
 
         existing_tables = set(inspector.get_table_names())
         if "modules" in existing_tables:
+            conn.execute(text("UPDATE modules SET sort_order = COALESCE(sort_order, 0)"))
             conn.execute(text("UPDATE modules SET pipeline_status = 'idle' WHERE pipeline_status IS NULL"))
             conn.execute(text("UPDATE modules SET pipeline_stage = 'idle' WHERE pipeline_stage IS NULL"))
             conn.execute(text("UPDATE modules SET pipeline_completed = 0 WHERE pipeline_completed IS NULL"))
@@ -177,6 +185,13 @@ def _ensure_runtime_schema():
         if "flashcards" in existing_tables:
             conn.execute(text("UPDATE flashcards SET generation_source = 'MANUAL' WHERE generation_source IS NULL"))
             conn.execute(text("UPDATE flashcards SET updated_at = COALESCE(updated_at, created_at)"))
+            conn.execute(text("UPDATE flashcards SET study_difficulty = COALESCE(study_difficulty, 'MEDIUM')"))
+            conn.execute(text("UPDATE flashcards SET is_bookmarked = COALESCE(is_bookmarked, 0)"))
+
+        if "study_sessions" in existing_tables:
+            conn.execute(text("UPDATE study_sessions SET active_duration_sec = COALESCE(active_duration_sec, 0)"))
+            conn.execute(text("UPDATE study_sessions SET timer_state = COALESCE(timer_state, 'running')"))
+            conn.execute(text("UPDATE study_sessions SET resumed_at = COALESCE(resumed_at, started_at)"))
 
         if "topic_progress" in existing_tables:
             conn.execute(text("UPDATE topic_progress SET status = COALESCE(status, 'not_started')"))

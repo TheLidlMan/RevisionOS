@@ -22,6 +22,8 @@ class Flashcard(Base):
     source_excerpt = Column(Text, nullable=True)
     tags = Column(Text, nullable=True, default="[]")  # JSON string
     generation_source = Column(String(10), nullable=False, default="MANUAL")  # AUTO, MANUAL
+    study_difficulty = Column(String(10), nullable=False, default="MEDIUM")
+    is_bookmarked = Column(Boolean, nullable=False, default=False, index=True)
 
     # FSRS scheduling fields
     due = Column(DateTime, default=datetime.utcnow)
@@ -40,3 +42,4 @@ class Flashcard(Base):
     module = relationship("Module", back_populates="flashcards")
     concept = relationship("Concept", back_populates="flashcards")
     source_document = relationship("Document", back_populates="flashcards")
+    assets = relationship("FlashcardAsset", back_populates="flashcard", cascade="all, delete-orphan")

@@ -15,6 +15,7 @@ class Module(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True, default="")
     color = Column(String(7), nullable=False, default="#00b4d8")
+    sort_order = Column(Integer, nullable=False, default=0, index=True)
     exam_date = Column(DateTime, nullable=True)
     pipeline_status = Column(String(20), nullable=False, default="idle")
     pipeline_stage = Column(String(50), nullable=False, default="idle")

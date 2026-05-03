@@ -6,12 +6,30 @@ import MasteryRing from './MasteryRing';
 
 interface Props {
   module: Module;
+  draggable?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDrop?: () => void;
+  isDragging?: boolean;
 }
 
-export default function ModuleCard({ module }: Props) {
+export default function ModuleCard({ module, draggable, onDragStart, onDragOver, onDrop, isDragging }: Props) {
   const navigate = useNavigate();
 
   return (
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver?.();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop?.();
+      }}
+      style={{ opacity: isDragging ? 0.55 : 1 }}
+    >
     <button
       onClick={() => navigate(`/modules/${module.id}`)}
       className="w-full text-left p-5 transition-colors"
@@ -95,5 +113,6 @@ export default function ModuleCard({ module }: Props) {
         </div>
       )}
     </button>
+    </div>
   );
 }

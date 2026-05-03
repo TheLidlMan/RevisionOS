@@ -1,20 +1,18 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowCounterClockwise, ArrowLeft, Confetti, Lightbulb, SpinnerGap, TrendUp, Brain, Heart } from '@phosphor-icons/react';
-import { getFlashcards, reviewFlashcard, getElaborationPrompts, submitConfidence, getGamificationStats, useHeart } from '../api/client';
-import type { Flashcard, Rating, ElaborationResponse, ReviewResponse } from '../types';
+import { ArrowCounterClockwise, ArrowLeft, Confetti, Lightbulb, SpinnerGap, TrendUp, Brain, Heart, BookmarkSimple, Pause, Play } from '@phosphor-icons/react';
+import { completeSessionTimer, getFlashcards, getElaborationPrompts, getGamificationStats, pauseSessionTimer, resumeSessionTimer, reviewFlashcard, setFlashcardBookmark, startFlashcardSession, submitConfidence, useHeart } from '../api/client';
+import type { Flashcard, Rating, ElaborationResponse, ReviewResponse, SessionTimerState } from '../types';
 import axios from 'axios';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
-import DOMPurify from 'dompurify';
 import { formatDays } from '../utils/formatters';
 import AITutorPanel from '../components/AITutorPanel';
 import AchievementToast from '../components/AchievementToast';
 import XPPopup from '../components/XPPopup';
 import Skeleton from '../components/Skeleton';
 import confetti from 'canvas-confetti';
+import RichTextPreview from '../components/RichTextPreview';
 
 const RATINGS: { label: string; value: Rating; key: string; color: string; bg: string; hoverBg: string }[] = [
   { label: 'Again', value: 'AGAIN', key: '1', color: '#fff', bg: 'rgba(220,120,100,0.8)', hoverBg: 'rgba(220,120,100,1)' },
@@ -61,54 +59,6 @@ function getErrorStatus(error: unknown): number | undefined {
     ?? errorWithStatus.response?.data?.status;
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-const RichText = memo(function RichText({ text }: { text: string }) {
-  const html = useMemo(() => {
-    let result = escapeHtml(text);
-
-    result = result.replace(/\$\$([^$]+)\$\$/g, (_match, tex) => {
-      try {
-        return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
-      } catch {
-        return `$$${tex}$$`;
-      }
-    });
-
-    result = result.replace(/\$([^$]+)\$/g, (_match, tex) => {
-      try {
-        return katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
-      } catch {
-        return `$${tex}$`;
-      }
-    });
-
-    result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    result = result.replace(
-      /`([^`]+)`/g,
-      '<code style="background:rgba(196,149,106,0.15);padding:1px 4px;border-radius:3px;font-size:0.9em">$1</code>'
-    );
-
-    return result;
-  }, [text]);
-
-  return (
-    <div
-      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
-      style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.25rem', lineHeight: 1.7 }}
-      className="text-center whitespace-pre-wrap"
-    />
-  );
-});
-
 export default function FlashcardReview() {
   const { moduleId } = useParams<{ moduleId: string }>();
   const navigate = useNavigate();
@@ -127,6 +77,7 @@ export default function FlashcardReview() {
   const [pendingAchievements, setPendingAchievements] = useState<{ key: string; name: string; icon: string }[]>([]);
   const [answerFeedback, setAnswerFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [outOfHearts, setOutOfHearts] = useState(false);
+  const [sessionTimer, setSessionTimer] = useState<SessionTimerState | null>(null);
   const elaborationLoadingRef = useRef(false);
   const startTimeRef = useRef<number>(0);
 
@@ -141,6 +92,31 @@ export default function FlashcardReview() {
     queryFn: async () => (await getFlashcards({ module_id: moduleId!, due: true, limit: 1000 })).items,
     enabled: !!moduleId,
   });
+
+  useEffect(() => {
+    if (!moduleId || !cards || cards.length === 0 || sessionTimer) {
+      return;
+    }
+    startFlashcardSession(moduleId, cards.length).then(setSessionTimer).catch((error) => {
+      console.error('Failed to start session timer:', error);
+    });
+  }, [cards, moduleId, sessionTimer]);
+
+  useEffect(() => {
+    if (!sessionTimer || sessionTimer.timer_state !== 'running') {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setSessionTimer((current) => current ? { ...current, active_duration_sec: current.active_duration_sec + 1 } : current);
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [sessionTimer]);
+
+  useEffect(() => () => {
+    if (sessionTimer && sessionTimer.timer_state === 'running') {
+      completeSessionTimer(sessionTimer.id).catch(() => undefined);
+    }
+  }, [sessionTimer]);
 
   // Memoized derived values — avoid recomputing on every render
   const totalCards = useMemo(() => cards?.length ?? 0, [cards]);
@@ -163,6 +139,15 @@ export default function FlashcardReview() {
         return;
       }
       console.error('Failed to use heart:', error);
+    },
+  });
+
+  const bookmarkMutation = useMutation({
+    mutationFn: ({ id, isBookmarked }: { id: string; isBookmarked: boolean }) => setFlashcardBookmark(id, isBookmarked),
+    onSuccess: (updatedCard) => {
+      queryClient.setQueryData(['flashcards', moduleId, 'due'], (current: Flashcard[] | undefined) =>
+        current?.map((item) => item.id === updatedCard.id ? updatedCard : item),
+      );
     },
   });
 
@@ -210,6 +195,9 @@ export default function FlashcardReview() {
       setShowTutor(false);
       elaborationLoadingRef.current = false;
       if (cards && currentIdx + 1 >= totalCards) {
+        if (sessionTimer) {
+          completeSessionTimer(sessionTimer.id).then(setSessionTimer).catch(() => undefined);
+        }
         if (typeof performance !== 'undefined') {
           setCompletedDurationSec(Math.round((performance.now() - startTimeRef.current) / 1000));
         }
@@ -390,6 +378,7 @@ export default function FlashcardReview() {
               setOutOfHearts(false);
               elaborationLoadingRef.current = false;
               setCompletedDurationSec(0);
+              setSessionTimer(null);
               if (typeof performance !== 'undefined') {
                 startTimeRef.current = performance.now();
               }
@@ -405,6 +394,8 @@ export default function FlashcardReview() {
   }
 
   const card: Flashcard = cards[currentIdx];
+  const timerMinutes = Math.floor((sessionTimer?.active_duration_sec || 0) / 60);
+  const timerSeconds = (sessionTimer?.active_duration_sec || 0) % 60;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
@@ -426,6 +417,20 @@ export default function FlashcardReview() {
         </button>
 
         <div className="flex items-center gap-4">
+          {sessionTimer && (
+            <button
+              type="button"
+              onClick={() => {
+                const action = sessionTimer.timer_state === 'running' ? pauseSessionTimer : resumeSessionTimer;
+                action(sessionTimer.id).then(setSessionTimer).catch(() => undefined);
+              }}
+              className="flex items-center gap-1 text-sm"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {sessionTimer.timer_state === 'running' ? <Pause size={16} /> : <Play size={16} />}
+              {timerMinutes}:{String(timerSeconds).padStart(2, '0')}
+            </button>
+          )}
           {/* Hearts display */}
           {gamStats?.hearts_enabled && (
             <div className="flex items-center gap-1" title={`${gamStats.hearts_remaining} hearts remaining`}>
@@ -461,6 +466,21 @@ export default function FlashcardReview() {
             width: `${progressPct}%`,
           }}
         />
+      </div>
+
+      <div className="flex items-center justify-center gap-3 mb-4">
+        <span className="px-3 py-1 rounded-full text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+          Difficulty: {card.study_difficulty}
+        </span>
+        <button
+          type="button"
+          onClick={() => bookmarkMutation.mutate({ id: card.id, isBookmarked: !card.is_bookmarked })}
+          className="px-3 py-1 rounded-full text-xs inline-flex items-center gap-1"
+          style={{ background: card.is_bookmarked ? 'var(--accent-soft)' : 'var(--surface)', border: '1px solid var(--border)', color: card.is_bookmarked ? 'var(--accent)' : 'var(--text-secondary)' }}
+        >
+          <BookmarkSimple size={14} weight={card.is_bookmarked ? 'fill' : 'regular'} />
+          {card.is_bookmarked ? 'Bookmarked' : 'Bookmark'}
+        </button>
       </div>
 
       {/* Confidence rating (before flip) — Feature 12 */}
@@ -529,7 +549,14 @@ export default function FlashcardReview() {
             <p style={{ color: 'var(--text-tertiary)', fontWeight: 300, fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase' }} className="mb-4">
               {flipped ? 'Answer' : 'Question'}
             </p>
-            <RichText text={flipped ? card.back : card.front} />
+            <RichTextPreview text={flipped ? card.back : card.front} align="center" className="w-full" />
+            {card.assets.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 w-full">
+                {card.assets.map((asset) => (
+                  <img key={asset.id} src={asset.content_url} alt={asset.original_filename || 'Flashcard asset'} className="w-full max-h-52 object-contain rounded-xl" />
+                ))}
+              </div>
+            )}
             {!flipped && (
               <p style={{ color: 'var(--text-tertiary)', fontWeight: 300, fontSize: '0.8rem' }} className="mt-6">
                 Click or press Space to flip

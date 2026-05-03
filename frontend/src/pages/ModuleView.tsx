@@ -25,6 +25,8 @@ import {
   deleteDocument,
   deleteModule,
   exportAnki,
+  exportCardsCsv,
+  exportCardsJson,
   exportJson,
   generateCardsStream,
   getContentMap,
@@ -542,6 +544,38 @@ export default function ModuleView() {
                   }}
                 >
                   Export JSON
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 rounded-xl"
+                  style={{ color: 'var(--text)' }}
+                  onClick={async () => {
+                    const blob = await exportCardsJson(mod.id);
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `${mod.name}_cards.json`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export Cards JSON
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 rounded-xl"
+                  style={{ color: 'var(--text)' }}
+                  onClick={async () => {
+                    const blob = await exportCardsCsv(mod.id);
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement('a');
+                    anchor.href = url;
+                    anchor.download = `${mod.name}_cards.csv`;
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export Cards CSV
                 </button>
               </div>
             </details>

@@ -1,13 +1,14 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CardsThree, ClockCountdown, FolderSimplePlus, Sparkle } from '@phosphor-icons/react';
-import { getAnalyticsOverview, getModules } from '../api/client';
+import { getAnalyticsOverview, getModules, reorderModules } from '../api/client';
 import CreateModuleModal from '../components/CreateModuleModal';
 import ModuleCard from '../components/ModuleCard';
 import Skeleton from '../components/Skeleton';
 import GamificationBar from '../components/GamificationBar';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { formatRelativeTime } from '../utils/formatters';
+import type { Module } from '../types';
 
 const glass = {
   background: 'var(--surface)',
@@ -37,8 +38,11 @@ function getPipelineRefetchInterval(
 }
 
 export default function Dashboard() {
+  const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [sortBy, setSortBy] = usePersistentState<'UPDATED' | 'NEWEST' | 'OLDEST' | 'NAME'>('dashboard:module-sort', 'UPDATED');
+  const [orderedModules, setOrderedModules] = useState<Module[]>([]);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
 
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics'],
@@ -51,8 +55,21 @@ export default function Dashboard() {
     refetchInterval: (query) => getPipelineRefetchInterval(query.state.data),
   });
 
+  useEffect(() => {
+    if (modules) {
+      setOrderedModules(modules);
+    }
+  }, [modules]);
+
+  const reorderMutation = useMutation({
+    mutationFn: reorderModules,
+    onSuccess: (nextModules) => {
+      queryClient.setQueryData(['modules'], nextModules);
+    },
+  });
+
   const sortedModules = useMemo(() => {
-    const list = [...(modules || [])];
+    const list = [...(orderedModules || [])];
     if (sortBy === 'NAME') {
       return list.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -63,7 +80,27 @@ export default function Dashboard() {
       return list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
     return list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  }, [modules, sortBy]);
+  }, [orderedModules, sortBy]);
+
+  const handleDrop = (targetId: string) => {
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null);
+      return;
+    }
+    const current = [...sortedModules];
+    const fromIndex = current.findIndex((module) => module.id === draggedId);
+    const toIndex = current.findIndex((module) => module.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) {
+      setDraggedId(null);
+      return;
+    }
+    const [moved] = current.splice(fromIndex, 1);
+    current.splice(toIndex, 0, moved);
+    const nextModules = current.map((module, index) => ({ ...module, sort_order: index }));
+    setOrderedModules(nextModules);
+    setDraggedId(null);
+    reorderMutation.mutate(nextModules.map((module) => module.id));
+  };
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto w-full">
@@ -162,7 +199,15 @@ export default function Dashboard() {
       ) : sortedModules.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
           {sortedModules.map((module) => (
-            <ModuleCard key={module.id} module={module} />
+            <ModuleCard
+              key={module.id}
+              module={module}
+              draggable
+              isDragging={draggedId === module.id}
+              onDragStart={() => setDraggedId(module.id)}
+              onDragOver={() => undefined}
+              onDrop={() => handleDrop(module.id)}
+            />
           ))}
         </div>
       ) : (
