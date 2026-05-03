@@ -70,7 +70,6 @@ function escapeHtml(text: string): string {
 }
 
 const katexRenderCache = new Map<string, string>();
-let confettiLoader: Promise<Awaited<typeof import('canvas-confetti')>> | null = null;
 
 function renderMathExpression(tex: string, displayMode: boolean): string {
   const normalized = tex.trim();
@@ -97,8 +96,7 @@ async function fireConfetti(options: {
   origin: { y: number };
   colors?: string[];
 }) {
-  confettiLoader ??= import('canvas-confetti');
-  const confettiModule = await confettiLoader;
+  const confettiModule = await import('canvas-confetti');
   confettiModule.default(options);
 }
 
