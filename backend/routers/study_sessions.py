@@ -12,11 +12,29 @@ from models.quiz_session import StudySession
 from models.review_log import ReviewLog
 from models.flashcard import Flashcard
 from models.module import Module
+from models.user_stats import UserStats
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
 from models.user import User
 
 router = APIRouter(tags=["sessions"])
+
+
+def _get_owned_session(db: Session, session_id: str, user: OptionalType[User]) -> StudySession:
+    query = db.query(StudySession).filter(StudySession.id == session_id)
+    if user:
+        query = query.filter(StudySession.user_id == user.id)
+    session = query.first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+def _sync_session_duration(session: StudySession, now: Optional[datetime] = None) -> None:
+    now = now or datetime.utcnow()
+    if session.timer_state == "running" and session.resumed_at:
+        session.active_duration_sec += max(0, int((now - session.resumed_at).total_seconds()))
+        session.resumed_at = now
 
 
 # ---------- Pydantic schemas ----------
@@ -33,6 +51,26 @@ class SessionListItem(BaseModel):
     incorrect: int
     skipped: int
     score_pct: float
+    active_duration_sec: int = 0
+    timer_state: str = "running"
+
+
+class FlashcardSessionStartRequest(BaseModel):
+    module_id: str
+    total_items: int = 0
+
+
+class SessionTimerResponse(BaseModel):
+    id: str
+    module_id: Optional[str] = None
+    session_type: str
+    status: str
+    timer_state: str
+    active_duration_sec: int
+    paused_at: Optional[datetime] = None
+    resumed_at: Optional[datetime] = None
+    started_at: datetime
+    ended_at: Optional[datetime] = None
 
 
 class OverviewResponse(BaseModel):
@@ -97,8 +135,118 @@ def list_sessions(
             incorrect=s.incorrect,
             skipped=s.skipped,
             score_pct=s.score_pct,
+            active_duration_sec=s.active_duration_sec,
+            timer_state=s.timer_state,
         ))
     return results
+
+
+@router.post("/api/sessions/flashcards", response_model=SessionTimerResponse)
+def start_flashcard_session(
+    body: FlashcardSessionStartRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    module = db.query(Module).filter(Module.id == body.module_id, Module.user_id == user.id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    session = StudySession(
+        user_id=user.id,
+        module_id=body.module_id,
+        session_type="FLASHCARDS",
+        started_at=datetime.utcnow(),
+        resumed_at=datetime.utcnow(),
+        timer_state="running",
+        total_items=body.total_items,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return SessionTimerResponse(**session.__dict__)
+
+
+@router.post("/api/sessions/{session_id}/pause", response_model=SessionTimerResponse)
+def pause_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    session = _get_owned_session(db, session_id, user)
+    if session.timer_state != "paused":
+        now = datetime.utcnow()
+        _sync_session_duration(session, now)
+        session.timer_state = "paused"
+        session.paused_at = now
+    db.commit()
+    db.refresh(session)
+    return SessionTimerResponse(**session.__dict__)
+
+
+@router.post("/api/sessions/{session_id}/resume", response_model=SessionTimerResponse)
+def resume_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    session = _get_owned_session(db, session_id, user)
+    if session.timer_state != "running":
+        now = datetime.utcnow()
+        session.timer_state = "running"
+        session.paused_at = None
+        session.resumed_at = now
+    db.commit()
+    db.refresh(session)
+    return SessionTimerResponse(**session.__dict__)
+
+
+@router.post("/api/sessions/{session_id}/complete", response_model=SessionTimerResponse)
+def complete_timer_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    session = _get_owned_session(db, session_id, user)
+    now = datetime.utcnow()
+    if session.timer_state == "running":
+        _sync_session_duration(session, now)
+    session.timer_state = "completed"
+    session.status = "completed"
+    session.ended_at = now
+    session.paused_at = None
+    session.resumed_at = None
+    stats = db.query(UserStats).filter(UserStats.user_id == user.id).first()
+    if stats:
+        existing_completed = max(0, sum(
+            completed.active_duration_sec or 0
+            for completed in db.query(StudySession)
+            .filter(StudySession.user_id == user.id, StudySession.status == "completed")
+            .all()
+        ))
+        stats.total_study_time_sec = max(existing_completed, stats.total_study_time_sec)
+    db.commit()
+    db.refresh(session)
+    return SessionTimerResponse(**session.__dict__)
+
+
+@router.get("/api/sessions/{session_id}", response_model=SessionTimerResponse)
+def get_session_timer(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    session = _get_owned_session(db, session_id, user)
+    return SessionTimerResponse(**session.__dict__)
 
 
 @router.get("/api/analytics/overview", response_model=OverviewResponse)

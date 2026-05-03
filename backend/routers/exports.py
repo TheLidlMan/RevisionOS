@@ -1,3 +1,4 @@
+import csv
 import io
 import json
 import os
@@ -6,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -44,12 +45,79 @@ class ImportModuleResponse(BaseModel):
     questions_imported: int = 0
 
 
+class CardImportPreviewResponse(BaseModel):
+    columns: list[str]
+    preview_rows: list[dict]
+    total_rows: int
+    suggested_mapping: dict[str, str | None]
+
+
+class CardImportCommitResponse(BaseModel):
+    imported: int
+    skipped: int
+
+
 # ---------- Helpers ----------
 
 def _serialize_datetime(val: Optional[datetime]) -> Optional[str]:
     if val is None:
         return None
     return val.isoformat()
+
+
+def _normalize_tags(raw_tags) -> list[str]:
+    if isinstance(raw_tags, str):
+        raw_tags = [part.strip() for part in raw_tags.split(",")]
+    if not isinstance(raw_tags, list):
+        return []
+    return sorted({str(tag).strip().lower() for tag in raw_tags if str(tag).strip()})
+
+
+def _normalize_study_difficulty(value: Optional[str]) -> str:
+    normalized = (value or "MEDIUM").strip().upper()
+    if normalized not in {"EASY", "MEDIUM", "HARD"}:
+        return "MEDIUM"
+    return normalized
+
+
+def _parse_card_rows(filename: str, content: bytes) -> tuple[list[str], list[dict]]:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext == ".json":
+        payload = json.loads(content.decode("utf-8"))
+        if isinstance(payload, dict):
+            rows = payload.get("flashcards") or payload.get("cards") or []
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            raise ValueError("JSON must contain an array of cards")
+        parsed_rows = [{str(key): value for key, value in row.items()} for row in rows if isinstance(row, dict)]
+        columns = sorted({key for row in parsed_rows for key in row.keys()})
+        return columns, parsed_rows
+
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("CSV file must include a header row")
+    rows = [dict(row) for row in reader]
+    return [field for field in reader.fieldnames if field], rows
+
+
+def _suggest_mapping(columns: list[str]) -> dict[str, str | None]:
+    lower_map = {column.lower(): column for column in columns}
+
+    def pick(*names: str) -> str | None:
+        for name in names:
+            if name in lower_map:
+                return lower_map[name]
+        return None
+
+    return {
+        "front": pick("front", "question", "prompt"),
+        "back": pick("back", "answer", "response"),
+        "tags": pick("tags", "tag"),
+        "study_difficulty": pick("study_difficulty", "difficulty"),
+        "is_bookmarked": pick("bookmarked", "is_bookmarked", "favorite", "favourite"),
+    }
 
 
 def _module_to_export_dict(db: Session, module: Module) -> dict:
@@ -196,6 +264,156 @@ def export_json(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
     )
 
 
+@router.get("/api/modules/{module_id}/export-cards-json")
+def export_cards_json(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
+    payload = {
+        "module": {"id": module.id, "name": module.name},
+        "cards": [
+            {
+                "front": card.front,
+                "back": card.back,
+                "tags": json.loads(card.tags or "[]"),
+                "study_difficulty": getattr(card, "study_difficulty", "MEDIUM"),
+                "bookmarked": bool(getattr(card, "is_bookmarked", False)),
+                "due": _serialize_datetime(card.due),
+            }
+            for card in flashcards
+        ],
+    }
+    safe_name = "".join(c for c in module.name if c.isalnum() or c in (" ", "-", "_")).strip()
+    json_bytes = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+    return StreamingResponse(
+        io.BytesIO(json_bytes),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_cards.json"'},
+    )
+
+
+@router.get("/api/modules/{module_id}/export-cards-csv")
+def export_cards_csv(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+    query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        query = query.filter(Module.user_id == user.id)
+    module = query.first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["front", "back", "tags", "study_difficulty", "bookmarked", "due"])
+    for card in flashcards:
+        writer.writerow([
+            card.front,
+            card.back,
+            ",".join(json.loads(card.tags or "[]")),
+            getattr(card, "study_difficulty", "MEDIUM"),
+            "true" if bool(getattr(card, "is_bookmarked", False)) else "false",
+            _serialize_datetime(card.due) or "",
+        ])
+
+    safe_name = "".join(c for c in module.name if c.isalnum() or c in (" ", "-", "_")).strip()
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_cards.csv"'},
+    )
+
+
+@router.post("/api/modules/{module_id}/import-cards/preview", response_model=CardImportPreviewResponse)
+def preview_card_import(
+    module_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    module_query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        module_query = module_query.filter(Module.user_id == user.id)
+    if not module_query.first():
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    try:
+        content = file.file.read()
+        columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
+
+    return CardImportPreviewResponse(
+        columns=columns,
+        preview_rows=rows[:10],
+        total_rows=len(rows),
+        suggested_mapping=_suggest_mapping(columns),
+    )
+
+
+@router.post("/api/modules/{module_id}/import-cards", response_model=CardImportCommitResponse)
+def import_cards(
+    module_id: str,
+    file: UploadFile = File(...),
+    mapping: str = Form(...),
+    db: Session = Depends(get_db),
+    user: OptionalType[User] = Depends(get_current_user),
+):
+    module_query = db.query(Module).filter(Module.id == module_id)
+    if user:
+        module_query = module_query.filter(Module.user_id == user.id)
+    module = module_query.first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    try:
+        mapping_data = json.loads(mapping)
+        if not isinstance(mapping_data, dict):
+            raise ValueError("mapping must be an object")
+        content = file.file.read()
+        _columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
+
+    imported = 0
+    skipped = 0
+    for row in rows:
+        front_column = mapping_data.get("front")
+        back_column = mapping_data.get("back")
+        if not front_column or not back_column:
+            raise HTTPException(status_code=400, detail="front and back mapping are required")
+
+        mapped_front = str(row.get(front_column, "")).strip()
+        mapped_back = str(row.get(back_column, "")).strip()
+        if not mapped_front or not mapped_back:
+            skipped += 1
+            continue
+
+        tags_value = row.get(mapping_data.get("tags", ""), [])
+        bookmark_value = str(row.get(mapping_data.get("is_bookmarked", ""), "")).strip().lower()
+        flashcard = Flashcard(
+            user_id=module.user_id,
+            module_id=module.id,
+            front=mapped_front,
+            back=mapped_back,
+            card_type="BASIC",
+            tags=json.dumps(_normalize_tags(tags_value)),
+            due=datetime.utcnow(),
+            state="NEW",
+            study_difficulty=_normalize_study_difficulty(str(row.get(mapping_data.get("study_difficulty", ""), ""))),
+            is_bookmarked=bookmark_value in {"1", "true", "yes", "y"},
+        )
+        db.add(flashcard)
+        imported += 1
+
+    db.commit()
+    return CardImportCommitResponse(imported=imported, skipped=skipped)
+
+
 @router.post("/api/modules/import-json", response_model=ImportModuleResponse)
 def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
     """Import module from JSON file."""
@@ -259,8 +477,13 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
     flashcards_imported = 0
     for f_data in data.get("flashcards", []):
         tags = f_data.get("tags", "[]")
-        if isinstance(tags, list):
-            tags = json.dumps(tags)
+        if isinstance(tags, str):
+            try:
+                parsed_tags = json.loads(tags) if tags.startswith("[") else tags
+            except json.JSONDecodeError:
+                parsed_tags = tags
+        else:
+            parsed_tags = tags
         card = Flashcard(
             user_id=module.user_id,
             module_id=module.id,
@@ -269,9 +492,11 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
             card_type=f_data.get("card_type", "BASIC"),
             cloze_text=f_data.get("cloze_text"),
             source_excerpt=f_data.get("source_excerpt"),
-            tags=tags,
+            tags=json.dumps(_normalize_tags(parsed_tags)),
             due=datetime.utcnow(),
             state="NEW",
+            study_difficulty=_normalize_study_difficulty(f_data.get("study_difficulty")),
+            is_bookmarked=bool(f_data.get("bookmarked") or f_data.get("is_bookmarked")),
         )
         db.add(card)
         flashcards_imported += 1

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fsrs import Scheduler, Card, Rating, State
@@ -75,6 +75,9 @@ def schedule_review(card_data: dict, rating: str) -> dict:
 
     updated_card, _review_log = _scheduler.review_card(card, fsrs_rating)
 
+    study_difficulty = (card_data.get("study_difficulty") or "MEDIUM").upper()
+    bias = {"EASY": -0.15, "MEDIUM": 0.0, "HARD": 0.2}.get(study_difficulty, 0.0)
+
     # Convert due to naive UTC for storage
     new_due = updated_card.due
     if new_due.tzinfo is not None:
@@ -108,6 +111,12 @@ def schedule_review(card_data: dict, rating: str) -> dict:
         nr = new_last_review.replace(tzinfo=timezone.utc) if new_last_review.tzinfo is None else new_last_review
         nd = new_due.replace(tzinfo=timezone.utc) if new_due.tzinfo is None else new_due
         scheduled_days = max((nd - nr).days, 0)
+
+    if new_last_review and bias != 0.0:
+        interval_seconds = max((new_due - new_last_review).total_seconds(), 86400)
+        adjusted_seconds = max(86400, round(interval_seconds * (1 - bias)))
+        new_due = new_last_review + timedelta(seconds=adjusted_seconds)
+        scheduled_days = max((new_due - new_last_review).days, 0)
 
     app_state = _to_app_state(updated_card.state)
 
