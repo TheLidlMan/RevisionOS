@@ -24,7 +24,9 @@ def _trusted_proxy_networks() -> list[NetworkType]:
             if "/" in candidate:
                 networks.append(ipaddress.ip_network(candidate, strict=False))
             else:
-                networks.append(ipaddress.ip_network(f"{candidate}/32", strict=False))
+                address = ipaddress.ip_address(candidate)
+                suffix = 32 if isinstance(address, ipaddress.IPv4Address) else 128
+                networks.append(ipaddress.ip_network(f"{candidate}/{suffix}", strict=False))
         except ValueError:
             continue
     return networks

@@ -128,8 +128,10 @@ def _owned_document_query(db: Session, user: User, document_id: str):
 
 
 def _assert_within_directory(candidate_path: str, allowed_root: str) -> None:
+    normalized_candidate = os.path.realpath(candidate_path)
+    normalized_root = os.path.realpath(allowed_root)
     try:
-        if os.path.commonpath([candidate_path, allowed_root]) != allowed_root:
+        if os.path.commonpath([normalized_candidate, normalized_root]) != normalized_root:
             raise HTTPException(status_code=403, detail="Path is outside the allowed import directory")
     except ValueError:
         raise HTTPException(status_code=403, detail="Path is outside the allowed import directory")
