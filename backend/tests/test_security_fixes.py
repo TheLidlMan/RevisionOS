@@ -22,11 +22,13 @@ from fastapi.testclient import TestClient
 import database
 from database import SessionLocal, create_tables
 from main import app, fastapi_app
+from models.concept import Concept
 from models.document import Document
 from models.flashcard import Flashcard
 from models.module import Module
 from models.quiz_question import QuizQuestion
 from models.user import User
+from models.user_stats import UserStats
 from routers import auth as auth_router
 from routers import collaboration, settings as settings_router
 from services.ai_request_lock_service import serialized_ai_request
@@ -141,6 +143,65 @@ class SecurityFixesTestCase(unittest.TestCase):
             db.commit()
             db.refresh(card)
             return module.id, card.id
+
+    def test_gamification_achievements_include_progress_metadata(self):
+        user_id, token = self._create_user("gamification@example.com")
+
+        with SessionLocal() as db:
+            module = Module(user_id=user_id, name="Biology", study_plan_json='{"weeks":[]}')
+            db.add(module)
+            db.flush()
+            db.add(Document(
+                user_id=user_id,
+                module_id=module.id,
+                filename="notes.txt",
+                file_type="TXT",
+                file_path="/tmp/private/notes.txt",
+                raw_text="Important notes",
+                processed=True,
+                processing_status="done",
+                word_count=2,
+            ))
+            db.add(Concept(module_id=module.id, name="Cells", definition="Basic unit of life"))
+            db.add(Flashcard(
+                user_id=user_id,
+                module_id=module.id,
+                front="Q",
+                back="A",
+                card_type="BASIC",
+                state="REVIEW",
+            ))
+            db.add(UserStats(
+                user_id=user_id,
+                streak_current=4,
+                streak_longest=4,
+                xp_total=250,
+                level=2,
+                total_cards_reviewed=42,
+                total_quizzes_completed=3,
+                total_perfect_quizzes=1,
+            ))
+            db.commit()
+
+        response = self.client.get(
+            "/api/gamification/achievements",
+            cookies={SESSION_COOKIE_NAME: token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        first_card = next(item for item in payload if item["achievement_key"] == "first_card")
+        streak = next(item for item in payload if item["achievement_key"] == "streak_7")
+        planner = next(item for item in payload if item["achievement_key"] == "curriculum")
+
+        self.assertEqual(first_card["category"], "review")
+        self.assertEqual(first_card["progress_current"], 42)
+        self.assertEqual(first_card["progress_target"], 1)
+        self.assertGreaterEqual(first_card["progress_pct"], 100)
+        self.assertEqual(streak["progress_current"], 4)
+        self.assertEqual(streak["progress_target"], 7)
+        self.assertEqual(planner["progress_current"], 1)
+        self.assertEqual(planner["category"], "planning")
 
     def test_profile_update_rejects_blank_display_name(self):
         _, token = self._create_user("profile@example.com")

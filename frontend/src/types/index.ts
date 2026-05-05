@@ -793,8 +793,14 @@ export interface AchievementDef {
   name: string;
   description: string;
   icon: string;
+  category?: string;
+  tier?: string;
   unlocked: boolean;
   unlocked_at?: string;
+  progress_current?: number;
+  progress_target?: number;
+  progress_pct?: number;
+  celebration_message?: string;
 }
 
 export interface AchievementResponse {

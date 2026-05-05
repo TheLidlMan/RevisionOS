@@ -7,6 +7,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.concept import Concept
+from models.document import Document
+from models.flashcard import Flashcard
+from models.module import Module
+from models.quiz_session import StudySession
 from models.user import User
 from models.user_stats import UserStats, Achievement
 from services.auth_service import get_current_user
@@ -40,26 +45,26 @@ def _level_from_xp(xp: int) -> int:
 # ---------- Achievement Definitions ----------
 
 ACHIEVEMENT_DEFS = {
-    "first_card": {"name": "Flashcard Rookie", "description": "Review your first card", "icon": "🃏"},
-    "first_quiz": {"name": "Quiz Starter", "description": "Complete your first quiz", "icon": "📝"},
-    "streak_3": {"name": "On a Roll", "description": "3-day streak", "icon": "🔥"},
-    "streak_7": {"name": "Week Warrior", "description": "7-day streak", "icon": "⚔️"},
-    "streak_30": {"name": "Monthly Master", "description": "30-day streak", "icon": "👑"},
-    "cards_100": {"name": "Century", "description": "Review 100 cards total", "icon": "💯"},
-    "cards_1000": {"name": "Card Shark", "description": "Review 1000 cards total", "icon": "🦈"},
-    "mastered_50": {"name": "Half Century", "description": "Master 50 cards", "icon": "🏆"},
-    "perfect_quiz": {"name": "Flawless", "description": "Score 100% on a quiz", "icon": "💎"},
-    "first_module": {"name": "Module Unlocked", "description": "Create your first module", "icon": "📦"},
-    "first_upload": {"name": "Document Digested", "description": "Upload your first document", "icon": "📄"},
-    "weak_drilled": {"name": "Weakness Slayer", "description": "Complete a Weakness Drill session", "icon": "⚡"},
-    "curriculum": {"name": "Planner", "description": "Generate a curriculum", "icon": "📅"},
-    "night_owl": {"name": "Night Owl", "description": "Study after 11pm", "icon": "🦉"},
-    "early_bird": {"name": "Early Bird", "description": "Study before 7am", "icon": "🐦"},
-    "speed_demon": {"name": "Speed Demon", "description": "Answer 10 cards in under 60 seconds", "icon": "⚡"},
-    "comeback": {"name": "Comeback Kid", "description": "Return after 3+ day break", "icon": "🔄"},
-    "anki_export": {"name": "Anki Convert", "description": "Export your first Anki deck", "icon": "📤"},
-    "bulk_import": {"name": "File Hoarder", "description": "Import 10+ documents", "icon": "📚"},
-    "knowledge_graph": {"name": "Connected Mind", "description": "View knowledge graph with 20+ nodes", "icon": "🧠"},
+    "first_card": {"name": "Flashcard Rookie", "description": "Review your first card", "icon": "🃏", "category": "review", "tier": "bronze", "metric": "total_cards_reviewed", "target": 1, "celebration_message": "First review complete — your revision streak starts here."},
+    "first_quiz": {"name": "Quiz Starter", "description": "Complete your first quiz", "icon": "📝", "category": "quiz", "tier": "bronze", "metric": "total_quizzes_completed", "target": 1, "celebration_message": "You have taken your first quiz lap."},
+    "streak_3": {"name": "On a Roll", "description": "3-day streak", "icon": "🔥", "category": "streak", "tier": "bronze", "metric": "streak_current", "target": 3, "celebration_message": "Three straight days — the habit is sticking."},
+    "streak_7": {"name": "Week Warrior", "description": "7-day streak", "icon": "⚔️", "category": "streak", "tier": "silver", "metric": "streak_current", "target": 7, "celebration_message": "A full week of consistency unlocked."},
+    "streak_30": {"name": "Monthly Master", "description": "30-day streak", "icon": "👑", "category": "streak", "tier": "legendary", "metric": "streak_current", "target": 30, "celebration_message": "Thirty days in a row — elite consistency."},
+    "cards_100": {"name": "Century", "description": "Review 100 cards total", "icon": "💯", "category": "review", "tier": "silver", "metric": "total_cards_reviewed", "target": 100, "celebration_message": "One hundred reviews banked."},
+    "cards_1000": {"name": "Card Shark", "description": "Review 1000 cards total", "icon": "🦈", "category": "review", "tier": "legendary", "metric": "total_cards_reviewed", "target": 1000, "celebration_message": "Four digits of review volume achieved."},
+    "mastered_50": {"name": "Half Century", "description": "Master 50 cards", "icon": "🏆", "category": "mastery", "tier": "gold", "metric": "mastered_cards", "target": 50, "celebration_message": "Fifty cards have graduated into long-term memory."},
+    "perfect_quiz": {"name": "Flawless", "description": "Score 100% on a quiz", "icon": "💎", "category": "quiz", "tier": "gold", "metric": "total_perfect_quizzes", "target": 1, "celebration_message": "Perfect score — no notes."},
+    "first_module": {"name": "Module Unlocked", "description": "Create your first module", "icon": "📦", "category": "organization", "tier": "bronze", "metric": "module_count", "target": 1, "celebration_message": "Your first study space is ready."},
+    "first_upload": {"name": "Document Digested", "description": "Upload your first document", "icon": "📄", "category": "organization", "tier": "bronze", "metric": "document_count", "target": 1, "celebration_message": "Your first source is now feeding the system."},
+    "weak_drilled": {"name": "Weakness Slayer", "description": "Complete a Weakness Drill session", "icon": "⚡", "category": "focus", "tier": "silver", "metric": "weakness_drill_sessions", "target": 1, "celebration_message": "You attacked a weak spot head-on."},
+    "curriculum": {"name": "Planner", "description": "Generate a curriculum", "icon": "📅", "category": "planning", "tier": "silver", "metric": "study_plans_generated", "target": 1, "celebration_message": "A study plan is now steering your next steps."},
+    "night_owl": {"name": "Night Owl", "description": "Study after 11pm", "icon": "🦉", "category": "special", "tier": "bronze", "target": 1, "celebration_message": "Late-night focus detected."},
+    "early_bird": {"name": "Early Bird", "description": "Study before 7am", "icon": "🐦", "category": "special", "tier": "bronze", "target": 1, "celebration_message": "You beat the day to the desk."},
+    "speed_demon": {"name": "Speed Demon", "description": "Answer 10 cards in under 60 seconds", "icon": "⚡", "category": "review", "tier": "gold", "target": 1, "celebration_message": "Lightning-fast recall unlocked."},
+    "comeback": {"name": "Comeback Kid", "description": "Return after 3+ day break", "icon": "🔄", "category": "streak", "tier": "silver", "target": 1, "celebration_message": "You came back stronger."},
+    "anki_export": {"name": "Anki Convert", "description": "Export your first Anki deck", "icon": "📤", "category": "organization", "tier": "silver", "target": 1, "celebration_message": "Your first deck export is out in the world."},
+    "bulk_import": {"name": "File Hoarder", "description": "Import 10+ documents", "icon": "📚", "category": "organization", "tier": "gold", "metric": "document_count", "target": 10, "celebration_message": "Your study library is starting to look serious."},
+    "knowledge_graph": {"name": "Connected Mind", "description": "View knowledge graph with 20+ nodes", "icon": "🧠", "category": "exploration", "tier": "gold", "metric": "concept_count", "target": 20, "celebration_message": "Your knowledge graph has real depth now."},
 }
 
 
@@ -97,8 +102,14 @@ class AchievementDefResponse(BaseModel):
     name: str
     description: str
     icon: str
+    category: str = "general"
+    tier: str = "bronze"
     unlocked: bool
     unlocked_at: Optional[datetime] = None
+    progress_current: int = 0
+    progress_target: int = 1
+    progress_pct: float = 0.0
+    celebration_message: str = ""
 
 
 class XPAwardResponse(BaseModel):
@@ -166,6 +177,57 @@ def _check_and_unlock(
         icon=defn["icon"],
         unlocked_at=ach.unlocked_at,
     )
+
+
+def _build_achievement_metrics(db: Session, user_id: Optional[str], stats: Optional[UserStats]) -> dict[str, int]:
+    if not user_id:
+        return {
+            "streak_current": 0,
+            "total_cards_reviewed": 0,
+            "total_quizzes_completed": 0,
+            "total_perfect_quizzes": 0,
+            "module_count": 0,
+            "document_count": 0,
+            "mastered_cards": 0,
+            "weakness_drill_sessions": 0,
+            "study_plans_generated": 0,
+            "concept_count": 0,
+        }
+
+    return {
+        "streak_current": int(stats.streak_current if stats else 0),
+        "total_cards_reviewed": int(stats.total_cards_reviewed if stats else 0),
+        "total_quizzes_completed": int(stats.total_quizzes_completed if stats else 0),
+        "total_perfect_quizzes": int(stats.total_perfect_quizzes if stats else 0),
+        "module_count": db.query(Module).filter(Module.user_id == user_id).count(),
+        "document_count": db.query(Document).filter(Document.user_id == user_id).count(),
+        "mastered_cards": (
+            db.query(Flashcard)
+            .join(Module, Module.id == Flashcard.module_id)
+            .filter(Module.user_id == user_id, Flashcard.state == "REVIEW")
+            .count()
+        ),
+        "weakness_drill_sessions": (
+            db.query(StudySession)
+            .filter(
+                StudySession.user_id == user_id,
+                StudySession.session_type == "WEAKNESS_DRILL",
+                StudySession.status == "completed",
+            )
+            .count()
+        ),
+        "study_plans_generated": (
+            db.query(Module)
+            .filter(Module.user_id == user_id, Module.study_plan_json.isnot(None))
+            .count()
+        ),
+        "concept_count": (
+            db.query(Concept)
+            .join(Module, Module.id == Concept.module_id)
+            .filter(Module.user_id == user_id)
+            .count()
+        ),
+    }
 
 
 def _replenish_hearts(stats: UserStats) -> None:
@@ -398,19 +460,37 @@ def get_achievements(
     user: Optional[User] = Depends(get_current_user),
 ):
     unlocked_map: dict[str, datetime] = {}
+    stats = None
     if user:
+        stats = _get_or_create_stats(db, user.id)
         unlocked = db.query(Achievement).filter(Achievement.user_id == user.id).all()
         unlocked_map = {a.achievement_key: a.unlocked_at for a in unlocked}
 
+    metrics = _build_achievement_metrics(db, user.id if user else None, stats)
     result = []
     for key, defn in ACHIEVEMENT_DEFS.items():
+        progress_target = max(1, int(defn.get("target", 1)))
+        metric_key = defn.get("metric")
+        if key in unlocked_map:
+            progress_current = progress_target
+        elif metric_key:
+            progress_current = int(metrics.get(metric_key, 0))
+        else:
+            progress_current = 0
+        progress_pct = round(min(progress_current / progress_target, 1.0) * 100, 1)
         result.append(AchievementDefResponse(
             achievement_key=key,
             name=defn["name"],
             description=defn["description"],
             icon=defn["icon"],
+            category=defn.get("category", "general"),
+            tier=defn.get("tier", "bronze"),
             unlocked=key in unlocked_map,
             unlocked_at=unlocked_map.get(key),
+            progress_current=progress_current,
+            progress_target=progress_target,
+            progress_pct=progress_pct,
+            celebration_message=defn.get("celebration_message", ""),
         ))
     return result
 
