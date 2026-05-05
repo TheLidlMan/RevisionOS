@@ -25,6 +25,7 @@ from services.auth_service import require_user
 from models.user import User
 
 router = APIRouter(tags=["exports"])
+_EXPORT_BATCH_SIZE = 100
 
 
 # ---------- Pydantic schemas ----------
@@ -199,6 +200,76 @@ def _module_to_export_dict(db: Session, module: Module) -> dict:
     }
 
 
+def _iter_json_array(query, serializer):
+    yield "["
+    first = True
+    for item in query.yield_per(_EXPORT_BATCH_SIZE):
+        if not first:
+            yield ","
+        yield json.dumps(serializer(item), ensure_ascii=False)
+        first = False
+    yield "]"
+
+
+def _iter_module_export_json(db: Session, module: Module):
+    yield '{"module":'
+    yield json.dumps(
+        {
+            "name": module.name,
+            "description": module.description,
+            "color": module.color,
+        },
+        ensure_ascii=False,
+    )
+    yield ',"documents":'
+    yield from _iter_json_array(
+        db.query(Document).filter(Document.module_id == module.id),
+        lambda d: {
+            "filename": d.filename,
+            "file_type": d.file_type,
+            "word_count": d.word_count,
+            "raw_text": d.raw_text or "",
+        },
+    )
+    yield ',"concepts":'
+    yield from _iter_json_array(
+        db.query(Concept).filter(Concept.module_id == module.id),
+        lambda c: {
+            "name": c.name,
+            "definition": c.definition,
+            "explanation": c.explanation,
+            "importance_score": c.importance_score,
+        },
+    )
+    yield ',"flashcards":'
+    yield from _iter_json_array(
+        db.query(Flashcard).filter(Flashcard.module_id == module.id),
+        lambda f: {
+            "front": f.front,
+            "back": f.back,
+            "card_type": f.card_type,
+            "cloze_text": f.cloze_text,
+            "source_excerpt": f.source_excerpt,
+            "tags": f.tags,
+        },
+    )
+    yield ',"quiz_questions":'
+    yield from _iter_json_array(
+        db.query(QuizQuestion).filter(QuizQuestion.module_id == module.id),
+        lambda q: {
+            "question_text": q.question_text,
+            "question_type": q.question_type,
+            "options": q.options,
+            "correct_answer": q.correct_answer,
+            "explanation": q.explanation,
+            "difficulty": q.difficulty,
+        },
+    )
+    yield ',"exported_at":'
+    yield json.dumps(datetime.utcnow().isoformat(), ensure_ascii=False)
+    yield "}"
+
+
 # ---------- Endpoints ----------
 
 @router.get("/api/modules/{module_id}/export-anki")
@@ -272,15 +343,11 @@ def export_json(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    data = _module_to_export_dict(db, module)
-    json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
-    buf = io.BytesIO(json_bytes)
-
     safe_name = "".join(c for c in module.name if c.isalnum() or c in (" ", "-", "_")).strip()
     filename = f"{safe_name}_export.json"
 
     return StreamingResponse(
-        buf,
+        _iter_module_export_json(db, module),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

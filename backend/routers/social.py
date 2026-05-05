@@ -42,6 +42,91 @@ def _get_timeframe_cutoff(timeframe: str) -> datetime | None:
     return None
 
 
+def _leaderboard_rank_order(total_reviews, total_sessions):
+    return (
+        total_reviews.desc(),
+        total_sessions.desc(),
+        User.display_name.asc(),
+        User.id.asc(),
+    )
+
+
+def _leaderboard_stats_subquery(db: Session, timeframe: str):
+    cutoff = _get_timeframe_cutoff(timeframe)
+
+    review_counts = (
+        db.query(
+            ReviewLog.user_id.label("user_id"),
+            func.count(ReviewLog.id).label("total_reviews"),
+        )
+        .filter(ReviewLog.user_id.isnot(None))
+    )
+    if cutoff is not None:
+        review_counts = review_counts.filter(ReviewLog.answered_at >= cutoff)
+    review_counts = review_counts.group_by(ReviewLog.user_id).subquery()
+
+    session_counts = (
+        db.query(
+            StudySession.user_id.label("user_id"),
+            func.count(StudySession.id).label("total_sessions"),
+        )
+        .filter(StudySession.user_id.isnot(None))
+    )
+    if cutoff is not None:
+        session_counts = session_counts.filter(StudySession.started_at >= cutoff)
+    session_counts = session_counts.group_by(StudySession.user_id).subquery()
+    activity_user_ids = db.query(review_counts.c.user_id.label("user_id")).union(
+        db.query(session_counts.c.user_id.label("user_id"))
+    ).subquery()
+
+    mastery = (
+        db.query(
+            Flashcard.user_id.label("user_id"),
+            func.count(Flashcard.id).label("card_total"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            Flashcard.state == "REVIEW",
+                            Flashcard.lapses == 0,
+                            Flashcard.reps >= 2,
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("mastered_total"),
+        )
+        .filter(Flashcard.user_id.isnot(None))
+        .group_by(Flashcard.user_id)
+        .subquery()
+    )
+
+    total_reviews = func.coalesce(review_counts.c.total_reviews, 0)
+    total_sessions = func.coalesce(session_counts.c.total_sessions, 0)
+    card_total = func.coalesce(mastery.c.card_total, 0)
+    mastered_total = func.coalesce(mastery.c.mastered_total, 0)
+    rank_order = _leaderboard_rank_order(total_reviews, total_sessions)
+
+    return (
+        db.query(
+            User.id.label("user_id"),
+            User.display_name.label("display_name"),
+            total_reviews.label("total_reviews"),
+            total_sessions.label("total_sessions"),
+            card_total.label("card_total"),
+            mastered_total.label("mastered_total"),
+            func.row_number().over(order_by=rank_order).label("rank"),
+        )
+        .join(activity_user_ids, activity_user_ids.c.user_id == User.id)
+        .outerjoin(review_counts, review_counts.c.user_id == User.id)
+        .outerjoin(session_counts, session_counts.c.user_id == User.id)
+        .outerjoin(mastery, mastery.c.user_id == User.id)
+        .filter(User.is_active.is_(True))
+        .subquery()
+    )
+
+
 @router.get("/leaderboard", response_model=LeaderboardResponse)
 def get_leaderboard(
     timeframe: str = "all",
@@ -55,39 +140,32 @@ def get_leaderboard(
     if cached is not None:
         return cached
 
-    users = db.query(User.id, User.display_name).filter(User.is_active.is_(True)).all()
+    leaderboard_stats = _leaderboard_stats_subquery(db, timeframe)
+    top_rows = db.query(leaderboard_stats).order_by(leaderboard_stats.c.rank).limit(50).all()
+    user_row = None
+    if user and not any(row.user_id == user.id for row in top_rows):
+        user_row = db.query(leaderboard_stats).filter(leaderboard_stats.c.user_id == user.id).first()
 
-    cutoff = _get_timeframe_cutoff(timeframe)
-
-    review_counts_query = db.query(
-        ReviewLog.user_id,
-        func.count(ReviewLog.id),
-    ).filter(ReviewLog.user_id.isnot(None))
-    if cutoff is not None:
-        review_counts_query = review_counts_query.filter(ReviewLog.answered_at >= cutoff)
-    review_counts = {
-        user_id: count
-        for user_id, count in review_counts_query.group_by(ReviewLog.user_id).all()
-    }
-
-    session_counts_query = db.query(
-        StudySession.user_id,
-        func.count(StudySession.id),
-    ).filter(StudySession.user_id.isnot(None))
-    if cutoff is not None:
-        session_counts_query = session_counts_query.filter(StudySession.started_at >= cutoff)
-    session_counts = {
-        user_id: count
-        for user_id, count in session_counts_query.group_by(StudySession.user_id).all()
-    }
+    streak_user_ids = [row.user_id for row in top_rows]
+    if user_row is not None:
+        streak_user_ids.append(user_row.user_id)
 
     streak_dates: dict[str, set] = defaultdict(set)
-    for session_user_id, started_at in (
-        db.query(StudySession.user_id, func.date(StudySession.started_at))
-        .filter(StudySession.user_id.isnot(None), StudySession.started_at.isnot(None))
-        .distinct()
-        .all()
-    ):
+    if streak_user_ids:
+        streak_rows = (
+            db.query(StudySession.user_id, func.date(StudySession.started_at))
+            .filter(
+                StudySession.user_id.in_(streak_user_ids),
+                StudySession.user_id.isnot(None),
+                StudySession.started_at.isnot(None),
+            )
+            .distinct()
+            .all()
+        )
+    else:
+        streak_rows = []
+
+    for session_user_id, started_at in streak_rows:
         if started_at is None:
             continue
         if isinstance(started_at, datetime):
@@ -97,44 +175,11 @@ def get_leaderboard(
         else:
             streak_dates[session_user_id].add(datetime.fromisoformat(str(started_at)).date())
 
-    mastery_rows = (
-        db.query(
-            Flashcard.user_id,
-            func.count(Flashcard.id).label("total"),
-            func.sum(
-                case(
-                    (
-                        and_(
-                            Flashcard.state == "REVIEW",
-                            Flashcard.lapses == 0,
-                            Flashcard.reps >= 2,
-                        ),
-                        1,
-                    ),
-                    else_=0,
-                )
-            ).label("mastered"),
-        )
-        .filter(Flashcard.user_id.isnot(None))
-        .group_by(Flashcard.user_id)
-        .all()
-    )
-    mastery_by_user = {
-        row.user_id: (int(row.total or 0), int(row.mastered or 0))
-        for row in mastery_rows
-    }
-
     entries = []
-    for u in users:
-        total_reviews = review_counts.get(u.id, 0)
-        total_sessions = session_counts.get(u.id, 0)
-
-        if total_reviews == 0 and total_sessions == 0:
-            continue
-
+    for row in top_rows:
         streak = 0
         today = datetime.utcnow().date()
-        user_session_dates = streak_dates.get(u.id, set())
+        user_session_dates = streak_dates.get(row.user_id, set())
         for i in range(365):
             check_date = today - timedelta(days=i)
             if check_date in user_session_dates:
@@ -145,32 +190,26 @@ def get_leaderboard(
                 break
 
         mastery_pct = 0.0
-        card_total, mastered_total = mastery_by_user.get(u.id, (0, 0))
+        card_total = int(row.card_total or 0)
+        mastered_total = int(row.mastered_total or 0)
         if card_total:
             mastery_pct = round((mastered_total / card_total) * 100, 1)
 
         entries.append(LeaderboardEntry(
-            rank=0,
-            user_id=u.id,
-            display_name=u.display_name,
+            rank=int(row.rank),
+            user_id=row.user_id,
+            display_name=row.display_name,
             streak=streak,
             mastery_pct=mastery_pct,
-            total_reviews=total_reviews,
-            total_sessions=total_sessions,
+            total_reviews=int(row.total_reviews or 0),
+            total_sessions=int(row.total_sessions or 0),
         ))
 
-    entries.sort(key=lambda e: e.total_reviews, reverse=True)
-    for i, entry in enumerate(entries):
-        entry.rank = i + 1
+    your_rank = next((entry.rank for entry in entries if user and entry.user_id == user.id), None)
+    if your_rank is None and user_row is not None:
+        your_rank = int(user_row.rank)
 
-    your_rank = None
-    if user:
-        for entry in entries:
-            if entry.user_id == user.id:
-                your_rank = entry.rank
-                break
-
-    response = LeaderboardResponse(entries=entries[:50], your_rank=your_rank)
+    response = LeaderboardResponse(entries=entries, your_rank=your_rank)
     cache_set(cache_key, response.model_dump(mode="json"), ttl=120)
     return response
 
