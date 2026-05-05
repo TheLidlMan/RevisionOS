@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -6,12 +6,13 @@ import {
   CaretRight,
   MagnifyingGlass,
   TrendDown,
+  Stack,
 } from '@phosphor-icons/react';
-import { getFlashcards, getForgettingCurve, getModules } from '../api/client';
+import { getFlashcards, getForgettingCurve, getModules, getRetentionForecast, getSettings } from '../api/client';
 import Skeleton from '../components/Skeleton';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
-import type { Flashcard, ForgettingCurveData, Module } from '../types';
+import type { Flashcard, ForgettingCurveData, Module, RetentionForecastData } from '../types';
 import { formatDateTime, formatDays } from '../utils/formatters';
 
 const glass = {
@@ -22,7 +23,7 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
-function RetentionChart({ data }: { data: ForgettingCurveData }) {
+function RetentionChart({ data, targetRetentionPct }: { data: ForgettingCurveData; targetRetentionPct: number }) {
   const points = data.data_points;
   if (points.length === 0) return null;
 
@@ -35,12 +36,17 @@ function RetentionChart({ data }: { data: ForgettingCurveData }) {
   const toX = (day: number) => padding.left + (day / maxDay) * chartW;
   const toY = (retention: number) => padding.top + ((100 - retention) / 100) * chartH;
   const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${toX(point.day)},${toY(point.retention_pct)}`).join(' ');
+  const targetY = toY(targetRetentionPct);
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto' }}>
       {[0, 25, 50, 75, 100].map((tick) => (
         <line key={tick} x1={padding.left} y1={toY(tick)} x2={width - padding.right} y2={toY(tick)} stroke="rgba(255,255,255,0.08)" />
       ))}
+      <line x1={padding.left} y1={targetY} x2={width - padding.right} y2={targetY} stroke="#78b478" strokeDasharray="6 6" />
+      <text x={width - padding.right} y={targetY - 6} textAnchor="end" fill="#78b478" fontSize="11">
+        Target {Math.round(targetRetentionPct)}%
+      </text>
       <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" />
       {points.map((point) => (
         <circle key={point.day} cx={toX(point.day)} cy={toY(point.retention_pct)} r="3.5" fill="var(--accent)" />
@@ -55,6 +61,10 @@ function CurveDetail({ cardId }: { cardId: string }) {
   const query = useQuery({
     queryKey: ['forgetting-curve', cardId],
     queryFn: () => getForgettingCurve(cardId),
+  });
+  const settingsQuery = useQuery({
+    queryKey: ['settings'],
+    queryFn: getSettings,
   });
 
   if (query.isLoading) {
@@ -77,6 +87,9 @@ function CurveDetail({ cardId }: { cardId: string }) {
     );
   }
 
+  const targetRetentionPct = (settingsQuery.data?.desired_retention || 0.9) * 100;
+  const projectedDropDay = query.data.data_points.find((point) => point.retention_pct <= targetRetentionPct)?.day ?? query.data.data_points.at(-1)?.day ?? 0;
+
   return (
     <div>
       <button type="button" onClick={() => navigate('/forgetting-curve')} className="hidden md:inline-flex items-center gap-2 mb-6" style={{ color: 'var(--text-secondary)' }}>
@@ -84,14 +97,21 @@ function CurveDetail({ cardId }: { cardId: string }) {
         Back to Cards
       </button>
       <div className="p-5 mb-5" style={glass}>
-        <RetentionChart data={query.data} />
+        <RetentionChart data={query.data} targetRetentionPct={targetRetentionPct} />
       </div>
-      <div className="p-5" style={glass}>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 6 }}>Card stability</p>
-        <p style={{ color: 'var(--text)', fontSize: '1.2rem' }}>{formatDays(query.data.stability)}</p>
-        <p style={{ color: 'var(--text-tertiary)', fontSize: '0.78rem', marginTop: 8 }}>
-          Data generated from the card&apos;s current review state.
-        </p>
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="p-5" style={glass}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 6 }}>Card stability</p>
+          <p style={{ color: 'var(--text)', fontSize: '1.2rem' }}>{formatDays(query.data.stability)}</p>
+        </div>
+        <div className="p-5" style={glass}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 6 }}>Retention floor</p>
+          <p style={{ color: 'var(--text)', fontSize: '1.2rem' }}>~day {projectedDropDay}</p>
+        </div>
+        <div className="p-5" style={glass}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 6 }}>Overlay note</p>
+          <p style={{ color: 'var(--text)', fontSize: '0.95rem', lineHeight: 1.6 }}>The green guide line uses your desired retention setting to show when this card drifts below target.</p>
+        </div>
       </div>
     </div>
   );
@@ -114,11 +134,50 @@ function CardBrowser() {
     queryFn: async () => (await getFlashcards({ module_id: moduleId || undefined, limit: 1000 })).items,
   });
 
+  const forecastQuery = useQuery<RetentionForecastData>({
+    queryKey: ['retention-forecast'],
+    queryFn: getRetentionForecast,
+  });
+
   const cards = (cardsQuery.data || []).filter((card) => {
     if (!search.trim()) return true;
     const term = search.toLowerCase();
     return card.front.toLowerCase().includes(term) || card.back.toLowerCase().includes(term);
   });
+
+  const bulkAnalysis = useMemo(() => {
+    if (!cards.length) {
+      return [];
+    }
+    const urgent = cards.filter((card) => (card.stability || 0) < 3).length;
+    const recovering = cards.filter((card) => (card.stability || 0) >= 3 && (card.stability || 0) < 14).length;
+    const durable = cards.filter((card) => (card.stability || 0) >= 14).length;
+    const avgStability = cards.reduce((sum, card) => sum + (card.stability || 0), 0) / cards.length;
+    const avgReps = cards.reduce((sum, card) => sum + (card.reps || 0), 0) / cards.length;
+    return [
+      { label: 'Urgent review', value: urgent, subtext: 'stability under 3 days' },
+      { label: 'Recovering', value: recovering, subtext: 'stability between 3 and 14 days' },
+      { label: 'Durable', value: durable, subtext: 'stability above 2 weeks' },
+      { label: 'Average stability', value: formatDays(avgStability), subtext: `${avgReps.toFixed(1)} reps per card` },
+    ];
+  }, [cards]);
+
+  const selectedForecast = useMemo(() => {
+    if (!forecastQuery.data) {
+      return null;
+    }
+    if (moduleId) {
+      return forecastQuery.data.modules.find((module) => module.module_id === moduleId) || null;
+    }
+    const aggregate = forecastQuery.data.modules.flatMap((module) => module.forecasts.filter((point) => point.days === 7));
+    if (aggregate.length === 0) {
+      return null;
+    }
+    return {
+      module_name: 'All modules',
+      forecasts: [{ days: 7, retention_pct: aggregate.reduce((sum, point) => sum + point.retention_pct, 0) / aggregate.length }],
+    };
+  }, [forecastQuery.data, moduleId]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -158,10 +217,40 @@ function CardBrowser() {
         </div>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-[1.5fr_1fr] mb-6">
+        <div className="p-5" style={glass}>
+          <div className="flex items-center gap-2 mb-4">
+            <Stack size={18} style={{ color: 'var(--accent)' }} />
+            <p style={{ color: 'var(--text)', fontWeight: 500 }}>Bulk card analysis</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {bulkAnalysis.map((item) => (
+              <div key={item.label} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <p style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{item.label}</p>
+                <p style={{ color: 'var(--text)', fontSize: '1.05rem', marginTop: 6 }}>{item.value}</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: 4 }}>{item.subtext}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="p-5" style={glass}>
+          <p style={{ color: 'var(--text)', fontWeight: 500 }}>7-day retention outlook</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: 4 }}>
+            {selectedForecast?.module_name || 'No forecast available yet'}
+          </p>
+          <p style={{ color: 'var(--accent)', fontSize: '2rem', fontWeight: 300, marginTop: 18 }}>
+            {selectedForecast?.forecasts?.[0] ? `${Math.round(selectedForecast.forecasts[0].retention_pct)}%` : '—'}
+          </p>
+          <p style={{ color: 'var(--text-tertiary)', fontSize: '0.78rem', marginTop: 8 }}>
+            Combines your current module forecast with the live card browser so weak spots surface immediately.
+          </p>
+        </div>
+      </div>
+
       {cardsQuery.isLoading ? (
         <div className="space-y-3">
-          {[0, 1, 2].map((idx) => (
-            <Skeleton key={idx} className="h-24 w-full" />
+          {[0, 1, 2].map((index) => (
+            <Skeleton key={index} className="h-24 w-full" />
           ))}
         </div>
       ) : cards.length > 0 ? (
@@ -210,7 +299,7 @@ export default function ForgettingCurve() {
         <TrendDown size={24} style={{ color: 'var(--accent)' }} />
         <div>
           <h1 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.8rem' }}>Forgetting Curve</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Browse stability across one module or all modules.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>Browse retention, inspect target overlays, and batch-analyse stability across your collection.</p>
         </div>
       </div>
       {cardId ? <CurveDetail cardId={cardId} /> : <CardBrowser />}
