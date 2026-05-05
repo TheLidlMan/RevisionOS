@@ -4,6 +4,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+import cache
 import database
 from database import SessionLocal, create_tables
 from main import app, fastapi_app
@@ -25,6 +27,8 @@ from models.document import Document
 from models.flashcard import Flashcard
 from models.module import Module
 from models.quiz_question import QuizQuestion
+from models.quiz_session import StudySession
+from models.review_log import ReviewLog
 from models.user import User
 from routers import auth as auth_router
 from routers import collaboration, settings as settings_router
@@ -54,6 +58,7 @@ class SecurityFixesTestCase(unittest.TestCase):
         collaboration._connections.clear()
         auth_router._oauth_states.clear()
         reset_rate_limits()
+        cache._store.clear()
         settings.GROQ_API_KEY = ""
         if self.settings_file.exists():
             self.settings_file.unlink()
@@ -128,6 +133,36 @@ class SecurityFixesTestCase(unittest.TestCase):
             db.commit()
             db.refresh(card)
             return module.id, card.id
+
+    def _create_module_with_due_flashcards(self, user_id: str):
+        with SessionLocal() as db:
+            module = Module(user_id=user_id, name="Chemistry")
+            db.add(module)
+            db.flush()
+            due_now = datetime.utcnow() - timedelta(minutes=5)
+            cards = [
+                Flashcard(
+                    user_id=user_id,
+                    module_id=module.id,
+                    front="Q1",
+                    back="A1",
+                    card_type="BASIC",
+                    state="REVIEW",
+                    due=due_now,
+                ),
+                Flashcard(
+                    user_id=user_id,
+                    module_id=module.id,
+                    front="Q2",
+                    back="A2",
+                    card_type="BASIC",
+                    state="REVIEW",
+                    due=due_now,
+                ),
+            ]
+            db.add_all(cards)
+            db.commit()
+            return module.id, [card.id for card in cards]
 
     def test_profile_update_rejects_blank_display_name(self):
         _, token = self._create_user("profile@example.com")
@@ -446,6 +481,116 @@ class SecurityFixesTestCase(unittest.TestCase):
         self.assertEqual(module_response.status_code, 200)
         self.assertNotIn("file_path", document_response.json())
         self.assertNotIn("file_path", module_response.json()["documents"][0])
+
+    def test_due_flashcard_batch_review_rewarms_due_cache(self):
+        owner_id, owner_token = self._create_user("due-owner@example.com")
+        module_id, card_ids = self._create_module_with_due_flashcards(owner_id)
+
+        due_response = self.client.get(
+            "/api/flashcards",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            params={"module_id": module_id, "due": "true", "limit": 1000},
+        )
+        self.assertEqual(due_response.status_code, 200)
+
+        expected_cache_key = f"cache:flashcards:{owner_id}:due:{module_id}:limit:1000"
+        self.assertIn(expected_cache_key, cache._store)
+
+        review_response = self.client.post(
+            "/api/flashcards/review/batch",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            json=[{"id": card_ids[0], "rating": "GOOD"}],
+        )
+        self.assertEqual(review_response.status_code, 200)
+        self.assertIn(expected_cache_key, cache._store)
+
+    def test_export_json_streams_complete_module_payload(self):
+        owner_id, owner_token = self._create_user("export-owner@example.com")
+        module_id, _document_id = self._create_module_with_document(owner_id)
+        with SessionLocal() as db:
+            module = db.query(Module).filter(Module.id == module_id).first()
+            db.add(
+                Flashcard(
+                    user_id=owner_id,
+                    module_id=module_id,
+                    front="Front",
+                    back="Back",
+                    card_type="BASIC",
+                    tags=json.dumps(["tag-one"]),
+                )
+            )
+            db.add(
+                QuizQuestion(
+                    user_id=owner_id,
+                    module_id=module_id,
+                    question_text="Question",
+                    question_type="MCQ",
+                    correct_answer="Answer",
+                )
+            )
+            db.commit()
+            self.assertIsNotNone(module)
+
+        response = self.client.get(
+            f"/api/modules/{module_id}/export-json",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["module"]["name"], "History")
+        self.assertEqual(len(payload["documents"]), 1)
+        self.assertEqual(len(payload["flashcards"]), 1)
+        self.assertEqual(len(payload["quiz_questions"]), 1)
+        self.assertIn("exported_at", payload)
+
+    def test_leaderboard_returns_ranked_entries_and_your_rank(self):
+        top_user_id, _ = self._create_user("leaderboard-top@example.com", "Top User")
+        current_user_id, current_token = self._create_user("leaderboard-current@example.com", "Current User")
+
+        with SessionLocal() as db:
+            top_session = StudySession(user_id=top_user_id, session_type="FLASHCARDS", started_at=datetime.utcnow())
+            current_session = StudySession(user_id=current_user_id, session_type="FLASHCARDS", started_at=datetime.utcnow())
+            db.add_all([top_session, current_session])
+            db.flush()
+            db.add_all(
+                [
+                    ReviewLog(
+                        user_id=top_user_id,
+                        session_id=top_session.id,
+                        item_id="top-1",
+                        item_type="FLASHCARD",
+                        rating="GOOD",
+                        answered_at=datetime.utcnow(),
+                    ),
+                    ReviewLog(
+                        user_id=top_user_id,
+                        session_id=top_session.id,
+                        item_id="top-2",
+                        item_type="FLASHCARD",
+                        rating="GOOD",
+                        answered_at=datetime.utcnow(),
+                    ),
+                    ReviewLog(
+                        user_id=current_user_id,
+                        session_id=current_session.id,
+                        item_id="current-1",
+                        item_type="FLASHCARD",
+                        rating="GOOD",
+                        answered_at=datetime.utcnow(),
+                    ),
+                ]
+            )
+            db.commit()
+
+        response = self.client.get(
+            "/api/social/leaderboard",
+            cookies={SESSION_COOKIE_NAME: current_token},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["entries"][0]["user_id"], top_user_id)
+        self.assertEqual(payload["entries"][0]["rank"], 1)
+        self.assertEqual(payload["your_rank"], 2)
 
 
 if __name__ == "__main__":

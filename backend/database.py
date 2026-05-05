@@ -98,6 +98,22 @@ def _add_missing_columns(conn, inspector, table_name: str, column_names: list[st
         conn.execute(text(f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_sql}"))
 
 
+def _ensure_index(conn, inspector, table_name: str, index_name: str, column_names: list[str]) -> None:
+    table_names = set(inspector.get_table_names())
+    if table_name not in table_names:
+        return
+
+    existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+    if index_name in existing_indexes:
+        return
+
+    preparer = conn.dialect.identifier_preparer
+    quoted_index_name = preparer.quote(index_name)
+    quoted_table_name = preparer.quote(table_name)
+    quoted_columns = ", ".join(preparer.quote(column_name) for column_name in column_names)
+    conn.execute(text(f"CREATE INDEX {quoted_index_name} ON {quoted_table_name} ({quoted_columns})"))
+
+
 def _ensure_runtime_schema():
     runtime_columns = {
         "documents": [
@@ -205,3 +221,17 @@ def _ensure_runtime_schema():
             conn.execute(text("UPDATE topic_progress SET question_count = COALESCE(question_count, 0)"))
             conn.execute(text("UPDATE topic_progress SET correct_count = COALESCE(correct_count, 0)"))
             conn.execute(text("UPDATE topic_progress SET updated_at = COALESCE(updated_at, created_at)"))
+
+        inspector = inspect(conn)
+        hot_path_indexes = (
+            ("flashcards", "ix_flashcards_user_id_due_updated_at", ["user_id", "due", "updated_at"]),
+            ("flashcards", "ix_flashcards_module_id_updated_at_id", ["module_id", "updated_at", "id"]),
+            ("flashcards", "ix_flashcards_module_id_due_id", ["module_id", "due", "id"]),
+            ("flashcards", "ix_flashcards_module_id_bookmarked_updated_at", ["module_id", "is_bookmarked", "updated_at"]),
+            ("documents", "ix_documents_module_id_status_delete_requested_at", ["module_id", "processing_status", "delete_requested_at"]),
+            ("review_logs", "ix_review_logs_user_id_answered_at", ["user_id", "answered_at"]),
+            ("study_sessions", "ix_study_sessions_user_id_started_at", ["user_id", "started_at"]),
+        )
+        for table_name, index_name, column_names in hot_path_indexes:
+            _ensure_index(conn, inspector, table_name, index_name, column_names)
+            inspector = inspect(conn)

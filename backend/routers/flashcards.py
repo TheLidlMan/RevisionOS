@@ -10,9 +10,8 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from cache import cache_get, cache_set, cache_invalidate_prefix
 from config import settings
@@ -35,6 +34,8 @@ logger = logging.getLogger(__name__)
 _pending_generation: dict[str, float] = {}
 _pending_lock = threading.Lock()
 _GENERATION_DEBOUNCE_SECS = 30
+_DUE_CACHE_TTL_SECONDS = 60
+_DUE_CACHE_WARM_LIMIT = 1000
 
 
 # ---------- Pydantic schemas ----------
@@ -241,6 +242,195 @@ def _owned_card_filter(db: Session, card_id: str, user_id: str):
     )
 
 
+def _invalidate_flashcard_caches(user_id: str) -> None:
+    cache_invalidate_prefix(f"cache:flashcards:{user_id}:")
+
+
+def _due_cache_key(user_id: str, module_id: Optional[str], limit: int) -> str:
+    module_part = module_id or "all"
+    return f"cache:flashcards:{user_id}:due:{module_part}:limit:{limit}"
+
+
+def _should_use_due_cache(
+    *,
+    module_id: Optional[str],
+    due: Optional[bool],
+    generation_source: Optional[str],
+    state: Optional[str],
+    study_difficulty: Optional[str],
+    bookmarked_only: bool,
+    normalized_tags: list[str],
+    search: Optional[str],
+    sort: str,
+    skip: int,
+) -> bool:
+    return bool(
+        due
+        and skip == 0
+        and sort == "updated_desc"
+        and not generation_source
+        and not state
+        and not study_difficulty
+        and not bookmarked_only
+        and not normalized_tags
+        and not (search or "").strip()
+    )
+
+
+def _flashcard_query_options():
+    return (
+        load_only(
+            Flashcard.id,
+            Flashcard.module_id,
+            Flashcard.concept_id,
+            Flashcard.front,
+            Flashcard.back,
+            Flashcard.card_type,
+            Flashcard.cloze_text,
+            Flashcard.source_document_id,
+            Flashcard.source_excerpt,
+            Flashcard.tags,
+            Flashcard.study_difficulty,
+            Flashcard.is_bookmarked,
+            Flashcard.due,
+            Flashcard.stability,
+            Flashcard.difficulty,
+            Flashcard.elapsed_days,
+            Flashcard.scheduled_days,
+            Flashcard.reps,
+            Flashcard.lapses,
+            Flashcard.generation_source,
+            Flashcard.state,
+            Flashcard.last_review,
+            Flashcard.created_at,
+            Flashcard.updated_at,
+        ),
+        selectinload(Flashcard.assets).load_only(
+            FlashcardAsset.id,
+            FlashcardAsset.mime_type,
+            FlashcardAsset.original_filename,
+            FlashcardAsset.created_at,
+        ),
+    )
+
+
+def _build_flashcards_query(db: Session, user_id: str):
+    owned_module_ids = db.query(Module.id).filter(Module.user_id == user_id)
+    return (
+        db.query(Flashcard)
+        .options(*_flashcard_query_options())
+        .filter(_user_owns_card_condition(user_id, owned_module_ids))
+    )
+
+
+def _apply_flashcard_filters(
+    query,
+    *,
+    module_id: Optional[str],
+    due: Optional[bool],
+    generation_source: Optional[str],
+    state: Optional[str],
+    study_difficulty: Optional[str],
+    bookmarked_only: bool,
+    normalized_tags: list[str],
+    search: Optional[str],
+):
+    if module_id:
+        query = query.filter(Flashcard.module_id == module_id)
+    if generation_source:
+        query = query.filter(Flashcard.generation_source == generation_source.upper())
+    if state:
+        query = query.filter(Flashcard.state == state.upper())
+    if study_difficulty:
+        query = query.filter(Flashcard.study_difficulty == _normalize_study_difficulty(study_difficulty))
+    if bookmarked_only:
+        query = query.filter(Flashcard.is_bookmarked.is_(True))
+    if due:
+        query = query.filter(Flashcard.due <= datetime.utcnow())
+    for tag in normalized_tags:
+        query = query.filter(Flashcard.tags.ilike(f'%"{tag}"%'))
+    if search:
+        term = f"%{search.strip()}%"
+        if term != "%%":
+            query = query.filter(or_(Flashcard.front.ilike(term), Flashcard.back.ilike(term)))
+    return query
+
+
+def _apply_flashcard_sort(query, sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"]):
+    if sort == "created_desc":
+        return query.order_by(Flashcard.created_at.desc(), Flashcard.id.desc())
+    if sort == "created_asc":
+        return query.order_by(Flashcard.created_at.asc(), Flashcard.id.asc())
+    if sort == "front_asc":
+        return query.order_by(Flashcard.front.asc(), Flashcard.created_at.asc(), Flashcard.id.asc())
+    return query.order_by(Flashcard.updated_at.desc(), Flashcard.id.desc())
+
+
+def _query_flashcards_page(
+    db: Session,
+    *,
+    user_id: str,
+    module_id: Optional[str],
+    due: Optional[bool],
+    generation_source: Optional[str],
+    state: Optional[str],
+    study_difficulty: Optional[str],
+    bookmarked_only: bool,
+    normalized_tags: list[str],
+    search: Optional[str],
+    sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"],
+    skip: int,
+    limit: int,
+) -> PaginatedFlashcardsResponse:
+    query = _build_flashcards_query(db, user_id)
+    query = _apply_flashcard_filters(
+        query,
+        module_id=module_id,
+        due=due,
+        generation_source=generation_source,
+        state=state,
+        study_difficulty=study_difficulty,
+        bookmarked_only=bookmarked_only,
+        normalized_tags=normalized_tags,
+        search=search,
+    )
+
+    total = query.order_by(None).with_entities(func.count(Flashcard.id)).scalar() or 0
+    cards = _apply_flashcard_sort(query, sort).offset(skip).limit(limit).all()
+    items = [_card_to_response(card) for card in cards]
+    return PaginatedFlashcardsResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=skip,
+        has_more=(skip + len(items)) < total,
+    )
+
+
+def _warm_due_flashcard_cache(db: Session, user_id: str, module_ids: set[str], limit: int = _DUE_CACHE_WARM_LIMIT) -> None:
+    for module_id in sorted(module_ids):
+        response = _query_flashcards_page(
+            db,
+            user_id=user_id,
+            module_id=module_id,
+            due=True,
+            generation_source=None,
+            state=None,
+            study_difficulty=None,
+            bookmarked_only=False,
+            normalized_tags=[],
+            search=None,
+            sort="updated_desc",
+            skip=0,
+            limit=limit,
+        )
+        cache_set(
+            _due_cache_key(user_id, module_id, limit),
+            response.model_dump(mode="json"),
+            ttl=_DUE_CACHE_TTL_SECONDS,
+        )
+
+
 def _allocate_card_targets(docs: list[Document], requested_total: Optional[int]) -> dict[str, int]:
     if not docs:
         return {}
@@ -306,45 +496,43 @@ def list_flashcards(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
-    owned_module_ids = db.query(Module.id).filter(Module.user_id == current_user.id)
-    query = db.query(Flashcard).filter(
-        _user_owns_card_condition(current_user.id, owned_module_ids)
-    )
-    if module_id:
-        query = query.filter(Flashcard.module_id == module_id)
-    if generation_source:
-        query = query.filter(Flashcard.generation_source == generation_source.upper())
-    if state:
-        query = query.filter(Flashcard.state == state.upper())
-    if study_difficulty:
-        query = query.filter(Flashcard.study_difficulty == _normalize_study_difficulty(study_difficulty))
-    if bookmarked_only:
-        query = query.filter(Flashcard.is_bookmarked.is_(True))
-    if due:
-        now = datetime.utcnow()
-        query = query.filter(Flashcard.due <= now)
     normalized_tags = _normalize_tags(tags)
-    for tag in normalized_tags:
-        query = query.filter(Flashcard.tags.ilike(f'%"{tag}"%'))
-    if search:
-        term = f"%{search.strip()}%"
-        if term != "%%":
-            query = query.filter(or_(Flashcard.front.ilike(term), Flashcard.back.ilike(term)))
+    cache_key = None
+    if _should_use_due_cache(
+        module_id=module_id,
+        due=due,
+        generation_source=generation_source,
+        state=state,
+        study_difficulty=study_difficulty,
+        bookmarked_only=bookmarked_only,
+        normalized_tags=normalized_tags,
+        search=search,
+        sort=sort,
+        skip=skip,
+    ):
+        cache_key = _due_cache_key(current_user.id, module_id, limit)
+        cached = cache_get(cache_key)
+        if cached is not None:
+            return cached
 
-    total = query.with_entities(func.count(Flashcard.id)).scalar() or 0
-
-    if sort == "created_desc":
-        query = query.order_by(Flashcard.created_at.desc(), Flashcard.id.desc())
-    elif sort == "created_asc":
-        query = query.order_by(Flashcard.created_at.asc(), Flashcard.id.asc())
-    elif sort == "front_asc":
-        query = query.order_by(Flashcard.front.asc(), Flashcard.created_at.asc(), Flashcard.id.asc())
-    else:
-        query = query.order_by(Flashcard.updated_at.desc(), Flashcard.id.desc())
-
-    cards = query.offset(skip).limit(limit).all()
-    items = [_card_to_response(card) for card in cards]
-    return PaginatedFlashcardsResponse(items=items, total=total, limit=limit, offset=skip, has_more=(skip + len(items)) < total)
+    response = _query_flashcards_page(
+        db,
+        user_id=current_user.id,
+        module_id=module_id,
+        due=due,
+        generation_source=generation_source,
+        state=state,
+        study_difficulty=study_difficulty,
+        bookmarked_only=bookmarked_only,
+        normalized_tags=normalized_tags,
+        search=search,
+        sort=sort,
+        skip=skip,
+        limit=limit,
+    )
+    if cache_key is not None:
+        cache_set(cache_key, response.model_dump(mode="json"), ttl=_DUE_CACHE_TTL_SECONDS)
+    return response
 
 
 @router.post("/api/flashcards", response_model=FlashcardResponse, status_code=201)
@@ -376,6 +564,7 @@ def create_flashcard(
     db.add(card)
     db.commit()
     db.refresh(card)
+    _invalidate_flashcard_caches(current_user.id)
     return _card_to_response(card)
 
 
@@ -405,6 +594,7 @@ def update_flashcard(
         card.is_bookmarked = body.is_bookmarked
     db.commit()
     db.refresh(card)
+    _invalidate_flashcard_caches(current_user.id)
     return _card_to_response(card)
 
 
@@ -443,6 +633,7 @@ def set_flashcard_bookmark(
     card.is_bookmarked = body.is_bookmarked
     db.commit()
     db.refresh(card)
+    _invalidate_flashcard_caches(current_user.id)
     return _card_to_response(card)
 
 
@@ -507,6 +698,7 @@ def upload_flashcard_asset(
     db.add(asset)
     db.commit()
     db.refresh(asset)
+    _invalidate_flashcard_caches(current_user.id)
     return FlashcardAssetResponse(
         id=asset.id,
         mime_type=asset.mime_type,
@@ -551,10 +743,12 @@ def delete_flashcard_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     file_path = asset.file_path
+    owner_id = current_user.id
     db.delete(asset)
     db.commit()
     if file_path and os.path.exists(file_path):
         os.remove(file_path)
+    _invalidate_flashcard_caches(owner_id)
     return None
 
 
@@ -569,6 +763,7 @@ def delete_flashcard(
         raise HTTPException(status_code=404, detail="Flashcard not found")
     db.delete(card)
     db.commit()
+    _invalidate_flashcard_caches(current_user.id)
     return None
 
 
@@ -613,6 +808,8 @@ def review_flashcard(
 
     db.commit()
     db.refresh(card)
+    _invalidate_flashcard_caches(user.id)
+    _warm_due_flashcard_cache(db, user.id, {card.module_id})
 
     # Award XP via gamification
     xp_data = {"xp_earned": 0, "xp_total": 0, "level": 1, "level_up": False, "new_achievements": []}
@@ -744,8 +941,10 @@ def review_flashcards_batch(
         except Exception as exc:
             logger.warning("Failed to award batch gamification XP: %s", exc)
 
-    # Invalidate cache for this user's due flashcards
-    cache_invalidate_prefix(f"cache:flashcards:{user.id}:")
+    reviewed_module_ids = {cards[result.id].module_id for result in results if result.id in cards}
+    _invalidate_flashcard_caches(user.id)
+    if reviewed_module_ids:
+        _warm_due_flashcard_cache(db, user.id, reviewed_module_ids)
 
     return BatchReviewResponse(reviewed=len(results), results=results)
 
@@ -872,6 +1071,7 @@ async def _do_generate_cards(module_id: str, body: Optional[GenerateCardsRequest
     db.commit()
     for c in created_cards:
         db.refresh(c)
+    _invalidate_flashcard_caches(module_user_id)
 
     return GenerateCardsResponse(
         generated=len(created_cards),
