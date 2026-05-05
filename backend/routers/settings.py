@@ -127,6 +127,8 @@ def update_settings(body: SettingsUpdate, user: User = Depends(require_user)):
     current = _load_settings()
     update_data = body.model_dump(exclude_none=True)
     api_key = update_data.pop("groq_api_key", None)
+    if api_key is not None and api_key.strip():
+        raise HTTPException(status_code=403, detail="Updating the global Groq API key is not allowed")
 
     if "cards_per_document" in update_data:
         update_data["cards_per_document"] = max(
@@ -146,9 +148,6 @@ def update_settings(body: SettingsUpdate, user: User = Depends(require_user)):
         update_data["llm_top_p"] = max(0.0, min(float(update_data["llm_top_p"]), 1.0))
 
     current.update(update_data)
-    if api_key is not None:
-        settings.GROQ_API_KEY = api_key.strip()
-        current["groq_api_key"] = settings.GROQ_API_KEY
     _save_settings(current)
     reload_runtime_settings()
 

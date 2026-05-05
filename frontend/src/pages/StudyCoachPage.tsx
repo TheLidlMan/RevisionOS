@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Brain, CheckCircle, Graph, Sparkle, SpinnerGap } from '@phosphor-icons/react';
+import { Brain, CheckCircle, Graph, Sparkle, SpinnerGap, ArrowRight } from '@phosphor-icons/react';
 import {
   buildStudyCoachPlan,
   evaluateStudyCoachAnswer,
@@ -87,6 +87,38 @@ export default function StudyCoachPage() {
   });
 
   const plan = planQuery.data as StudyCoachPlan | undefined;
+  const dependencyView = useMemo(() => {
+    if (!selectedTopic || !coachQuery.data) {
+      return { parent: null, children: [] as StudyCoachTopic[] };
+    }
+    return {
+      parent: coachQuery.data.topics.find((topic) => topic.concept_id === selectedTopic.parent_id) || null,
+      children: coachQuery.data.topics.filter((topic) => topic.parent_id === selectedTopic.concept_id),
+    };
+  }, [coachQuery.data, selectedTopic]);
+
+  const coachPrompts = useMemo(() => {
+    if (!selectedTopic) {
+      return [];
+    }
+    const cues = [] as string[];
+    if (selectedTopic.progress_pct < 40) {
+      cues.push('Start with the definition, then explain one example from memory before checking your notes.');
+    }
+    if (selectedTopic.progress_pct >= 40 && selectedTopic.progress_pct < 85) {
+      cues.push('You are in consolidation mode — teach this topic aloud and then mark your explanation.');
+    }
+    if (selectedTopic.progress_pct >= 85) {
+      cues.push('This topic is nearly mastered — keep it warm by connecting it to neighbouring concepts.');
+    }
+    if (dependencyView.parent) {
+      cues.push(`Anchor this topic back to ${dependencyView.parent.name} before moving on.`);
+    }
+    if (dependencyView.children.length > 0) {
+      cues.push(`Next, branch into ${dependencyView.children.slice(0, 2).map((topic) => topic.name).join(' and ')}.`);
+    }
+    return cues;
+  }, [dependencyView.children, dependencyView.parent, selectedTopic]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
@@ -159,6 +191,75 @@ export default function StudyCoachPage() {
               </div>
             ))}
           </div>
+
+          {selectedTopic && (
+            <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+              <div style={glass} className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Graph size={18} style={{ color: 'var(--accent)' }} />
+                  <p style={{ color: 'var(--text)', fontWeight: 500 }}>Concept dependency view</p>
+                </div>
+                <div className="space-y-3">
+                  {dependencyView.parent && (
+                    <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                      <p style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Prerequisite</p>
+                      <p style={{ color: 'var(--text)', marginTop: 6 }}>{dependencyView.parent.name}</p>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 p-4 rounded-2xl" style={{ background: 'rgba(196,149,106,0.12)', border: '1px solid rgba(196,149,106,0.25)' }}>
+                      <p style={{ color: 'var(--accent)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Current focus</p>
+                      <p style={{ color: 'var(--text)', fontSize: '1rem', marginTop: 6 }}>{selectedTopic.name}</p>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: 6 }}>
+                        Mastery {Math.round(selectedTopic.mastery)}% · progress {Math.round(selectedTopic.progress_pct)}%
+                      </p>
+                    </div>
+                    <ArrowRight size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    <div className="flex-1 p-4 rounded-2xl" style={{ background: 'rgba(120,180,120,0.08)', border: '1px solid rgba(120,180,120,0.2)' }}>
+                      <p style={{ color: '#78b478', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Next step</p>
+                      <p style={{ color: 'var(--text)', fontSize: '0.95rem', marginTop: 6 }}>
+                        {dependencyView.children[0]?.name || plan?.checklist[0]?.title || 'Strengthen this explanation with a marked answer.'}
+                      </p>
+                    </div>
+                  </div>
+                  {dependencyView.children.length > 0 ? (
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      {dependencyView.children.map((topic) => (
+                        <button
+                          key={topic.concept_id}
+                          type="button"
+                          onClick={() => setSelectedConceptId(topic.concept_id)}
+                          className="text-left p-3 rounded-xl"
+                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}
+                        >
+                          <p style={{ color: 'var(--text)', fontSize: '0.9rem' }}>{topic.name}</p>
+                          <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', marginTop: 4 }}>Child topic · {Math.round(topic.progress_pct)}%</p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                      No child concepts yet — use the plan below to deepen this topic before branching out.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div style={glass} className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Sparkle size={18} style={{ color: 'var(--accent)' }} />
+                  <p style={{ color: 'var(--text)', fontWeight: 500 }}>Encouragement engine</p>
+                </div>
+                <div className="space-y-3">
+                  {coachPrompts.map((prompt) => (
+                    <div key={prompt} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                      <p style={{ color: 'var(--text)', fontSize: '0.88rem', lineHeight: 1.6 }}>{prompt}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-6 xl:grid-cols-[1.1fr_1.5fr]">
             <div style={glass} className="p-5 space-y-4">

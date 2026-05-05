@@ -5,6 +5,7 @@ import MobileTopBar from './components/MobileTopBar';
 import Sidebar from './components/Sidebar';
 import SearchModal from './components/SearchModal';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
+import PomodoroTimer from './components/PomodoroTimer';
 import { getStoredThemeMode, resolveTheme } from './utils/theme';
 import LoginPage from './pages/LoginPage';
 // Lazily loaded — defer heavier authenticated routes until navigation
@@ -120,6 +121,7 @@ export default function App() {
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <KeyboardShortcuts />
+      <PomodoroTimer />
     </div>
   );
 }

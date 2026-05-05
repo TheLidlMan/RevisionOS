@@ -7,6 +7,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from services.security import escape_like_query
+
 logger = logging.getLogger(__name__)
 
 _model = None
@@ -182,11 +184,11 @@ def search_keyword(db: Session, query: str, top_k: int = 20, user_id: Optional[s
     from models.concept import Concept
     from models.document import Document
 
-    pattern = f"%{query}%"
+    pattern = f"%{escape_like_query(query)}%"
     results = []
 
     concept_q = db.query(Concept).filter(
-        (Concept.name.ilike(pattern)) | (Concept.definition.ilike(pattern))
+        (Concept.name.ilike(pattern, escape="\\")) | (Concept.definition.ilike(pattern, escape="\\"))
     )
     if user_id:
         concept_q = concept_q.filter(Concept.user_id == user_id)
@@ -205,7 +207,7 @@ def search_keyword(db: Session, query: str, top_k: int = 20, user_id: Optional[s
     remaining = top_k - len(results)
     if remaining > 0:
         doc_q = db.query(Document).filter(
-            (Document.filename.ilike(pattern)) | (Document.raw_text.ilike(pattern))
+            (Document.filename.ilike(pattern, escape="\\")) | (Document.raw_text.ilike(pattern, escape="\\"))
         )
         if user_id:
             doc_q = doc_q.filter(Document.user_id == user_id)
@@ -229,7 +231,7 @@ def search_exact(db: Session, query: str, top_k: int = 20, user_id: Optional[str
     from models.document import Document
 
     results = []
-    doc_q = db.query(Document).filter(Document.raw_text.ilike(f"%{query}%"))
+    doc_q = db.query(Document).filter(Document.raw_text.ilike(f"%{escape_like_query(query)}%", escape="\\"))
     if user_id:
         doc_q = doc_q.filter(Document.user_id == user_id)
     if module_id:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -17,6 +18,16 @@ GLOBAL_GROQ_LOCK_NAME = "groq_global"
 LOCK_LEASE_SECONDS = 180
 LOCK_HEARTBEAT_INTERVAL_SECONDS = 30
 LOCK_POLL_INTERVAL_SECONDS = 0.5
+LOCK_NAME_PATTERN = re.compile(r"^[a-z0-9:_-]{1,50}$")
+
+
+def _validate_lock_name(lock_name: str) -> str:
+    normalized = (lock_name or "").strip().lower()
+    if not LOCK_NAME_PATTERN.fullmatch(normalized):
+        raise ValueError("Invalid AI request lock name")
+    if normalized != GLOBAL_GROQ_LOCK_NAME:
+        raise ValueError("Unsupported AI request lock name")
+    return normalized
 
 
 def _utcnow() -> datetime:
@@ -135,6 +146,7 @@ async def _heartbeat(lock_name: str, owner_id: str) -> None:
 
 @asynccontextmanager
 async def serialized_ai_request(lock_name: str = GLOBAL_GROQ_LOCK_NAME) -> AsyncIterator[None]:
+    lock_name = _validate_lock_name(lock_name)
     owner_id = str(uuid.uuid4())
 
     await asyncio.to_thread(_ensure_lock_row, lock_name)

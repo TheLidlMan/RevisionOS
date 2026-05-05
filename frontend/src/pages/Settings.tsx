@@ -84,16 +84,14 @@ export default function SettingsPage() {
       if (!draft.apiKey.trim()) {
         throw new Error('Enter an API key first.');
       }
-      const result = await validateApiKey(draft.apiKey.trim());
-      if (!result.valid) {
-        throw new Error(result.message);
-      }
-      return updateSettings({ groq_api_key: draft.apiKey.trim() });
+      return validateApiKey(draft.apiKey.trim());
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
-      setFeedback({ type: 'success', message: 'Groq API key validated and saved.' });
-      setDraft((current) => ({ ...current, apiKey: '' }));
+    onSuccess: (result) => {
+      if (!result.valid) {
+        setFeedback({ type: 'error', message: result.message });
+        return;
+      }
+      setFeedback({ type: 'success', message: 'Groq API key is valid.' });
     },
     onError: (error) => setFeedback({ type: 'error', message: (error as Error).message }),
   });
@@ -137,7 +135,7 @@ export default function SettingsPage() {
             Groq API Key
           </h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 12 }}>
-            Validate and save the key in one step so automatic summaries and flashcards can run.
+            Validate a Groq key before asking an administrator to configure it server-side.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
             <input
@@ -151,13 +149,13 @@ export default function SettingsPage() {
               className="flex-1 px-3 py-3"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}
             />
-            <button type="button" className="scholar-btn" disabled={!canValidateKey} onClick={() => validateAndSaveMutation.mutate()}>
-              {validateAndSaveMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <CheckCircle size={18} />}
-              Validate & Save
-            </button>
-          </div>
+              <button type="button" className="scholar-btn" disabled={!canValidateKey} onClick={() => validateAndSaveMutation.mutate()}>
+                {validateAndSaveMutation.isPending ? <SpinnerGap size={18} className="animate-spin" /> : <CheckCircle size={18} />}
+                Validate Key
+              </button>
+            </div>
           {!draft.apiKey.trim() ? (
-            <p style={{ color: 'var(--text-tertiary)', fontSize: '0.82rem', marginTop: 10 }}>Paste a Groq key to validate and save it.</p>
+            <p style={{ color: 'var(--text-tertiary)', fontSize: '0.82rem', marginTop: 10 }}>Paste a Groq key to validate it without changing the global backend configuration.</p>
           ) : null}
         </section>
 

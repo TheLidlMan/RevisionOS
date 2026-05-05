@@ -83,3 +83,7 @@ def enforce_rate_limit(
 def reset_rate_limits() -> None:
     with _RATE_LIMIT_LOCK:
         _RATE_LIMIT_BUCKETS.clear()
+
+
+def escape_like_query(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { SpinnerGap, X, Brain, Lightning, BookOpen, Question } from '@phosphor-icons/react';
+import { SpinnerGap, X, Brain, Lightning, BookOpen, Question, ClockCounterClockwise } from '@phosphor-icons/react';
 import { tutorExplain } from '../api/client';
 import type { TutorExplainResponse } from '../types';
+import { usePersistentState } from '../hooks/usePersistentState';
 
 const glass = {
   background: 'var(--surface)',
@@ -13,12 +14,21 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
+const HISTORY_KEY_MAX_LENGTH = 140;
+
 interface AITutorPanelProps {
   concept: string;
   context?: string;
   cardId?: string;
   cardFront?: string;
   onClose: () => void;
+}
+
+interface TutorHistoryEntry {
+  id: string;
+  mode: 'eli5' | 'deep' | 'example' | 'why_wrong';
+  createdAt: string;
+  result: TutorExplainResponse;
 }
 
 const MODES = [
@@ -29,8 +39,17 @@ const MODES = [
 ];
 
 export default function AITutorPanel({ concept, context, cardId, cardFront, onClose }: AITutorPanelProps) {
-  const [selectedMode, setSelectedMode] = useState<'eli5' | 'deep' | 'example' | 'why_wrong'>('eli5');
-  const [result, setResult] = useState<TutorExplainResponse | null>(null);
+  const [historyMap, setHistoryMap] = usePersistentState<Record<string, TutorHistoryEntry[]>>('ai-tutor:history', {});
+  const sessionKey = useMemo(() => {
+    const seed = cardId || cardFront || concept || 'general';
+    return seed.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, HISTORY_KEY_MAX_LENGTH);
+  }, [cardFront, cardId, concept]);
+  const history = useMemo(() => historyMap[sessionKey] || [], [historyMap, sessionKey]);
+  const initialHistoryEntry = history[0] || null;
+  const [selectedMode, setSelectedMode] = useState<'eli5' | 'deep' | 'example' | 'why_wrong'>(
+    initialHistoryEntry?.mode ?? 'eli5',
+  );
+  const [result, setResult] = useState<TutorExplainResponse | null>(initialHistoryEntry?.result ?? null);
 
   const explainMutation = useMutation({
     mutationFn: (mode: typeof selectedMode) =>
@@ -40,13 +59,31 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
         mode,
         cardId,
       ),
-    onSuccess: (data) => setResult(data),
+    onSuccess: (data, mode) => {
+      setResult(data);
+      setHistoryMap((current) => ({
+        ...current,
+        [sessionKey]: [
+          {
+            id: `${mode}-${Date.now()}`,
+            mode,
+            createdAt: new Date().toISOString(),
+            result: data,
+          },
+          ...(current[sessionKey] || []),
+        ].slice(0, 8),
+      }));
+    },
   });
 
   const handleExplain = (mode: typeof selectedMode) => {
     setSelectedMode(mode);
-    setResult(null);
     explainMutation.mutate(mode);
+  };
+
+  const restoreHistoryEntry = (entry: TutorHistoryEntry) => {
+    setSelectedMode(entry.mode);
+    setResult(entry.result);
   };
 
   return (
@@ -56,14 +93,16 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
         animate={{ opacity: 1, x: 0, scale: 1 }}
         exit={{ opacity: 0, x: 20, scale: 0.95 }}
         transition={{ duration: 0.2 }}
-        className="fixed right-4 top-20 bottom-4 w-[380px] max-w-[calc(100vw-2rem)] z-50 overflow-hidden flex flex-col"
+        className="fixed right-4 top-20 bottom-4 w-[420px] max-w-[calc(100vw-2rem)] z-50 overflow-hidden flex flex-col"
         style={{ ...glass, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2">
             <Brain size={20} style={{ color: 'var(--accent)' }} />
-            <span style={{ color: 'var(--text)', fontWeight: 500, fontSize: '0.95rem' }}>AI Tutor</span>
+            <div>
+              <span style={{ color: 'var(--text)', fontWeight: 500, fontSize: '0.95rem' }}>AI Tutor</span>
+              <p style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>Multi-modal explanations with session history</p>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -74,7 +113,6 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
           </button>
         </div>
 
-        {/* Concept */}
         {concept && (
           <div className="px-4 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -86,8 +124,7 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
           </div>
         )}
 
-        {/* Mode buttons */}
-        <div className="px-4 py-3 flex flex-wrap gap-2">
+        <div className="px-4 py-3 flex flex-wrap gap-2" style={{ borderBottom: history.length > 0 ? '1px solid var(--border)' : undefined }}>
           {MODES.map((mode) => {
             const Icon = mode.icon;
             const isActive = selectedMode === mode.key;
@@ -112,12 +149,43 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
           })}
         </div>
 
-        {/* Content */}
+        {history.length > 0 && (
+          <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <ClockCounterClockwise size={15} style={{ color: 'var(--text-secondary)' }} />
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Conversation History
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {history.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => restoreHistoryEntry(entry)}
+                  className="px-2.5 py-1.5 rounded-lg text-left"
+                  style={{
+                    background: result === entry.result ? 'rgba(196,149,106,0.16)' : 'rgba(255,255,255,0.03)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <p style={{ color: 'var(--text)', fontSize: '0.78rem', fontWeight: 500 }}>
+                    {MODES.find((mode) => mode.key === entry.mode)?.label}
+                  </p>
+                  <p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', marginTop: 2 }}>
+                    {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           {explainMutation.isPending && (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <SpinnerGap className="w-6 h-6 animate-spin" style={{ color: 'var(--accent)' }} />
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Thinking...</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Thinking…</p>
             </div>
           )}
 
@@ -133,18 +201,14 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="space-y-4"
+              className="space-y-4 pt-4"
             >
-              {/* Explanation */}
               <div>
-                <p
-                  style={{ color: 'var(--text)', fontSize: '0.9rem', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}
-                >
+                <p style={{ color: 'var(--text)', fontSize: '0.9rem', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                   {result.explanation}
                 </p>
               </div>
 
-              {/* Key Takeaways */}
               {result.key_takeaways.length > 0 && (
                 <div
                   className="p-3 rounded-lg"
@@ -153,9 +217,9 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
                   <p style={{ color: 'var(--accent)', fontWeight: 500, fontSize: '0.8rem', marginBottom: 6 }}>
                     💡 Key Takeaways
                   </p>
-                  <ul className="space-y-1">
-                    {result.key_takeaways.map((point, i) => (
-                      <li key={i} style={{ color: 'var(--text)', fontSize: '0.85rem', paddingLeft: 8 }}>
+                    <ul className="space-y-1">
+                    {result.key_takeaways.map((point) => (
+                      <li key={`${selectedMode}-${point}-${result.memory_hook}`} style={{ color: 'var(--text)', fontSize: '0.85rem', paddingLeft: 8 }}>
                         • {point}
                       </li>
                     ))}
@@ -163,7 +227,6 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
                 </div>
               )}
 
-              {/* Memory Hook */}
               {result.memory_hook && (
                 <div
                   className="p-3 rounded-lg"
@@ -180,7 +243,6 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
             </motion.div>
           )}
 
-          {/* Initial state */}
           {!result && !explainMutation.isPending && !explainMutation.isError && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Brain size={32} style={{ color: 'var(--text-tertiary)', marginBottom: 12 }} />
@@ -188,7 +250,7 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
                 Choose a mode above to get started
               </p>
               <p style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>
-                The tutor will explain this concept in the selected style
+                Every explanation is saved locally so you can revisit earlier tutor turns.
               </p>
             </div>
           )}

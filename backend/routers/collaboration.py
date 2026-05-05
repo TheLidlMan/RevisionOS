@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.module import Module
 from models.user import User
 from services.auth_service import get_current_user, get_current_user_from_websocket, require_user
 
@@ -46,6 +47,9 @@ def create_room(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    module = db.query(Module.id).filter(Module.id == body.module_id, Module.user_id == user.id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
     room_id = str(uuid.uuid4())[:8]
     room = {
         "id": room_id,
