@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from cache import cache_get, cache_set
@@ -75,6 +75,9 @@ def _leaderboard_stats_subquery(db: Session, timeframe: str):
     if cutoff is not None:
         session_counts = session_counts.filter(StudySession.started_at >= cutoff)
     session_counts = session_counts.group_by(StudySession.user_id).subquery()
+    activity_user_ids = db.query(review_counts.c.user_id.label("user_id")).union(
+        db.query(session_counts.c.user_id.label("user_id"))
+    ).subquery()
 
     mastery = (
         db.query(
@@ -115,11 +118,11 @@ def _leaderboard_stats_subquery(db: Session, timeframe: str):
             mastered_total.label("mastered_total"),
             func.row_number().over(order_by=rank_order).label("rank"),
         )
+        .join(activity_user_ids, activity_user_ids.c.user_id == User.id)
         .outerjoin(review_counts, review_counts.c.user_id == User.id)
         .outerjoin(session_counts, session_counts.c.user_id == User.id)
         .outerjoin(mastery, mastery.c.user_id == User.id)
         .filter(User.is_active.is_(True))
-        .filter(or_(total_reviews > 0, total_sessions > 0))
         .subquery()
     )
 
