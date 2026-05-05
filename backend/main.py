@@ -2,14 +2,16 @@ import hashlib
 import logging
 import os
 from time import perf_counter
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from config import settings, get_cors_origins, get_cors_origin_regex
 from database import create_tables, get_pool_snapshot, is_pool_under_pressure
-from services.auth_service import validate_auth_settings
+from services.auth_service import SESSION_COOKIE_NAME, validate_auth_settings
 from services.pipeline_service import ensure_document_retry_worker_started, stop_document_retry_worker
 
 from routers import modules, documents, flashcards, quizzes, study_sessions, concepts, auth
@@ -40,6 +42,35 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
+UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _origin_from_url(value: str) -> str | None:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _allowed_csrf_origins() -> set[str]:
+    allowed = {
+        origin
+        for origin in get_cors_origins()
+        if origin.startswith("http://") or origin.startswith("https://")
+    }
+    for candidate in (
+        settings.PUBLIC_APP_URL,
+        settings.PUBLIC_LOGIN_URL,
+        settings.PUBLIC_MARKETING_URL,
+        settings.PUBLIC_API_URL,
+    ):
+        normalized = _origin_from_url(candidate)
+        if normalized:
+            allowed.add(normalized)
+    return allowed
 
 
 def _should_log_request_timing(path: str) -> bool:
@@ -69,6 +100,17 @@ async def security_headers_middleware(request: Request, call_next):
     for header_name, header_value in SECURITY_HEADERS.items():
         response.headers.setdefault(header_name, header_value)
     return response
+
+
+@fastapi_app.middleware("http")
+async def csrf_protection_middleware(request: Request, call_next):
+    if request.method in UNSAFE_HTTP_METHODS and request.cookies.get(SESSION_COOKIE_NAME):
+        origin = request.headers.get("origin")
+        referer = request.headers.get("referer")
+        request_origin = _origin_from_url(origin) if origin else _origin_from_url(referer or "")
+        if request_origin not in _allowed_csrf_origins():
+            return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+    return await call_next(request)
 
 
 @fastapi_app.middleware("http")
@@ -194,7 +236,7 @@ def health_check():
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch unhandled exceptions and return a safe 500 response."""
     logger.exception("Unhandled exception: %s", exc)
-    return {"detail": "An internal error occurred. Please try again later."}
+    return JSONResponse(status_code=500, content={"detail": "An internal error occurred. Please try again later."})
 
 
 app = CORSMiddleware(

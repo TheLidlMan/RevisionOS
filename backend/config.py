@@ -18,7 +18,7 @@ DEFAULT_CORS_ORIGINS = [
     "https://app.reviseos.co.uk",
     "https://api.reviseos.co.uk",
 ]
-DEFAULT_CORS_ORIGIN_REGEX = r"https://([A-Za-z0-9-]+\.)?(revisionos-frontend\.pages\.dev|reviseos\.co\.uk)"
+DEFAULT_CORS_ORIGIN_REGEX = ""
 PERSISTED_SETTINGS_MAP = {
     "groq_api_key": "GROQ_API_KEY",
     "llm_model_fast": "LLM_MODEL_FAST",
@@ -94,10 +94,14 @@ class Settings(BaseSettings):
     PUBLIC_API_URL: str = "https://api.reviseos.co.uk"
 
     # Session cookies
-    SESSION_COOKIE_DOMAIN: str = ".reviseos.co.uk"
+    SESSION_COOKIE_DOMAIN: str = ""
     SESSION_COOKIE_SECURE: bool = True
     SESSION_MAX_AGE_DAYS: int = 7
     TRUSTED_PROXY_IPS: str = ""
+    MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
+    MAX_FLASHCARD_ASSET_BYTES: int = 10 * 1024 * 1024
+    MAX_IMPORT_JSON_BYTES: int = 5 * 1024 * 1024
+    MAX_IMPORT_RECORDS: int = 2000
 
     model_config = {
         "env_file": ".env",
@@ -116,7 +120,7 @@ def get_cors_origins() -> list[str]:
 
 
 def get_cors_origin_regex() -> str | None:
-    regexes = [DEFAULT_CORS_ORIGIN_REGEX]
+    regexes = [DEFAULT_CORS_ORIGIN_REGEX] if DEFAULT_CORS_ORIGIN_REGEX else []
     configured_regex = settings.CORS_ORIGIN_REGEX.strip()
     if configured_regex and configured_regex != DEFAULT_CORS_ORIGIN_REGEX:
         regexes.append(configured_regex)

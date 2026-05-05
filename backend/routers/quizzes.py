@@ -49,6 +49,21 @@ class QuestionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class QuestionListResponse(BaseModel):
+    id: str
+    module_id: str
+    concept_id: Optional[str] = None
+    question_text: str
+    question_type: str
+    options: Optional[list[str]] = None
+    explanation: Optional[str] = None
+    difficulty: str
+    source_document_id: Optional[str] = None
+    times_answered: int = 0
+    times_correct: int = 0
+    created_at: datetime
+
+
 class QuestionForQuiz(BaseModel):
     """Question sent during a quiz (no correct_answer exposed)."""
     id: str
@@ -177,6 +192,29 @@ def _question_to_response(q: QuizQuestion) -> QuestionResponse:
     )
 
 
+def _question_to_list_response(q: QuizQuestion) -> QuestionListResponse:
+    options = None
+    if q.options:
+        try:
+            options = json.loads(q.options)
+        except (json.JSONDecodeError, TypeError):
+            options = None
+    return QuestionListResponse(
+        id=q.id,
+        module_id=q.module_id,
+        concept_id=q.concept_id,
+        question_text=q.question_text,
+        question_type=q.question_type,
+        options=options,
+        explanation=q.explanation,
+        difficulty=q.difficulty,
+        source_document_id=q.source_document_id,
+        times_answered=q.times_answered,
+        times_correct=q.times_correct,
+        created_at=q.created_at,
+    )
+
+
 def _question_for_quiz(q: QuizQuestion) -> QuestionForQuiz:
     options = None
     if q.options:
@@ -274,7 +312,7 @@ def _quiz_generation_messages(
 
 # ---------- Endpoints ----------
 
-@router.get("/api/questions", response_model=list[QuestionResponse])
+@router.get("/api/questions", response_model=list[QuestionListResponse])
 def list_questions(
     module_id: Optional[str] = None,
     difficulty: Optional[str] = None,
@@ -290,7 +328,7 @@ def list_questions(
     if type:
         query = query.filter(QuizQuestion.question_type == type.upper())
     questions = query.order_by(QuizQuestion.created_at.desc()).all()
-    return [_question_to_response(q) for q in questions]
+    return [_question_to_list_response(q) for q in questions]
 
 
 @router.post("/api/quizzes/generate", response_model=GenerateQuizResponse)

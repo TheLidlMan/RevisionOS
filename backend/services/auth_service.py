@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Optional
@@ -103,6 +104,7 @@ def _query_session(
 
 def create_session(db: Session, user: User, request: Optional[Request] = None) -> str:
     """Create a new auth session and return the raw session token."""
+    db.query(AuthSession).filter(AuthSession.user_id == user.id).delete(synchronize_session=False)
     raw_token = secrets.token_urlsafe(48)
     session = AuthSession(
         user_id=user.id,
@@ -192,6 +194,31 @@ def validate_return_to(url: Optional[str]) -> Optional[str]:
     return None
 
 
+def _validate_user_id_claim(value: object) -> str:
+    if not isinstance(value, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user_id = value.strip()
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        uuid.UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    return user_id
+
+
 # --------------- FastAPI dependencies ---------------
 
 def get_current_user(
@@ -238,13 +265,7 @@ def get_current_user(
         return None
     try:
         payload = jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        user_id = _validate_user_id_claim(payload.get("sub"))
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -292,7 +313,8 @@ def get_current_user_from_websocket(
     except JWTError:
         return None
 
-    user_id = payload.get("sub")
-    if not user_id:
+    try:
+        user_id = _validate_user_id_claim(payload.get("sub"))
+    except HTTPException:
         return None
     return db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()

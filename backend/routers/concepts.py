@@ -11,11 +11,12 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.concept import Concept
 from models.flashcard import Flashcard
+from models.module import Module
 from models.quiz_question import QuizQuestion
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
 from typing import Optional as OptionalType
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from models.user import User
 
 router = APIRouter(prefix="/api/concepts", tags=["concepts"])
@@ -80,9 +81,16 @@ class DrillSessionResponse(BaseModel):
 
 
 @router.get("/content-map/{module_id}")
-async def get_content_map(module_id: str, db: Session = Depends(get_db)):
+async def get_content_map(
+    module_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
     """Get content map showing all topics/subtopics for a module."""
     from services.content_indexer import generate_content_map
+    module = db.query(Module.id).filter(Module.id == module_id, Module.user_id == user.id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
     return await generate_content_map(module_id, db)
 
 
