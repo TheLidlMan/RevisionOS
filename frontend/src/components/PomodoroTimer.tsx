@@ -48,26 +48,15 @@ export default function PomodoroTimer() {
   const breakSeconds = Math.max(1, Math.round(preferences.breakMinutes * 60));
   const total = isBreak ? breakSeconds : focusSeconds;
   const [seconds, setSeconds] = useState(total);
-
-  useEffect(() => {
-    if (analytics.dayKey === todayKey()) {
-      return;
-    }
-    setAnalytics({
-      dayKey: todayKey(),
-      sessions: 0,
-      focusSeconds: 0,
-      longestFocusSeconds: 0,
-      lastFocusSeconds: 0,
-    });
-  }, [analytics, setAnalytics]);
-
-  useEffect(() => {
-    if (running) {
-      return;
-    }
-    setSeconds(total);
-  }, [running, total]);
+  const normalizedAnalytics = analytics.dayKey === todayKey()
+    ? analytics
+    : {
+        dayKey: todayKey(),
+        sessions: 0,
+        focusSeconds: 0,
+        longestFocusSeconds: 0,
+        lastFocusSeconds: 0,
+      };
 
   useEffect(() => {
     if (!running) {
@@ -82,10 +71,18 @@ export default function PomodoroTimer() {
         setRunning(false);
         if (!isBreak) {
           setAnalytics((existing) => ({
-            ...existing,
-            sessions: existing.sessions + 1,
-            focusSeconds: existing.focusSeconds + focusSeconds,
-            longestFocusSeconds: Math.max(existing.longestFocusSeconds, focusSeconds),
+            ...(existing.dayKey === todayKey()
+              ? existing
+              : {
+                  dayKey: todayKey(),
+                  sessions: 0,
+                  focusSeconds: 0,
+                  longestFocusSeconds: 0,
+                  lastFocusSeconds: 0,
+                }),
+            sessions: (existing.dayKey === todayKey() ? existing.sessions : 0) + 1,
+            focusSeconds: (existing.dayKey === todayKey() ? existing.focusSeconds : 0) + focusSeconds,
+            longestFocusSeconds: Math.max(existing.dayKey === todayKey() ? existing.longestFocusSeconds : 0, focusSeconds),
             lastFocusSeconds: focusSeconds,
             lastCompletedAt: new Date().toISOString(),
           }));
@@ -98,19 +95,20 @@ export default function PomodoroTimer() {
     return () => window.clearInterval(id);
   }, [breakSeconds, focusSeconds, isBreak, running, setAnalytics]);
 
-  const pct = ((total - seconds) / total) * 100;
-  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const ss = String(seconds % 60).padStart(2, '0');
-  const lastCompletedLabel = analytics.lastCompletedAt
-    ? new Date(analytics.lastCompletedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const displaySeconds = running ? seconds : total;
+  const pct = ((total - displaySeconds) / total) * 100;
+  const mm = String(Math.floor(displaySeconds / 60)).padStart(2, '0');
+  const ss = String(displaySeconds % 60).padStart(2, '0');
+  const lastCompletedLabel = normalizedAnalytics.lastCompletedAt
+    ? new Date(normalizedAnalytics.lastCompletedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : 'No sessions yet';
   const summary = useMemo(
     () => [
-      { label: 'Today', value: `${analytics.sessions} sessions` },
-      { label: 'Focus', value: `${Math.round(analytics.focusSeconds / 60)} min` },
-      { label: 'Best', value: `${Math.round(analytics.longestFocusSeconds / 60)} min` },
+      { label: 'Today', value: `${normalizedAnalytics.sessions} sessions` },
+      { label: 'Focus', value: `${Math.round(normalizedAnalytics.focusSeconds / 60)} min` },
+      { label: 'Best', value: `${Math.round(normalizedAnalytics.longestFocusSeconds / 60)} min` },
     ],
-    [analytics.focusSeconds, analytics.longestFocusSeconds, analytics.sessions],
+    [normalizedAnalytics.focusSeconds, normalizedAnalytics.longestFocusSeconds, normalizedAnalytics.sessions],
   );
 
   const r = 40;
@@ -232,7 +230,12 @@ export default function PomodoroTimer() {
 
       <div className="flex items-center justify-center gap-2 mt-2">
         <button
-          onClick={() => setRunning((current) => !current)}
+          onClick={() => {
+            if (!running) {
+              setSeconds(total);
+            }
+            setRunning((current) => !current);
+          }}
           style={{
             background: running ? 'rgba(220,120,100,0.2)' : 'rgba(196,149,106,0.15)',
             border: '1px solid rgba(139,115,85,0.2)',
@@ -278,7 +281,7 @@ export default function PomodoroTimer() {
       </div>
 
       <div style={{ textAlign: 'center', marginTop: 10, fontSize: '0.72rem', color: 'rgba(245,240,232,0.36)' }}>
-        Last completion: {lastCompletedLabel} · most recent focus block {Math.round(analytics.lastFocusSeconds / 60)} min
+        Last completion: {lastCompletedLabel} · most recent focus block {Math.round(normalizedAnalytics.lastFocusSeconds / 60)} min
       </div>
     </div>
   );

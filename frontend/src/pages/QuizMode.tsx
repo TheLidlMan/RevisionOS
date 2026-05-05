@@ -646,6 +646,7 @@ export default function QuizMode() {
       {/* AI Tutor Panel */}
       {showTutor && question && (
         <AITutorPanel
+          key={question.id}
           concept={question.question_text}
           context={answerResult?.explanation || ''}
           onClose={() => setShowTutor(false)}

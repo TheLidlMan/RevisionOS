@@ -646,6 +646,7 @@ export default function FlashcardReview() {
       {/* AI Tutor Panel */}
       {showTutor && (
         <AITutorPanel
+          key={card.id}
           concept={card.back || card.front}
           context={card.front}
           cardId={card.id}

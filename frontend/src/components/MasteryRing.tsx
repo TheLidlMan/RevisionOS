@@ -40,16 +40,18 @@ export default function MasteryRing({
     return '#dc7864';
   };
 
-  let runningValue = 0;
-  const activeSegments = resolvedSegments.map((segment) => {
-    const segmentStart = runningValue;
-    runningValue += segment.value;
-    return {
-      ...segment,
-      dashArray: `${(circumference * segment.value) / 100} ${circumference}`,
-      dashOffset: circumference * (1 - segmentStart / 100),
-    };
-  });
+  const activeSegments = resolvedSegments.reduce<Array<MasteryRingSegment & { dashArray: string; dashOffset: number }>>(
+    (accumulator, segment) => {
+      const segmentStart = accumulator.reduce((sum, item) => sum + item.value, 0);
+      accumulator.push({
+        ...segment,
+        dashArray: `${(circumference * segment.value) / 100} ${circumference}`,
+        dashOffset: circumference * (1 - segmentStart / 100),
+      });
+      return accumulator;
+    },
+    [],
+  );
 
   const fallbackDashOffset = circumference * (1 - pct / 100);
   const resolvedLabel = centerLabel ?? `${Math.round(totalSegmentValue > 0 ? Math.min(totalSegmentValue, 100) : pct)}%`;

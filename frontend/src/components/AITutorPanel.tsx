@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SpinnerGap, X, Brain, Lightning, BookOpen, Question, ClockCounterClockwise } from '@phosphor-icons/react';
@@ -37,25 +37,17 @@ const MODES = [
 ];
 
 export default function AITutorPanel({ concept, context, cardId, cardFront, onClose }: AITutorPanelProps) {
-  const [selectedMode, setSelectedMode] = useState<'eli5' | 'deep' | 'example' | 'why_wrong'>('eli5');
-  const [result, setResult] = useState<TutorExplainResponse | null>(null);
   const [historyMap, setHistoryMap] = usePersistentState<Record<string, TutorHistoryEntry[]>>('ai-tutor:history', {});
   const sessionKey = useMemo(() => {
     const seed = cardId || cardFront || concept || 'general';
     return seed.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 140);
   }, [cardFront, cardId, concept]);
-  const history = historyMap[sessionKey] || [];
-
-  useEffect(() => {
-    if (history.length === 0) {
-      setResult(null);
-      setSelectedMode('eli5');
-      return;
-    }
-    const latest = history[0];
-    setSelectedMode(latest.mode);
-    setResult(latest.result);
-  }, [history, sessionKey]);
+  const history = useMemo(() => historyMap[sessionKey] || [], [historyMap, sessionKey]);
+  const initialHistoryEntry = history[0] || null;
+  const [selectedMode, setSelectedMode] = useState<'eli5' | 'deep' | 'example' | 'why_wrong'>(
+    initialHistoryEntry?.mode ?? 'eli5',
+  );
+  const [result, setResult] = useState<TutorExplainResponse | null>(initialHistoryEntry?.result ?? null);
 
   const explainMutation = useMutation({
     mutationFn: (mode: typeof selectedMode) =>

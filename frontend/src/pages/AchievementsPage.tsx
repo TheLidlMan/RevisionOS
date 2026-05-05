@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Trophy, Target, Heart, Sparkle } from '@phosphor-icons/react';
+import { Target, Heart, Sparkle } from '@phosphor-icons/react';
 import confetti from 'canvas-confetti';
 import { getGamificationStats, getAchievements, updateDailyGoal, toggleHearts } from '../api/client';
 import Skeleton from '../components/Skeleton';
 import MasteryRing from '../components/MasteryRing';
-import AchievementToast from '../components/AchievementToast';
 import { usePersistentState } from '../hooks/usePersistentState';
-import type { AchievementDef } from '../types';
 
 const glass = {
   background: 'var(--surface)',
@@ -28,7 +26,7 @@ export default function AchievementsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'unlocked' | 'locked'>('all');
   const [sortBy, setSortBy] = useState<'progress' | 'recent' | 'name' | 'tier'>('progress');
   const [celebratedKeys, setCelebratedKeys] = usePersistentState<string[]>('achievements:celebrated', []);
-  const [toastAchievements, setToastAchievements] = useState<{ key: string; name: string; icon: string }[]>([]);
+  const [mountedAt] = useState(() => Date.now());
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['gamification-stats'],
@@ -61,24 +59,18 @@ export default function AchievementsPage() {
   );
 
   const recentlyUnlocked = useMemo(() => {
-    const now = Date.now();
     return (achievements || []).filter((achievement) => {
       if (!achievement.unlocked || !achievement.unlocked_at || celebratedKeys.includes(achievement.achievement_key)) {
         return false;
       }
-      return now - new Date(achievement.unlocked_at).getTime() <= 36 * 60 * 60 * 1000;
+      return mountedAt - new Date(achievement.unlocked_at).getTime() <= 36 * 60 * 60 * 1000;
     });
-  }, [achievements, celebratedKeys]);
+  }, [achievements, celebratedKeys, mountedAt]);
 
   useEffect(() => {
     if (recentlyUnlocked.length === 0) {
       return;
     }
-    setToastAchievements(recentlyUnlocked.map((achievement) => ({
-      key: achievement.achievement_key,
-      name: achievement.name,
-      icon: achievement.icon,
-    })));
     confetti({ particleCount: 120, spread: 80, origin: { y: 0.55 }, colors: ['#c4956a', '#f5f0e8', '#78b478'] });
     setCelebratedKeys((current) => [...new Set([...current, ...recentlyUnlocked.map((achievement) => achievement.achievement_key)])]);
   }, [recentlyUnlocked, setCelebratedKeys]);
@@ -141,7 +133,6 @@ export default function AchievementsPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto w-full">
-      <AchievementToast achievements={toastAchievements} onDismiss={() => setToastAchievements([])} />
       <h1 className="text-[1.55rem] sm:text-[1.9rem] mb-2" style={{ fontFamily: 'var(--heading)', color: 'var(--text)' }}>
         Achievements & Stats
       </h1>
