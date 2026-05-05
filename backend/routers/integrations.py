@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from typing import Optional
 
@@ -20,6 +21,22 @@ GOOGLE_DRIVE_ALLOWED_FILE_TYPES = {
     ".pptx": "PPTX",
     ".docx": "DOCX",
 }
+NOTION_PAGE_ID_PATTERN = re.compile(r"^[A-Fa-f0-9-]{32,36}$")
+GOOGLE_DRIVE_FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
+
+
+def _validate_notion_page_id(page_id: str) -> str:
+    candidate = (page_id or "").strip()
+    if not NOTION_PAGE_ID_PATTERN.fullmatch(candidate):
+        raise HTTPException(status_code=400, detail="Invalid Notion page ID")
+    return candidate
+
+
+def _validate_google_drive_file_id(file_id: str) -> str:
+    candidate = (file_id or "").strip()
+    if not GOOGLE_DRIVE_FILE_ID_PATTERN.fullmatch(candidate):
+        raise HTTPException(status_code=400, detail="Invalid Google Drive file ID")
+    return candidate
 
 
 class NotionImportRequest(BaseModel):
@@ -54,6 +71,7 @@ async def import_from_notion(
 
     module_id = module.id
     user_id = user.id
+    page_id = _validate_notion_page_id(body.page_id)
     db.close()
 
     headers = {
@@ -65,14 +83,14 @@ async def import_from_notion(
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             page_resp = await client.get(
-                f"https://api.notion.com/v1/pages/{body.page_id}",
+                f"https://api.notion.com/v1/pages/{page_id}",
                 headers=headers,
             )
             page_resp.raise_for_status()
             page_data = page_resp.json()
 
             blocks_resp = await client.get(
-                f"https://api.notion.com/v1/blocks/{body.page_id}/children?page_size=100",
+                f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=100",
                 headers=headers,
             )
             blocks_resp.raise_for_status()
@@ -158,6 +176,7 @@ async def import_from_google_drive(
 
     module_id = module.id
     user_id = user.id
+    file_id = _validate_google_drive_file_id(body.file_id)
     db.close()
 
     headers = {"Authorization": f"Bearer {body.access_token}"}
@@ -165,7 +184,7 @@ async def import_from_google_drive(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             meta_resp = await client.get(
-                f"https://www.googleapis.com/drive/v3/files/{body.file_id}",
+                f"https://www.googleapis.com/drive/v3/files/{file_id}",
                 headers=headers,
                 params={"fields": "name,mimeType,size"},
             )
@@ -175,7 +194,7 @@ async def import_from_google_drive(
             filename = meta.get("name", "google-drive-import")
             mime_type = meta.get("mimeType", "")
 
-            download_url = f"https://www.googleapis.com/drive/v3/files/{body.file_id}"
+            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
             params: dict[str, str] = {}
 
             if mime_type == "application/vnd.google-apps.document":

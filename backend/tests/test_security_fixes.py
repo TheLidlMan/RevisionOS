@@ -4,6 +4,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,7 +29,15 @@ from models.quiz_question import QuizQuestion
 from models.user import User
 from routers import auth as auth_router
 from routers import collaboration, settings as settings_router
-from services.auth_service import SESSION_COOKIE_NAME, _get_secret_key, create_session, validate_return_to
+from services.ai_request_lock_service import serialized_ai_request
+from services.auth_service import (
+    SESSION_COOKIE_NAME,
+    _get_secret_key,
+    create_access_token,
+    create_session,
+    get_user_from_session_token,
+    validate_return_to,
+)
 from services.security import reset_rate_limits
 from config import settings
 
@@ -60,6 +69,10 @@ class SecurityFixesTestCase(unittest.TestCase):
         database.Base.metadata.drop_all(bind=database.engine)
         create_tables()
         self.client = TestClient(app)
+        self.client.headers.update({
+            "Origin": settings.PUBLIC_APP_URL,
+            "Referer": f"{settings.PUBLIC_APP_URL}/dashboard",
+        })
 
     def tearDown(self):
         self.client.close()
@@ -208,13 +221,14 @@ class SecurityFixesTestCase(unittest.TestCase):
         self.assertEqual(owner.json()["question_count"], 1)
 
     def test_collaboration_room_endpoints_require_membership(self):
-        _, owner_token = self._create_user("collab-owner@example.com", "Owner")
+        owner_id, owner_token = self._create_user("collab-owner@example.com", "Owner")
         _, outsider_token = self._create_user("collab-outsider@example.com", "Outsider")
+        module_id = self._create_module_with_question(owner_id)
 
         created = self.client.post(
             "/api/collab/rooms",
             cookies={SESSION_COOKIE_NAME: owner_token},
-            json={"module_id": "module-1", "name": "Private room", "room_type": "study"},
+            json={"module_id": module_id, "name": "Private room", "room_type": "study"},
         )
         room_id = created.json()["id"]
 
@@ -232,11 +246,12 @@ class SecurityFixesTestCase(unittest.TestCase):
     def test_collaboration_websocket_requires_authenticated_member(self):
         owner_id, owner_token = self._create_user("socket-owner@example.com", "Owner")
         _, outsider_token = self._create_user("socket-outsider@example.com", "Outsider")
+        module_id = self._create_module_with_question(owner_id)
 
         created = self.client.post(
             "/api/collab/rooms",
             cookies={SESSION_COOKIE_NAME: owner_token},
-            json={"module_id": "module-1", "name": "Socket room", "room_type": "study"},
+            json={"module_id": module_id, "name": "Socket room", "room_type": "study"},
         )
         room_id = created.json()["id"]
 
@@ -262,7 +277,7 @@ class SecurityFixesTestCase(unittest.TestCase):
             self.assertEqual(joined["data"]["user_id"], owner_id)
             self.assertEqual(joined["data"]["display_name"], "Owner")
 
-    def test_settings_update_keeps_api_key_out_of_persisted_file(self):
+    def test_settings_update_rejects_global_api_key_changes(self):
         _, token = self._create_user("persist@example.com")
         response = self.client.patch(
             "/api/settings",
@@ -270,11 +285,7 @@ class SecurityFixesTestCase(unittest.TestCase):
             json={"groq_api_key": "gsk_live_secret_value_12345678", "theme": "light"},
         )
 
-        self.assertEqual(response.status_code, 200)
-        persisted = json.loads(self.settings_file.read_text(encoding="utf-8"))
-        self.assertNotIn("groq_api_key", persisted)
-        self.assertEqual(persisted["theme"], "light")
-        self.assertEqual(response.json()["groq_api_key"], "gsk_...5678")
+        self.assertEqual(response.status_code, 403)
 
     def test_validate_return_to_rejects_prefix_smuggling(self):
         valid_url = "https://app.reviseos.co.uk/modules/123"
@@ -446,6 +457,174 @@ class SecurityFixesTestCase(unittest.TestCase):
         self.assertEqual(module_response.status_code, 200)
         self.assertNotIn("file_path", document_response.json())
         self.assertNotIn("file_path", module_response.json()["documents"][0])
+
+    def test_csrf_protection_blocks_cookie_authenticated_state_change_without_origin(self):
+        _, token = self._create_user("csrf@example.com")
+        with TestClient(app) as client:
+            response = client.patch(
+                "/api/settings",
+                cookies={SESSION_COOKIE_NAME: token},
+                json={"theme": "light"},
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_google_callback_requires_matching_oauth_state_cookie(self):
+        started = self.client.get("/api/auth/google/start")
+        self.assertEqual(started.status_code, 200)
+        state = next(iter(auth_router._oauth_states.keys()))
+        self.client.cookies.set(auth_router.OAUTH_STATE_COOKIE_NAME, "wrong-state")
+
+        callback = self.client.get(
+            f"/api/auth/google/callback?code=test-code&state={state}",
+            allow_redirects=False,
+        )
+
+        self.assertEqual(callback.status_code, 302)
+        self.assertIn("error=invalid_state", callback.headers["location"])
+
+    def test_create_session_invalidates_previous_session_token(self):
+        user_id, old_token = self._create_user("session@example.com")
+        with SessionLocal() as db:
+            user = db.query(User).filter(User.id == user_id).first()
+            new_token = create_session(db, user)
+            self.assertIsNone(get_user_from_session_token(db, old_token))
+            self.assertIsNotNone(get_user_from_session_token(db, new_token))
+
+    def test_invalid_bearer_sub_claim_is_rejected(self):
+        token = create_access_token({"sub": 123})
+        response = self.client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_content_map_requires_owned_module(self):
+        owner_id, owner_token = self._create_user("map-owner@example.com")
+        _, attacker_token = self._create_user("map-attacker@example.com")
+        module_id, _document_id = self._create_module_with_document(owner_id)
+
+        anonymous = self.client.get(f"/api/concepts/content-map/{module_id}")
+        attacker = self.client.get(
+            f"/api/concepts/content-map/{module_id}",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+        )
+        owner = self.client.get(
+            f"/api/concepts/content-map/{module_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(attacker.status_code, 404)
+        self.assertEqual(owner.status_code, 200)
+
+    def test_create_collaboration_room_requires_owned_module(self):
+        owner_id, owner_token = self._create_user("collab-module-owner@example.com")
+        _, attacker_token = self._create_user("collab-module-attacker@example.com")
+        module_id = self._create_module_with_question(owner_id)
+
+        response = self.client.post(
+            "/api/collab/rooms",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json={"module_id": module_id, "name": "Private room", "room_type": "study"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_quiz_list_hides_correct_answers(self):
+        owner_id, owner_token = self._create_user("quiz-list@example.com")
+        module_id = self._create_module_with_question(owner_id)
+
+        response = self.client.get(
+            "/api/questions",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            params={"module_id": module_id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertNotIn("correct_answer", response.json()[0])
+
+    def test_keyword_search_escapes_sql_wildcards(self):
+        owner_id, owner_token = self._create_user("search-owner@example.com")
+        with SessionLocal() as db:
+            module = Module(user_id=owner_id, name="Search")
+            db.add(module)
+            db.flush()
+            db.add(Flashcard(user_id=owner_id, module_id=module.id, front="Alpha", back="Beta", card_type="BASIC", state="NEW"))
+            db.commit()
+
+        response = self.client.get(
+            "/api/search",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            params={"q": "%", "type": "keyword"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total"], 0)
+
+    def test_flashcard_asset_upload_rejects_content_type_bypass(self):
+        owner_id, owner_token = self._create_user("asset-owner@example.com")
+        _, card_id = self._create_module_with_flashcard(owner_id)
+
+        response = self.client.post(
+            f"/api/flashcards/{card_id}/assets",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+            files={"image": ("evil.png", b"not-an-image", "image/png")},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_document_upload_enforces_maximum_size(self):
+        owner_id, owner_token = self._create_user("upload-owner@example.com")
+        with SessionLocal() as db:
+            module = Module(user_id=owner_id, name="Uploads")
+            db.add(module)
+            db.commit()
+            db.refresh(module)
+            module_id = module.id
+
+        original_limit = settings.MAX_UPLOAD_BYTES
+        settings.MAX_UPLOAD_BYTES = 4
+        try:
+            response = self.client.post(
+                "/api/documents/upload",
+                cookies={SESSION_COOKIE_NAME: owner_token},
+                data={"module_id": module_id},
+                files={"file": ("big.txt", b"12345", "text/plain")},
+            )
+        finally:
+            settings.MAX_UPLOAD_BYTES = original_limit
+
+        self.assertEqual(response.status_code, 413)
+
+    def test_json_import_requires_auth_and_enforces_size_limit(self):
+        _, token = self._create_user("import-owner@example.com")
+        anonymous = self.client.post(
+            "/api/modules/import-json",
+            files={"file": ("module.json", b"{}", "application/json")},
+        )
+        self.assertEqual(anonymous.status_code, 401)
+
+        original_limit = settings.MAX_IMPORT_JSON_BYTES
+        settings.MAX_IMPORT_JSON_BYTES = 8
+        try:
+            response = self.client.post(
+                "/api/modules/import-json",
+                cookies={SESSION_COOKIE_NAME: token},
+                files={"file": ("module.json", b'{"module":{"name":"too big"}}', "application/json")},
+            )
+        finally:
+            settings.MAX_IMPORT_JSON_BYTES = original_limit
+
+        self.assertEqual(response.status_code, 413)
+
+    def test_serialized_ai_request_rejects_invalid_lock_names(self):
+        with self.assertRaises(ValueError):
+            asyncio.run(self._acquire_invalid_ai_lock())
+
+    async def _acquire_invalid_ai_lock(self):
+        async with serialized_ai_request("groq_global;drop"):
+            return None
 
 
 if __name__ == "__main__":

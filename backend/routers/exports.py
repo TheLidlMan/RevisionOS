@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
 from models.module import Module
 from models.document import Document
@@ -20,6 +21,7 @@ from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
+from services.auth_service import require_user
 from models.user import User
 
 router = APIRouter(tags=["exports"])
@@ -78,6 +80,26 @@ def _normalize_study_difficulty(value: Optional[str]) -> str:
     if normalized not in {"EASY", "MEDIUM", "HARD"}:
         return "MEDIUM"
     return normalized
+
+
+def _read_limited_upload(file: UploadFile, *, max_bytes: int) -> bytes:
+    content = file.file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="Import file exceeds the maximum allowed size")
+    return content
+
+
+def _validate_import_records(name: str, value: object) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise HTTPException(status_code=400, detail=f"Imported {name} must be an array")
+    if len(value) > settings.MAX_IMPORT_RECORDS:
+        raise HTTPException(status_code=400, detail=f"Imported {name} exceed the maximum allowed records")
+    rows = [row for row in value if isinstance(row, dict)]
+    if len(rows) != len(value):
+        raise HTTPException(status_code=400, detail=f"Imported {name} contain invalid entries")
+    return rows
 
 
 def _parse_card_rows(filename: str, content: bytes) -> tuple[list[str], list[dict]]:
@@ -415,23 +437,30 @@ def import_cards(
 
 
 @router.post("/api/modules/import-json", response_model=ImportModuleResponse)
-def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def import_json(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
     """Import module from JSON file."""
     try:
-        content = file.file.read()
+        content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         data = json.loads(content.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON file: {str(e)}")
 
-    if "module" not in data:
+    if not isinstance(data, dict) or "module" not in data:
         raise HTTPException(status_code=400, detail="JSON missing 'module' key")
 
     mod_data = data["module"]
+    if not isinstance(mod_data, dict):
+        raise HTTPException(status_code=400, detail="Imported module metadata is invalid")
+    module_name = str(mod_data.get("name", "Imported Module")).strip()[:255] or "Imported Module"
     module = Module(
-        name=mod_data.get("name", "Imported Module"),
-        description=mod_data.get("description", ""),
-        color=mod_data.get("color", "#00b4d8"),
-        user_id=user.id if user else None,
+        name=module_name,
+        description=str(mod_data.get("description", ""))[:2000],
+        color=str(mod_data.get("color", "#00b4d8"))[:32] or "#00b4d8",
+        user_id=user.id,
     )
     db.add(module)
     db.flush()
@@ -439,15 +468,15 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
     # Import documents (metadata + text only, no files)
     docs_imported = 0
     doc_map: dict[int, str] = {}  # index -> new doc id for linking
-    for i, d_data in enumerate(data.get("documents", [])):
+    for i, d_data in enumerate(_validate_import_records("documents", data.get("documents"))):
         doc = Document(
             user_id=module.user_id,
             module_id=module.id,
-            filename=d_data.get("filename", "imported_doc"),
-            file_type=d_data.get("file_type", "TXT"),
+            filename=str(d_data.get("filename", "imported_doc"))[:255] or "imported_doc",
+            file_type=str(d_data.get("file_type", "TXT"))[:20] or "TXT",
             file_path="",
-            raw_text=d_data.get("raw_text", ""),
-            word_count=d_data.get("word_count", 0),
+            raw_text=str(d_data.get("raw_text", ""))[: settings.MAX_PROMPT_CHARS],
+            word_count=max(0, int(d_data.get("word_count", 0) or 0)),
             processed=True,
             processing_status="done",
         )
@@ -459,14 +488,14 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
     # Import concepts
     concepts_imported = 0
     concept_map: dict[int, str] = {}
-    for i, c_data in enumerate(data.get("concepts", [])):
+    for i, c_data in enumerate(_validate_import_records("concepts", data.get("concepts"))):
         concept = Concept(
             user_id=module.user_id,
             module_id=module.id,
-            name=c_data.get("name", ""),
-            definition=c_data.get("definition", ""),
-            explanation=c_data.get("explanation", ""),
-            importance_score=c_data.get("importance_score", 0.5),
+            name=str(c_data.get("name", ""))[:255],
+            definition=str(c_data.get("definition", ""))[:4000],
+            explanation=str(c_data.get("explanation", ""))[:12000],
+            importance_score=float(c_data.get("importance_score", 0.5) or 0.5),
         )
         db.add(concept)
         db.flush()
@@ -475,8 +504,10 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
 
     # Import flashcards
     flashcards_imported = 0
-    for f_data in data.get("flashcards", []):
+    for f_data in _validate_import_records("flashcards", data.get("flashcards")):
         tags = f_data.get("tags", "[]")
+        cloze_text = f_data.get("cloze_text")
+        source_excerpt = f_data.get("source_excerpt")
         if isinstance(tags, str):
             try:
                 parsed_tags = json.loads(tags) if tags.startswith("[") else tags
@@ -487,11 +518,11 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
         card = Flashcard(
             user_id=module.user_id,
             module_id=module.id,
-            front=f_data.get("front", ""),
-            back=f_data.get("back", ""),
-            card_type=f_data.get("card_type", "BASIC"),
-            cloze_text=f_data.get("cloze_text"),
-            source_excerpt=f_data.get("source_excerpt"),
+            front=str(f_data.get("front", ""))[:4000],
+            back=str(f_data.get("back", ""))[:12000],
+            card_type=str(f_data.get("card_type", "BASIC"))[:20] or "BASIC",
+            cloze_text=str(cloze_text)[:12000] if cloze_text is not None else None,
+            source_excerpt=str(source_excerpt)[:2000] if source_excerpt is not None else None,
             tags=json.dumps(_normalize_tags(parsed_tags)),
             due=datetime.utcnow(),
             state="NEW",
@@ -503,19 +534,19 @@ def import_json(file: UploadFile = File(...), db: Session = Depends(get_db), use
 
     # Import quiz questions
     questions_imported = 0
-    for q_data in data.get("quiz_questions", []):
+    for q_data in _validate_import_records("quiz_questions", data.get("quiz_questions")):
         options = q_data.get("options")
         if isinstance(options, list):
             options = json.dumps(options)
         question = QuizQuestion(
             user_id=module.user_id,
             module_id=module.id,
-            question_text=q_data.get("question_text", ""),
-            question_type=q_data.get("question_type", "MCQ"),
+            question_text=str(q_data.get("question_text", ""))[:4000],
+            question_type=str(q_data.get("question_type", "MCQ"))[:20] or "MCQ",
             options=options,
-            correct_answer=q_data.get("correct_answer", ""),
-            explanation=q_data.get("explanation", ""),
-            difficulty=q_data.get("difficulty", "MEDIUM"),
+            correct_answer=str(q_data.get("correct_answer", ""))[:2000],
+            explanation=str(q_data.get("explanation", ""))[:4000],
+            difficulty=str(q_data.get("difficulty", "MEDIUM"))[:20] or "MEDIUM",
         )
         db.add(question)
         questions_imported += 1

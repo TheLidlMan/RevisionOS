@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,7 @@ GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 # In-memory nonce/state store (use Redis in production for multi-instance)
 _oauth_states: dict[str, dict[str, object]] = {}
 OAUTH_STATE_TTL = timedelta(minutes=10)
+OAUTH_STATE_COOKIE_NAME = "reviseos_oauth_state"
 
 
 def _prune_oauth_states(now: Optional[datetime] = None) -> None:
@@ -70,6 +72,27 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
         domain=settings.SESSION_COOKIE_DOMAIN if settings.SESSION_COOKIE_SECURE else None,
         max_age=settings.SESSION_MAX_AGE_DAYS * 86400,
         path="/",
+    )
+
+
+def _set_oauth_state_cookie(response: Response, state: str) -> None:
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        value=state,
+        httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite="lax",
+        path="/api/auth/google/callback",
+    )
+
+
+def _clear_oauth_state_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite="lax",
+        path="/api/auth/google/callback",
     )
 
 
@@ -214,9 +237,11 @@ def google_start(request: Request, return_to: Optional[str] = None, redirect: bo
         "prompt": "select_account",
     }
     url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    response = Response(status_code=302, headers={"Location": url}) if redirect else JSONResponse({"url": url})
+    _set_oauth_state_cookie(response, state)
     if redirect:
-        return Response(status_code=302, headers={"Location": url})
-    return {"url": url}
+        return response
+    return response
 
 
 @router.get("/google/callback")
@@ -233,24 +258,39 @@ async def google_callback(
     login_url = settings.PUBLIC_LOGIN_URL
 
     if error:
-        return Response(
+        redirect_response = Response(
             status_code=302,
             headers={"Location": f"{login_url}?error={error}"},
         )
+        _clear_oauth_state_cookie(redirect_response)
+        return redirect_response
 
     if not code or not state:
-        return Response(
+        redirect_response = Response(
             status_code=302,
             headers={"Location": f"{login_url}?error=missing_params"},
         )
+        _clear_oauth_state_cookie(redirect_response)
+        return redirect_response
+
+    state_cookie = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
+    if not state_cookie or not secrets.compare_digest(state_cookie, state):
+        redirect_response = Response(
+            status_code=302,
+            headers={"Location": f"{login_url}?error=invalid_state"},
+        )
+        _clear_oauth_state_cookie(redirect_response)
+        return redirect_response
 
     _prune_oauth_states()
     state_data = _oauth_states.pop(state, None)
     if not state_data:
-        return Response(
+        redirect_response = Response(
             status_code=302,
             headers={"Location": f"{login_url}?error=invalid_state"},
         )
+        _clear_oauth_state_cookie(redirect_response)
+        return redirect_response
 
     # Exchange authorization code for tokens
     try:
@@ -267,10 +307,12 @@ async def google_callback(
                 },
             )
             if token_resp.status_code != 200:
-                return Response(
+                redirect_response = Response(
                     status_code=302,
                     headers={"Location": f"{login_url}?error=token_exchange_failed"},
                 )
+                _clear_oauth_state_cookie(redirect_response)
+                return redirect_response
             tokens = token_resp.json()
 
             # Fetch user info
@@ -279,24 +321,30 @@ async def google_callback(
                 headers={"Authorization": f"Bearer {tokens['access_token']}"},
             )
             if userinfo_resp.status_code != 200:
-                return Response(
+                redirect_response = Response(
                     status_code=302,
                     headers={"Location": f"{login_url}?error=userinfo_failed"},
                 )
+                _clear_oauth_state_cookie(redirect_response)
+                return redirect_response
             userinfo = userinfo_resp.json()
     except Exception:
-        return Response(
+        redirect_response = Response(
             status_code=302,
             headers={"Location": f"{login_url}?error=google_request_failed"},
         )
+        _clear_oauth_state_cookie(redirect_response)
+        return redirect_response
 
     google_sub = userinfo.get("sub")
     email = userinfo.get("email")
     if not google_sub or not email:
-        return Response(
+        redirect_response = Response(
             status_code=302,
             headers={"Location": f"{login_url}?error=missing_google_info"},
         )
+        _clear_oauth_state_cookie(redirect_response)
+        return redirect_response
 
     # Upsert user
     user = db.query(User).filter(User.google_subject == google_sub).first()
@@ -334,4 +382,5 @@ async def google_callback(
     redirect_to = state_data.get("return_to") or settings.PUBLIC_APP_URL
     resp = Response(status_code=302, headers={"Location": redirect_to})
     _set_session_cookie(resp, raw_token)
+    _clear_oauth_state_cookie(resp)
     return resp

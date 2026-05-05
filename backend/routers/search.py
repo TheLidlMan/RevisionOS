@@ -12,6 +12,7 @@ from models.document import Document
 from models.module import Module
 from typing import Optional as OptionalType
 from services.auth_service import get_current_user
+from services.security import escape_like_query
 from models.user import User
 
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -200,11 +201,11 @@ def search(
             raise
 
     # Keyword search fallback
-    pattern = f"%{q}%"
+    pattern = f"%{escape_like_query(q)}%"
     results: list[SearchResult] = []
 
     concept_query = _apply_owned_scope(db.query(Concept), Concept, user).filter(
-        (Concept.name.ilike(pattern)) | (Concept.definition.ilike(pattern))
+        (Concept.name.ilike(pattern, escape="\\")) | (Concept.definition.ilike(pattern, escape="\\"))
     )
     if module_id:
         concept_query = concept_query.filter(Concept.module_id == module_id)
@@ -222,7 +223,7 @@ def search(
     remaining = limit - len(results)
     if remaining > 0:
         fc_query = _apply_owned_scope(db.query(Flashcard), Flashcard, user).filter(
-            (Flashcard.front.ilike(pattern)) | (Flashcard.back.ilike(pattern))
+            (Flashcard.front.ilike(pattern, escape="\\")) | (Flashcard.back.ilike(pattern, escape="\\"))
         )
         if module_id:
             fc_query = fc_query.filter(Flashcard.module_id == module_id)
@@ -240,7 +241,7 @@ def search(
     remaining = limit - len(results)
     if remaining > 0:
         doc_query = _apply_owned_scope(db.query(Document), Document, user).filter(
-            (Document.filename.ilike(pattern)) | (Document.raw_text.ilike(pattern))
+            (Document.filename.ilike(pattern, escape="\\")) | (Document.raw_text.ilike(pattern, escape="\\"))
         )
         if module_id:
             doc_query = doc_query.filter(Document.module_id == module_id)

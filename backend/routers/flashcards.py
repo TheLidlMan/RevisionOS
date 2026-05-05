@@ -446,23 +446,18 @@ def set_flashcard_bookmark(
     return _card_to_response(card)
 
 
-def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str]:
+def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str, str]:
     base_upload = os.path.realpath(settings.UPLOAD_DIR)
     upload_dir = os.path.join(base_upload, module_id, "flashcard-assets")
     os.makedirs(upload_dir, exist_ok=True)
 
     file_id = str(uuid.uuid4())
     safe_basename = os.path.basename(file.filename or "image.png")
-    ext = os.path.splitext(safe_basename)[1].lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        ext = ".png"
-    file_path = os.path.join(upload_dir, f"{file_id}{ext}")
-    tmp_path = f"{file_path}.part"
-
-    if not os.path.realpath(file_path).startswith(base_upload):
-        raise HTTPException(status_code=400, detail="Invalid file path")
-
+    ext = os.path.splitext(safe_basename)[1].lower() or ".png"
     total_bytes = 0
+    sniffed_type: tuple[str, str] | None = None
+    file_path: str | None = None
+    tmp_path = os.path.join(upload_dir, f"{file_id}.part")
     try:
         with open(tmp_path, "wb") as handle:
             while True:
@@ -470,18 +465,30 @@ def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str]:
                 if not chunk:
                     break
                 total_bytes += len(chunk)
+                if total_bytes > settings.MAX_FLASHCARD_ASSET_BYTES:
+                    raise HTTPException(status_code=413, detail="Uploaded image exceeds the maximum allowed size")
+                if sniffed_type is None:
+                    sniffed_type = _sniff_image_type(chunk[:32])
                 handle.write(chunk)
         if total_bytes <= 0:
             raise HTTPException(status_code=400, detail="Empty uploads are not allowed")
+        if sniffed_type is None:
+            raise HTTPException(status_code=400, detail="Uploaded file is not a supported image")
+        sniffed_ext, sniffed_mime_type = sniffed_type
+        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+            ext = sniffed_ext
+        file_path = os.path.join(upload_dir, f"{file_id}{ext}")
+        if not os.path.realpath(file_path).startswith(base_upload):
+            raise HTTPException(status_code=400, detail="Invalid file path")
         os.replace(tmp_path, file_path)
     except Exception:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
         raise
 
-    return file_path, safe_basename
+    return file_path, safe_basename, sniffed_mime_type
 
 
 @router.post("/api/flashcards/{card_id}/assets", response_model=FlashcardAssetResponse, status_code=201)
@@ -497,11 +504,11 @@ def upload_flashcard_asset(
     if not (image.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image uploads are supported")
 
-    file_path, original_filename = _save_flashcard_asset(card.module_id, image)
+    file_path, original_filename, mime_type = _save_flashcard_asset(card.module_id, image)
     asset = FlashcardAsset(
         flashcard_id=card.id,
         file_path=file_path,
-        mime_type=image.content_type or "image/png",
+        mime_type=mime_type,
         original_filename=original_filename,
     )
     db.add(asset)
@@ -877,3 +884,13 @@ async def _do_generate_cards(module_id: str, body: Optional[GenerateCardsRequest
         generated=len(created_cards),
         cards=[_card_to_response(c) for c in created_cards],
     )
+def _sniff_image_type(header: bytes) -> tuple[str, str] | None:
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png", "image/png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return ".jpg", "image/jpeg"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif", "image/gif"
+    if len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return ".webp", "image/webp"
+    return None

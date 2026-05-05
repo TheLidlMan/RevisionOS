@@ -155,7 +155,10 @@ def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str
     saved_filename = f"{file_id}{ext}"
     file_path = os.path.join(upload_dir, saved_filename)
     tmp_path = f"{file_path}.part"
-    if not os.path.realpath(file_path).startswith(base_upload):
+    try:
+        if os.path.commonpath([os.path.realpath(file_path), base_upload]) != base_upload:
+            raise HTTPException(status_code=400, detail="Invalid file path")
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid file path")
 
     digest = hashlib.sha256()
@@ -168,6 +171,8 @@ def _save_uploaded_file(module_id: str, file: UploadFile) -> tuple[str, str, str
                 if not chunk:
                     break
                 total_bytes += len(chunk)
+                if total_bytes > settings.MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Uploaded file exceeds the maximum allowed size")
                 digest.update(chunk)
                 f.write(chunk)
 
