@@ -249,8 +249,8 @@ function CardBrowser() {
 
       {cardsQuery.isLoading ? (
         <div className="space-y-3">
-          {[0, 1, 2].map((index) => (
-            <Skeleton key={index} className="h-24 w-full" />
+          {[0, 1, 2].map((skeletonIndex) => (
+            <Skeleton key={skeletonIndex} className="h-24 w-full" />
           ))}
         </div>
       ) : cards.length > 0 ? (

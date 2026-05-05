@@ -99,7 +99,7 @@ export default function StudyCoachPage() {
 
   const coachPrompts = useMemo(() => {
     if (!selectedTopic) {
-      return [] as string[];
+      return [];
     }
     const cues = [] as string[];
     if (selectedTopic.progress_pct < 40) {

@@ -121,8 +121,8 @@ export default function AchievementsPage() {
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto w-full">
         <Skeleton className="h-8 w-48 mb-6" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          {[0, 1, 2].map((index) => (
-            <div key={index} className="p-5" style={glass}>
+          {[0, 1, 2].map((skeletonIndex) => (
+            <div key={skeletonIndex} className="p-5" style={glass}>
               <Skeleton className="h-6 w-20 mb-3" />
               <Skeleton className="h-10 w-16" />
             </div>
@@ -167,8 +167,8 @@ export default function AchievementsPage() {
               { label: 'Level', value: stats.level, subtext: `${stats.xp_total} XP total`, icon: '⭐' },
               { label: 'Reviews', value: stats.total_cards_reviewed, subtext: `${stats.total_quizzes_completed} quizzes`, icon: '📚' },
               { label: 'Trophies', value: `${unlockedCount}/${totalCount}`, subtext: `${recentlyUnlocked.length} fresh unlocks`, icon: '🏅' },
-            ].map((item, index) => (
-              <motion.div key={item.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} className="p-5" style={glass}>
+            ].map((item, statIndex) => (
+              <motion.div key={item.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: statIndex * 0.05 }} className="p-5" style={glass}>
                 <div className="flex items-center gap-2 mb-2">
                   <span style={{ fontSize: '1.2rem' }}>{item.icon}</span>
                   <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -297,7 +297,7 @@ export default function AchievementsPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-        {filteredAchievements.map((achievement, index) => {
+        {filteredAchievements.map((achievement, achievementIndex) => {
           const progressCurrent = achievement.progress_current || 0;
           const progressTarget = achievement.progress_target || 1;
           return (
@@ -305,7 +305,7 @@ export default function AchievementsPage() {
               key={achievement.achievement_key}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.02 }}
+              transition={{ delay: achievementIndex * 0.02 }}
               className="p-4"
               style={{
                 ...glass,

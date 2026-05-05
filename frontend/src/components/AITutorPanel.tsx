@@ -217,9 +217,9 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
                   <p style={{ color: 'var(--accent)', fontWeight: 500, fontSize: '0.8rem', marginBottom: 6 }}>
                     💡 Key Takeaways
                   </p>
-                  <ul className="space-y-1">
-                    {result.key_takeaways.map((point, index) => (
-                      <li key={`${point}-${index}`} style={{ color: 'var(--text)', fontSize: '0.85rem', paddingLeft: 8 }}>
+                    <ul className="space-y-1">
+                    {result.key_takeaways.map((point) => (
+                      <li key={`${selectedMode}-${point}-${result.memory_hook}`} style={{ color: 'var(--text)', fontSize: '0.85rem', paddingLeft: 8 }}>
                         • {point}
                       </li>
                     ))}

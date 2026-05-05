@@ -194,7 +194,7 @@ export default function KeyboardShortcuts() {
                           <span style={{ color: 'rgba(245,240,232,0.7)', fontWeight: 300, fontSize: '0.9rem' }}>{command.description}</span>
                           <div className="flex items-center gap-2 flex-wrap justify-end">
                             {command.keys.map((keyName, index) => (
-                              <span key={`${command.id}-${keyName}-${index}`}>
+                              <span key={`${command.id}-${keyName}`}>
                                 <kbd style={{
                                   background: 'rgba(255,248,240,0.08)',
                                   border: '1px solid rgba(139,115,85,0.25)',

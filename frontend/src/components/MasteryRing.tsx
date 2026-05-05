@@ -69,9 +69,9 @@ export default function MasteryRing({
           strokeWidth={strokeWidth}
         />
         {activeSegments.length > 0 ? (
-          activeSegments.map((segment, index) => (
+          activeSegments.map((segment) => (
             <motion.circle
-              key={`${segment.color}-${index}`}
+              key={`${segment.color}-${segment.value}-${segment.dashOffset}`}
               cx={size / 2}
               cy={size / 2}
               r={radius}
@@ -82,7 +82,7 @@ export default function MasteryRing({
               strokeDasharray={segment.dashArray}
               initial={{ strokeDashoffset: circumference }}
               animate={{ strokeDashoffset: segment.dashOffset }}
-              transition={{ duration: 0.9, ease: 'easeOut', delay: index * 0.06 }}
+              transition={{ duration: 0.9, ease: 'easeOut' }}
             />
           ))
         ) : (
