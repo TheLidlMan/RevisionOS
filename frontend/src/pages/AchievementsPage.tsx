@@ -17,6 +17,7 @@ const glass = {
 } as const;
 
 const tierOrder = { bronze: 0, silver: 1, gold: 2, legendary: 3 } as const;
+const RECENT_UNLOCK_WINDOW_MS = 36 * 60 * 60 * 1000;
 
 export default function AchievementsPage() {
   const queryClient = useQueryClient();
@@ -63,7 +64,7 @@ export default function AchievementsPage() {
       if (!achievement.unlocked || !achievement.unlocked_at || celebratedKeys.includes(achievement.achievement_key)) {
         return false;
       }
-      return mountedAt - new Date(achievement.unlocked_at).getTime() <= 36 * 60 * 60 * 1000;
+      return mountedAt - new Date(achievement.unlocked_at).getTime() <= RECENT_UNLOCK_WINDOW_MS;
     });
   }, [achievements, celebratedKeys, mountedAt]);
 

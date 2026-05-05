@@ -471,7 +471,12 @@ def get_achievements(
     for key, defn in ACHIEVEMENT_DEFS.items():
         progress_target = max(1, int(defn.get("target", 1)))
         metric_key = defn.get("metric")
-        progress_current = progress_target if key in unlocked_map else int(metrics.get(metric_key, 0)) if metric_key else 0
+        if key in unlocked_map:
+            progress_current = progress_target
+        elif metric_key:
+            progress_current = int(metrics.get(metric_key, 0))
+        else:
+            progress_current = 0
         progress_pct = round(min(progress_current / progress_target, 1.0) * 100, 1)
         result.append(AchievementDefResponse(
             achievement_key=key,

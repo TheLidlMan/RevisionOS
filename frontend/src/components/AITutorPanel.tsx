@@ -14,6 +14,8 @@ const glass = {
   WebkitBackdropFilter: 'var(--blur)',
 } as const;
 
+const HISTORY_KEY_MAX_LENGTH = 140;
+
 interface AITutorPanelProps {
   concept: string;
   context?: string;
@@ -40,7 +42,7 @@ export default function AITutorPanel({ concept, context, cardId, cardFront, onCl
   const [historyMap, setHistoryMap] = usePersistentState<Record<string, TutorHistoryEntry[]>>('ai-tutor:history', {});
   const sessionKey = useMemo(() => {
     const seed = cardId || cardFront || concept || 'general';
-    return seed.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 140);
+    return seed.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, HISTORY_KEY_MAX_LENGTH);
   }, [cardFront, cardId, concept]);
   const history = useMemo(() => historyMap[sessionKey] || [], [historyMap, sessionKey]);
   const initialHistoryEntry = history[0] || null;
