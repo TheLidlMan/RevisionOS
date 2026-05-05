@@ -496,9 +496,6 @@ def list_flashcards(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
-    if limit > 200 and not due:
-        raise HTTPException(status_code=422, detail="limit cannot exceed 200 unless due=true")
-
     normalized_tags = _normalize_tags(tags)
     cache_key = None
     if _should_use_due_cache(

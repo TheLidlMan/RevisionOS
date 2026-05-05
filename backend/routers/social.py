@@ -42,6 +42,15 @@ def _get_timeframe_cutoff(timeframe: str) -> datetime | None:
     return None
 
 
+def _leaderboard_rank_order(total_reviews, total_sessions):
+    return (
+        total_reviews.desc(),
+        total_sessions.desc(),
+        User.display_name.asc(),
+        User.id.asc(),
+    )
+
+
 def _leaderboard_stats_subquery(db: Session, timeframe: str):
     cutoff = _get_timeframe_cutoff(timeframe)
 
@@ -94,12 +103,7 @@ def _leaderboard_stats_subquery(db: Session, timeframe: str):
     total_sessions = func.coalesce(session_counts.c.total_sessions, 0)
     card_total = func.coalesce(mastery.c.card_total, 0)
     mastered_total = func.coalesce(mastery.c.mastered_total, 0)
-    rank_order = (
-        total_reviews.desc(),
-        total_sessions.desc(),
-        User.display_name.asc(),
-        User.id.asc(),
-    )
+    rank_order = _leaderboard_rank_order(total_reviews, total_sessions)
 
     return (
         db.query(
