@@ -98,12 +98,11 @@ def _add_missing_columns(conn, inspector, table_name: str, column_names: list[st
         conn.execute(text(f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_sql}"))
 
 
-def _ensure_index(conn, inspector, table_name: str, index_name: str, column_names: list[str]) -> None:
-    table_names = set(inspector.get_table_names())
-    if table_name not in table_names:
+def _ensure_index(conn, existing_indexes_by_table: dict[str, set[str]], table_name: str, index_name: str, column_names: list[str]) -> None:
+    existing_indexes = existing_indexes_by_table.get(table_name)
+    if existing_indexes is None:
         return
 
-    existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
     if index_name in existing_indexes:
         return
 
@@ -112,6 +111,7 @@ def _ensure_index(conn, inspector, table_name: str, index_name: str, column_name
     quoted_table_name = preparer.quote(table_name)
     quoted_columns = ", ".join(preparer.quote(column_name) for column_name in column_names)
     conn.execute(text(f"CREATE INDEX {quoted_index_name} ON {quoted_table_name} ({quoted_columns})"))
+    existing_indexes.add(index_name)
 
 
 def _ensure_runtime_schema():
@@ -223,6 +223,10 @@ def _ensure_runtime_schema():
             conn.execute(text("UPDATE topic_progress SET updated_at = COALESCE(updated_at, created_at)"))
 
         inspector = inspect(conn)
+        existing_indexes_by_table = {
+            table_name: {index["name"] for index in inspector.get_indexes(table_name)}
+            for table_name in existing_tables
+        }
         hot_path_indexes = (
             ("flashcards", "ix_flashcards_user_id_due_updated_at", ["user_id", "due", "updated_at"]),
             ("flashcards", "ix_flashcards_module_id_updated_at_id", ["module_id", "updated_at", "id"]),
@@ -233,5 +237,4 @@ def _ensure_runtime_schema():
             ("study_sessions", "ix_study_sessions_user_id_started_at", ["user_id", "started_at"]),
         )
         for table_name, index_name, column_names in hot_path_indexes:
-            _ensure_index(conn, inspector, table_name, index_name, column_names)
-            inspector = inspect(conn)
+            _ensure_index(conn, existing_indexes_by_table, table_name, index_name, column_names)
