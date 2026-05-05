@@ -147,7 +147,7 @@ class SecurityFixesTestCase(unittest.TestCase):
                     front="Q1",
                     back="A1",
                     card_type="BASIC",
-                    state="REVIEW",
+                    state="NEW",
                     due=due_now,
                 ),
                 Flashcard(
@@ -156,7 +156,7 @@ class SecurityFixesTestCase(unittest.TestCase):
                     front="Q2",
                     back="A2",
                     card_type="BASIC",
-                    state="REVIEW",
+                    state="NEW",
                     due=due_now,
                 ),
             ]

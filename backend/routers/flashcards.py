@@ -492,7 +492,7 @@ def list_flashcards(
     search: Optional[str] = None,
     sort: Literal["updated_desc", "created_desc", "created_asc", "front_asc"] = "updated_desc",
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
