@@ -456,6 +456,7 @@ def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str, s
     ext = os.path.splitext(safe_basename)[1].lower() or ".png"
     total_bytes = 0
     sniffed_type: tuple[str, str] | None = None
+    file_path: str | None = None
     tmp_path = os.path.join(upload_dir, f"{file_id}.part")
     try:
         with open(tmp_path, "wb") as handle:
@@ -483,7 +484,6 @@ def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str, s
     except Exception:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        file_path = locals().get("file_path")
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         raise
@@ -894,4 +894,3 @@ def _sniff_image_type(header: bytes) -> tuple[str, str] | None:
     if len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP":
         return ".webp", "image/webp"
     return None
-

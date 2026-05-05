@@ -506,6 +506,8 @@ def import_json(
     flashcards_imported = 0
     for f_data in _validate_import_records("flashcards", data.get("flashcards")):
         tags = f_data.get("tags", "[]")
+        cloze_text = f_data.get("cloze_text")
+        source_excerpt = f_data.get("source_excerpt")
         if isinstance(tags, str):
             try:
                 parsed_tags = json.loads(tags) if tags.startswith("[") else tags
@@ -519,8 +521,8 @@ def import_json(
             front=str(f_data.get("front", ""))[:4000],
             back=str(f_data.get("back", ""))[:12000],
             card_type=str(f_data.get("card_type", "BASIC"))[:20] or "BASIC",
-            cloze_text=str(f_data.get("cloze_text"))[:12000] if f_data.get("cloze_text") is not None else None,
-            source_excerpt=str(f_data.get("source_excerpt"))[:2000] if f_data.get("source_excerpt") is not None else None,
+            cloze_text=str(cloze_text)[:12000] if cloze_text is not None else None,
+            source_excerpt=str(source_excerpt)[:2000] if source_excerpt is not None else None,
             tags=json.dumps(_normalize_tags(parsed_tags)),
             due=datetime.utcnow(),
             state="NEW",
