@@ -12,6 +12,7 @@ from config import settings
 
 _RATE_LIMIT_BUCKETS: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 _RATE_LIMIT_LOCK = threading.Lock()
+_MAX_RATE_LIMIT_BUCKETS = 10_000
 NetworkType = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
@@ -64,8 +65,12 @@ def enforce_rate_limit(
     bucket_key = (scope, identifier)
 
     with _RATE_LIMIT_LOCK:
-        bucket = _RATE_LIMIT_BUCKETS[bucket_key]
         cutoff = now - window_seconds
+        if len(_RATE_LIMIT_BUCKETS) > _MAX_RATE_LIMIT_BUCKETS:
+            stale_keys = [key for key, values in _RATE_LIMIT_BUCKETS.items() if not values or values[-1] <= cutoff]
+            for key in stale_keys:
+                _RATE_LIMIT_BUCKETS.pop(key, None)
+        bucket = _RATE_LIMIT_BUCKETS[bucket_key]
         while bucket and bucket[0] <= cutoff:
             bucket.popleft()
 
