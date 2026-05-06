@@ -204,7 +204,7 @@ def list_modules(
 
 
 @router.post("", response_model=ModuleResponse, status_code=201)
-def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     max_sort_order = _apply_module_scope(db.query(func.max(Module.sort_order)), user).scalar()
     module = Module(
         name=body.name,
