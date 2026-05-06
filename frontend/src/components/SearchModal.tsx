@@ -78,7 +78,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
     queryFn: getModules,
   });
 
-  const { data: searchData } = useQuery({
+  const { data: searchData, isFetching: searchLoading, isError: searchError } = useQuery({
     queryKey: ['search', debouncedQuery, moduleFilter],
     queryFn: () => searchAll(debouncedQuery, moduleFilter || undefined, 20),
     enabled: debouncedQuery.length >= 2,
@@ -128,7 +128,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center px-3 pt-[10vh] sm:pt-[15vh]"
       style={{ background: sg.overlay }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -141,11 +141,15 @@ function SearchDialog({ onClose }: SearchDialogProps) {
         className="w-full max-w-xl shadow-2xl overflow-hidden"
         style={sg.glass}
         onKeyDown={handleKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="global-search-title"
       >
             <div
               className="flex items-center gap-3 px-4"
               style={{ borderBottom: `1px solid ${sg.warmBorder}` }}
             >
+              <h2 id="global-search-title" className="sr-only">Search ReviseOS</h2>
               <MagnifyingGlass size={20} style={{ color: sg.accent, flexShrink: 0 }} />
               <input
                 ref={inputRef}
@@ -193,7 +197,11 @@ function SearchDialog({ onClose }: SearchDialogProps) {
 
             {debouncedQuery.length >= 2 && (
               <div className="max-h-80 overflow-y-auto">
-                {results.length === 0 ? (
+                {searchLoading ? (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>Searching…</div>
+                ) : searchError ? (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: '#dc7864' }}>Search failed. Try again.</div>
+                ) : results.length === 0 ? (
                   <div className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>
                     No results found.
                   </div>
