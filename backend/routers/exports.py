@@ -281,16 +281,11 @@ def _iter_module_export_json(db: Session, module: Module):
 # ---------- Endpoints ----------
 
 @router.get("/api/modules/{module_id}/export-anki")
-def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def export_anki(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Generate .apkg file via genanki and return as file download."""
     import genanki
 
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = _owned_module_or_404(db, module_id, user)
 
     flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     if not flashcards:
