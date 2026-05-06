@@ -262,7 +262,7 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
 
 
 @router.patch("/{module_id}", response_model=ModuleResponse)
-def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
