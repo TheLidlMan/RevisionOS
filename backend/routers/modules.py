@@ -16,7 +16,7 @@ from models.module_job import ModuleJob
 from models.quiz_question import QuizQuestion
 from models.user import User
 from services import ai_service
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from services.content_indexer import backfill_document_summaries
 from services.pipeline_service import ACTIVE_JOB_STATUSES, rebuild_module_outputs, sync_module_pipeline_state
 from typing import Optional as OptionalType
@@ -204,7 +204,7 @@ def list_modules(
 
 
 @router.post("", response_model=ModuleResponse, status_code=201)
-def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def create_module(body: ModuleCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     max_sort_order = _apply_module_scope(db.query(func.max(Module.sort_order)), user).scalar()
     module = Module(
         name=body.name,
@@ -262,7 +262,7 @@ def get_module(module_id: str, db: Session = Depends(get_db), user: OptionalType
 
 
 @router.patch("/{module_id}", response_model=ModuleResponse)
-def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -286,7 +286,7 @@ def update_module(module_id: str, body: ModuleUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{module_id}", status_code=204)
-def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def delete_module(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -306,7 +306,7 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: OptionalT
 def reorder_modules(
     body: ModuleReorderRequest,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     if not body.ordered_ids:
         return []
@@ -333,7 +333,7 @@ def reorder_modules(
 
 
 @router.post("/{module_id}/cancel-processing")
-def cancel_module_processing(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def cancel_module_processing(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")

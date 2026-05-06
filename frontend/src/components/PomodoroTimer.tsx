@@ -95,7 +95,7 @@ export default function PomodoroTimer() {
     return () => window.clearInterval(id);
   }, [breakSeconds, focusSeconds, isBreak, running, setAnalytics]);
 
-  const displaySeconds = running ? seconds : total;
+  const displaySeconds = seconds;
   const pct = ((total - displaySeconds) / total) * 100;
   const mm = String(Math.floor(displaySeconds / 60)).padStart(2, '0');
   const ss = String(displaySeconds % 60).padStart(2, '0');
@@ -111,12 +111,32 @@ export default function PomodoroTimer() {
     [normalizedAnalytics.focusSeconds, normalizedAnalytics.longestFocusSeconds, normalizedAnalytics.sessions],
   );
 
+  const updateFocusMinutes = (rawValue: number) => {
+    const nextMinutes = Math.min(90, Math.max(5, rawValue || 25));
+    const nextSeconds = Math.max(1, Math.round(nextMinutes * 60));
+    setPreferences((current) => ({ ...current, focusMinutes: nextMinutes }));
+    if (!running && !isBreak && (seconds === focusSeconds || seconds > nextSeconds)) {
+      setSeconds(nextSeconds);
+    }
+  };
+
+  const updateBreakMinutes = (rawValue: number) => {
+    const nextMinutes = Math.min(30, Math.max(1, rawValue || 5));
+    const nextSeconds = Math.max(1, Math.round(nextMinutes * 60));
+    setPreferences((current) => ({ ...current, breakMinutes: nextMinutes }));
+    if (!running && isBreak && (seconds === breakSeconds || seconds > nextSeconds)) {
+      setSeconds(nextSeconds);
+    }
+  };
+
   const r = 40;
   const c = 2 * Math.PI * r;
 
   if (!open) {
     return (
       <button
+        type="button"
+        aria-label="Open Pomodoro timer"
         onClick={() => setOpen(true)}
         style={{
           position: 'fixed',
@@ -166,12 +186,13 @@ export default function PomodoroTimer() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            aria-label="Toggle Pomodoro settings"
             onClick={() => setShowSettings((current) => !current)}
             style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.55)', cursor: 'pointer' }}
           >
             <SlidersHorizontal className="w-4 h-4" />
           </button>
-          <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}>
+          <button type="button" aria-label="Close Pomodoro timer" onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -186,7 +207,7 @@ export default function PomodoroTimer() {
               min={5}
               max={90}
               value={preferences.focusMinutes}
-              onChange={(event) => setPreferences((current) => ({ ...current, focusMinutes: Math.max(5, Number(event.target.value) || 25) }))}
+              onChange={(event) => updateFocusMinutes(Number(event.target.value))}
               className="w-full px-3 py-2 rounded-lg"
               style={{ background: 'rgba(255,248,240,0.05)', border: '1px solid rgba(139,115,85,0.2)', color: '#f5f0e8' }}
             />
@@ -198,7 +219,7 @@ export default function PomodoroTimer() {
               min={1}
               max={30}
               value={preferences.breakMinutes}
-              onChange={(event) => setPreferences((current) => ({ ...current, breakMinutes: Math.max(1, Number(event.target.value) || 5) }))}
+              onChange={(event) => updateBreakMinutes(Number(event.target.value))}
               className="w-full px-3 py-2 rounded-lg"
               style={{ background: 'rgba(255,248,240,0.05)', border: '1px solid rgba(139,115,85,0.2)', color: '#f5f0e8' }}
             />
@@ -207,7 +228,7 @@ export default function PomodoroTimer() {
       )}
 
       <div style={{ textAlign: 'center', margin: '0.5rem 0' }}>
-        <svg width="100" height="100" viewBox="0 0 100 100">
+        <svg width="100" height="100" viewBox="0 0 100 100" role="timer" aria-label={`${isBreak ? 'Break' : 'Focus'} timer ${mm}:${ss} remaining`}>
           <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(139,115,85,0.15)" strokeWidth="4" />
           <circle
             cx="50"
@@ -231,9 +252,6 @@ export default function PomodoroTimer() {
       <div className="flex items-center justify-center gap-2 mt-2">
         <button
           onClick={() => {
-            if (!running) {
-              setSeconds(total);
-            }
             setRunning((current) => !current);
           }}
           style={{

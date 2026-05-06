@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_IPS: str = ""
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
     MAX_FLASHCARD_ASSET_BYTES: int = 10 * 1024 * 1024
+    MAX_FLASHCARD_ASSETS_PER_CARD: int = 8
     MAX_IMPORT_JSON_BYTES: int = 5 * 1024 * 1024
     MAX_IMPORT_RECORDS: int = 2000
 

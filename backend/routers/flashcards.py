@@ -666,10 +666,12 @@ def _save_flashcard_asset(module_id: str, file: UploadFile) -> tuple[str, str, s
         if sniffed_type is None:
             raise HTTPException(status_code=400, detail="Uploaded file is not a supported image")
         sniffed_ext, sniffed_mime_type = sniffed_type
-        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-            ext = sniffed_ext
+        ext = sniffed_ext
         file_path = os.path.join(upload_dir, f"{file_id}{ext}")
-        if not os.path.realpath(file_path).startswith(base_upload):
+        try:
+            if os.path.commonpath([os.path.realpath(file_path), base_upload]) != base_upload:
+                raise HTTPException(status_code=400, detail="Invalid file path")
+        except ValueError:
             raise HTTPException(status_code=400, detail="Invalid file path")
         os.replace(tmp_path, file_path)
     except Exception:
@@ -694,6 +696,9 @@ def upload_flashcard_asset(
         raise HTTPException(status_code=404, detail="Flashcard not found")
     if not (image.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image uploads are supported")
+    existing_assets = db.query(func.count(FlashcardAsset.id)).filter(FlashcardAsset.flashcard_id == card.id).scalar() or 0
+    if existing_assets >= settings.MAX_FLASHCARD_ASSETS_PER_CARD:
+        raise HTTPException(status_code=400, detail="Flashcard asset limit reached")
 
     file_path, original_filename, mime_type = _save_flashcard_asset(card.module_id, image)
     asset = FlashcardAsset(

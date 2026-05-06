@@ -20,7 +20,6 @@ from models.concept import Concept
 from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from typing import Optional as OptionalType
-from services.auth_service import get_current_user
 from services.auth_service import require_user
 from models.user import User
 
@@ -62,6 +61,14 @@ class CardImportCommitResponse(BaseModel):
 
 # ---------- Helpers ----------
 
+
+
+def _owned_module_or_404(db: Session, module_id: str, user: User) -> Module:
+    module = db.query(Module).filter(Module.id == module_id, Module.user_id == user.id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    return module
+
 def _serialize_datetime(val: Optional[datetime]) -> Optional[str]:
     if val is None:
         return None
@@ -88,6 +95,11 @@ def _read_limited_upload(file: UploadFile, *, max_bytes: int) -> bytes:
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail="Import file exceeds the maximum allowed size")
     return content
+
+
+def _enforce_import_record_limit(rows: list[dict]) -> None:
+    if len(rows) > settings.MAX_IMPORT_RECORDS:
+        raise HTTPException(status_code=400, detail="Import exceeds the maximum allowed records")
 
 
 def _validate_import_records(name: str, value: object) -> list[dict]:
@@ -273,16 +285,11 @@ def _iter_module_export_json(db: Session, module: Module):
 # ---------- Endpoints ----------
 
 @router.get("/api/modules/{module_id}/export-anki")
-def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def export_anki(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Generate .apkg file via genanki and return as file download."""
     import genanki
 
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = _owned_module_or_404(db, module_id, user)
 
     flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     if not flashcards:
@@ -334,14 +341,9 @@ def export_anki(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
 
 
 @router.get("/api/modules/{module_id}/export-json")
-def export_json(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def export_json(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Dump all module data as JSON download."""
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = _owned_module_or_404(db, module_id, user)
 
     safe_name = "".join(c for c in module.name if c.isalnum() or c in (" ", "-", "_")).strip()
     filename = f"{safe_name}_export.json"
@@ -354,13 +356,8 @@ def export_json(module_id: str, db: Session = Depends(get_db), user: OptionalTyp
 
 
 @router.get("/api/modules/{module_id}/export-cards-json")
-def export_cards_json(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+def export_cards_json(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    module = _owned_module_or_404(db, module_id, user)
 
     flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     payload = {
@@ -387,13 +384,8 @@ def export_cards_json(module_id: str, db: Session = Depends(get_db), user: Optio
 
 
 @router.get("/api/modules/{module_id}/export-cards-csv")
-def export_cards_csv(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+def export_cards_csv(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    module = _owned_module_or_404(db, module_id, user)
 
     flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     output = io.StringIO()
@@ -422,17 +414,14 @@ def preview_card_import(
     module_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    module_query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        module_query = module_query.filter(Module.user_id == user.id)
-    if not module_query.first():
-        raise HTTPException(status_code=404, detail="Module not found")
+    _owned_module_or_404(db, module_id, user)
 
     try:
-        content = file.file.read()
+        content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
+        _enforce_import_record_limit(rows)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
 
@@ -450,21 +439,17 @@ def import_cards(
     file: UploadFile = File(...),
     mapping: str = Form(...),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    module_query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        module_query = module_query.filter(Module.user_id == user.id)
-    module = module_query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = _owned_module_or_404(db, module_id, user)
 
     try:
         mapping_data = json.loads(mapping)
         if not isinstance(mapping_data, dict):
             raise ValueError("mapping must be an object")
-        content = file.file.read()
+        content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         _columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
+        _enforce_import_record_limit(rows)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
 
