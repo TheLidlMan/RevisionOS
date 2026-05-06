@@ -97,6 +97,11 @@ def _read_limited_upload(file: UploadFile, *, max_bytes: int) -> bytes:
     return content
 
 
+def _enforce_import_record_limit(rows: list[dict]) -> None:
+    if len(rows) > settings.MAX_IMPORT_RECORDS:
+        raise HTTPException(status_code=400, detail="Import exceeds the maximum allowed records")
+
+
 def _validate_import_records(name: str, value: object) -> list[dict]:
     if value is None:
         return []
@@ -416,6 +421,7 @@ def preview_card_import(
     try:
         content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
+        _enforce_import_record_limit(rows)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
 
@@ -443,6 +449,7 @@ def import_cards(
             raise ValueError("mapping must be an object")
         content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         _columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
+        _enforce_import_record_limit(rows)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
 
