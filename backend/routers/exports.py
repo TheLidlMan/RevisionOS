@@ -434,20 +434,15 @@ def import_cards(
     file: UploadFile = File(...),
     mapping: str = Form(...),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    module_query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        module_query = module_query.filter(Module.user_id == user.id)
-    module = module_query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = _owned_module_or_404(db, module_id, user)
 
     try:
         mapping_data = json.loads(mapping)
         if not isinstance(mapping_data, dict):
             raise ValueError("mapping must be an object")
-        content = file.file.read()
+        content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         _columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
