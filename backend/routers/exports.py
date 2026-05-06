@@ -20,7 +20,6 @@ from models.concept import Concept
 from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from typing import Optional as OptionalType
-from services.auth_service import get_current_user
 from services.auth_service import require_user
 from models.user import User
 
