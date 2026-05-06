@@ -306,7 +306,7 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: User = De
 def reorder_modules(
     body: ModuleReorderRequest,
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     if not body.ordered_ids:
         return []
