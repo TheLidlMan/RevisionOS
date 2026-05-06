@@ -62,6 +62,14 @@ class CardImportCommitResponse(BaseModel):
 
 # ---------- Helpers ----------
 
+
+
+def _owned_module_or_404(db: Session, module_id: str, user: User) -> Module:
+    module = db.query(Module).filter(Module.id == module_id, Module.user_id == user.id).first()
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    return module
+
 def _serialize_datetime(val: Optional[datetime]) -> Optional[str]:
     if val is None:
         return None
