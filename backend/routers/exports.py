@@ -352,13 +352,8 @@ def export_json(module_id: str, db: Session = Depends(get_db), user: User = Depe
 
 
 @router.get("/api/modules/{module_id}/export-cards-json")
-def export_cards_json(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+def export_cards_json(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    module = _owned_module_or_404(db, module_id, user)
 
     flashcards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
     payload = {
