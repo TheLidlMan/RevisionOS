@@ -696,6 +696,9 @@ def upload_flashcard_asset(
         raise HTTPException(status_code=404, detail="Flashcard not found")
     if not (image.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image uploads are supported")
+    existing_assets = db.query(func.count(FlashcardAsset.id)).filter(FlashcardAsset.flashcard_id == card.id).scalar() or 0
+    if existing_assets >= settings.MAX_FLASHCARD_ASSETS_PER_CARD:
+        raise HTTPException(status_code=400, detail="Flashcard asset limit reached")
 
     file_path, original_filename, mime_type = _save_flashcard_asset(card.module_id, image)
     asset = FlashcardAsset(
