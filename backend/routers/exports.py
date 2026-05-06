@@ -337,14 +337,9 @@ def export_anki(module_id: str, db: Session = Depends(get_db), user: User = Depe
 
 
 @router.get("/api/modules/{module_id}/export-json")
-def export_json(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def export_json(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Dump all module data as JSON download."""
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
-    if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+    module = _owned_module_or_404(db, module_id, user)
 
     safe_name = "".join(c for c in module.name if c.isalnum() or c in (" ", "-", "_")).strip()
     filename = f"{safe_name}_export.json"
