@@ -410,16 +410,12 @@ def preview_card_import(
     module_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    module_query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        module_query = module_query.filter(Module.user_id == user.id)
-    if not module_query.first():
-        raise HTTPException(status_code=404, detail="Module not found")
+    _owned_module_or_404(db, module_id, user)
 
     try:
-        content = file.file.read()
+        content = _read_limited_upload(file, max_bytes=settings.MAX_IMPORT_JSON_BYTES)
         columns, rows = _parse_card_rows(file.filename or "cards.csv", content)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid import file: {exc}")
