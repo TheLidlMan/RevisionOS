@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Timer, Play, Pause, RotateCcw, X, SlidersHorizontal } from 'lucide-react';
 import { usePersistentState } from '../hooks/usePersistentState';
 
@@ -48,6 +48,7 @@ export default function PomodoroTimer() {
   const breakSeconds = Math.max(1, Math.round(preferences.breakMinutes * 60));
   const total = isBreak ? breakSeconds : focusSeconds;
   const [seconds, setSeconds] = useState(total);
+  const previousTotalRef = useRef(total);
   const normalizedAnalytics = analytics.dayKey === todayKey()
     ? analytics
     : {
@@ -57,6 +58,14 @@ export default function PomodoroTimer() {
         longestFocusSeconds: 0,
         lastFocusSeconds: 0,
       };
+
+  useEffect(() => {
+    const previousTotal = previousTotalRef.current;
+    previousTotalRef.current = total;
+    if (!running && (seconds === previousTotal || seconds > total)) {
+      setSeconds(total);
+    }
+  }, [running, seconds, total]);
 
   useEffect(() => {
     if (!running) {
