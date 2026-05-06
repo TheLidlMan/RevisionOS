@@ -266,7 +266,7 @@ async def upload_document_stream(
     module_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     module_query = db.query(Module).filter(Module.id == module_id)
     if user:
