@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 import asyncio
 from pathlib import Path
 from unittest.mock import patch
@@ -36,6 +37,7 @@ from models.user_stats import UserStats
 from routers import auth as auth_router
 from routers import collaboration, settings as settings_router
 from services.ai_request_lock_service import serialized_ai_request
+from services import security as security_service
 from services.auth_service import (
     SESSION_COOKIE_NAME,
     _get_secret_key,
@@ -279,6 +281,15 @@ class SecurityFixesTestCase(unittest.TestCase):
             )
 
         self.assertEqual(limited.status_code, 429)
+
+    def test_rate_limit_buckets_evict_active_entries_at_hard_cap(self):
+        with patch.object(security_service, "_MAX_RATE_LIMIT_BUCKETS", 2):
+            for ip_address in ("192.0.2.1", "192.0.2.2", "192.0.2.3"):
+                request = SimpleNamespace(headers={}, client=SimpleNamespace(host=ip_address))
+                security_service.enforce_rate_limit(request, scope="test:eviction", limit=10, window_seconds=60)
+
+        self.assertLessEqual(len(security_service._RATE_LIMIT_BUCKETS), 2)
+        self.assertIn(("test:eviction", "192.0.2.3"), security_service._RATE_LIMIT_BUCKETS)
 
     def test_google_start_is_rate_limited(self):
         for _ in range(10):
@@ -802,6 +813,43 @@ class SecurityFixesTestCase(unittest.TestCase):
             settings.MAX_UPLOAD_BYTES = original_limit
 
         self.assertEqual(response.status_code, 413)
+
+    def test_card_import_preview_enforces_record_limit(self):
+        owner_id, owner_token = self._create_user("card-preview-limit@example.com")
+        module_id = self._create_module_with_flashcard(owner_id)[0]
+        csv_body = b"front,back\nq1,a1\nq2,a2\n"
+        original_limit = settings.MAX_IMPORT_RECORDS
+        settings.MAX_IMPORT_RECORDS = 1
+        try:
+            response = self.client.post(
+                f"/api/modules/{module_id}/import-cards/preview",
+                cookies={SESSION_COOKIE_NAME: owner_token},
+                files={"file": ("cards.csv", csv_body, "text/csv")},
+            )
+        finally:
+            settings.MAX_IMPORT_RECORDS = original_limit
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("maximum allowed records", response.json()["detail"])
+
+    def test_card_import_commit_enforces_record_limit(self):
+        owner_id, owner_token = self._create_user("card-commit-limit@example.com")
+        module_id = self._create_module_with_flashcard(owner_id)[0]
+        csv_body = b"front,back\nq1,a1\nq2,a2\n"
+        original_limit = settings.MAX_IMPORT_RECORDS
+        settings.MAX_IMPORT_RECORDS = 1
+        try:
+            response = self.client.post(
+                f"/api/modules/{module_id}/import-cards",
+                cookies={SESSION_COOKIE_NAME: owner_token},
+                data={"mapping": json.dumps({"front": "front", "back": "back"})},
+                files={"file": ("cards.csv", csv_body, "text/csv")},
+            )
+        finally:
+            settings.MAX_IMPORT_RECORDS = original_limit
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("maximum allowed records", response.json()["detail"])
 
     def test_json_import_requires_auth_and_enforces_size_limit(self):
         _, token = self._create_user("import-owner@example.com")
