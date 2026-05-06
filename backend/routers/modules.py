@@ -333,7 +333,7 @@ def reorder_modules(
 
 
 @router.post("/{module_id}/cancel-processing")
-def cancel_module_processing(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def cancel_module_processing(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     module = _apply_module_scope(db.query(Module).filter(Module.id == module_id), user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
