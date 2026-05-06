@@ -16,7 +16,7 @@ from models.module_job import ModuleJob
 from models.quiz_question import QuizQuestion
 from models.user import User
 from services import ai_service
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, require_user
 from services.content_indexer import backfill_document_summaries
 from services.pipeline_service import ACTIVE_JOB_STATUSES, rebuild_module_outputs, sync_module_pipeline_state
 from typing import Optional as OptionalType
