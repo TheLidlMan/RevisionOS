@@ -66,10 +66,16 @@ def enforce_rate_limit(
 
     with _RATE_LIMIT_LOCK:
         cutoff = now - window_seconds
-        if len(_RATE_LIMIT_BUCKETS) > _MAX_RATE_LIMIT_BUCKETS:
+        if len(_RATE_LIMIT_BUCKETS) >= _MAX_RATE_LIMIT_BUCKETS and bucket_key not in _RATE_LIMIT_BUCKETS:
             stale_keys = [key for key, values in _RATE_LIMIT_BUCKETS.items() if not values or values[-1] <= cutoff]
             for key in stale_keys:
                 _RATE_LIMIT_BUCKETS.pop(key, None)
+            if len(_RATE_LIMIT_BUCKETS) >= _MAX_RATE_LIMIT_BUCKETS:
+                oldest_key = min(
+                    _RATE_LIMIT_BUCKETS,
+                    key=lambda key: _RATE_LIMIT_BUCKETS[key][-1] if _RATE_LIMIT_BUCKETS[key] else 0,
+                )
+                _RATE_LIMIT_BUCKETS.pop(oldest_key, None)
         bucket = _RATE_LIMIT_BUCKETS[bucket_key]
         while bucket and bucket[0] <= cutoff:
             bucket.popleft()
