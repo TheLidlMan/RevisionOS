@@ -208,7 +208,7 @@ async def upload_document(
     module_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     # Verify module exists
     module_query = db.query(Module).filter(Module.id == module_id)
