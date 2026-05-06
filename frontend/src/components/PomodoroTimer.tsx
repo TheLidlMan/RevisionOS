@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Timer, Play, Pause, RotateCcw, X, SlidersHorizontal } from 'lucide-react';
 import { usePersistentState } from '../hooks/usePersistentState';
 
@@ -48,7 +48,6 @@ export default function PomodoroTimer() {
   const breakSeconds = Math.max(1, Math.round(preferences.breakMinutes * 60));
   const total = isBreak ? breakSeconds : focusSeconds;
   const [seconds, setSeconds] = useState(total);
-  const previousTotalRef = useRef(total);
   const normalizedAnalytics = analytics.dayKey === todayKey()
     ? analytics
     : {
@@ -58,14 +57,6 @@ export default function PomodoroTimer() {
         longestFocusSeconds: 0,
         lastFocusSeconds: 0,
       };
-
-  useEffect(() => {
-    const previousTotal = previousTotalRef.current;
-    previousTotalRef.current = total;
-    if (!running && (seconds === previousTotal || seconds > total)) {
-      setSeconds(total);
-    }
-  }, [running, seconds, total]);
 
   useEffect(() => {
     if (!running) {
@@ -119,6 +110,24 @@ export default function PomodoroTimer() {
     ],
     [normalizedAnalytics.focusSeconds, normalizedAnalytics.longestFocusSeconds, normalizedAnalytics.sessions],
   );
+
+  const updateFocusMinutes = (rawValue: number) => {
+    const nextMinutes = Math.min(90, Math.max(5, rawValue || 25));
+    const nextSeconds = Math.max(1, Math.round(nextMinutes * 60));
+    setPreferences((current) => ({ ...current, focusMinutes: nextMinutes }));
+    if (!running && !isBreak && (seconds === focusSeconds || seconds > nextSeconds)) {
+      setSeconds(nextSeconds);
+    }
+  };
+
+  const updateBreakMinutes = (rawValue: number) => {
+    const nextMinutes = Math.min(30, Math.max(1, rawValue || 5));
+    const nextSeconds = Math.max(1, Math.round(nextMinutes * 60));
+    setPreferences((current) => ({ ...current, breakMinutes: nextMinutes }));
+    if (!running && isBreak && (seconds === breakSeconds || seconds > nextSeconds)) {
+      setSeconds(nextSeconds);
+    }
+  };
 
   const r = 40;
   const c = 2 * Math.PI * r;
@@ -198,7 +207,7 @@ export default function PomodoroTimer() {
               min={5}
               max={90}
               value={preferences.focusMinutes}
-              onChange={(event) => setPreferences((current) => ({ ...current, focusMinutes: Math.min(90, Math.max(5, Number(event.target.value) || 25)) }))}
+              onChange={(event) => updateFocusMinutes(Number(event.target.value))}
               className="w-full px-3 py-2 rounded-lg"
               style={{ background: 'rgba(255,248,240,0.05)', border: '1px solid rgba(139,115,85,0.2)', color: '#f5f0e8' }}
             />
@@ -210,7 +219,7 @@ export default function PomodoroTimer() {
               min={1}
               max={30}
               value={preferences.breakMinutes}
-              onChange={(event) => setPreferences((current) => ({ ...current, breakMinutes: Math.min(30, Math.max(1, Number(event.target.value) || 5)) }))}
+              onChange={(event) => updateBreakMinutes(Number(event.target.value))}
               className="w-full px-3 py-2 rounded-lg"
               style={{ background: 'rgba(255,248,240,0.05)', border: '1px solid rgba(139,115,85,0.2)', color: '#f5f0e8' }}
             />
