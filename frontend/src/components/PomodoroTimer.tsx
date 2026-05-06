@@ -210,7 +210,7 @@ export default function PomodoroTimer() {
       )}
 
       <div style={{ textAlign: 'center', margin: '0.5rem 0' }}>
-        <svg width="100" height="100" viewBox="0 0 100 100">
+        <svg width="100" height="100" viewBox="0 0 100 100" role="timer" aria-label={`${isBreak ? 'Break' : 'Focus'} timer ${mm}:${ss} remaining`}>
           <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(139,115,85,0.15)" strokeWidth="4" />
           <circle
             cx="50"
