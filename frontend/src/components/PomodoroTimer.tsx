@@ -189,7 +189,7 @@ export default function PomodoroTimer() {
               min={5}
               max={90}
               value={preferences.focusMinutes}
-              onChange={(event) => setPreferences((current) => ({ ...current, focusMinutes: Math.max(5, Number(event.target.value) || 25) }))}
+              onChange={(event) => setPreferences((current) => ({ ...current, focusMinutes: Math.min(90, Math.max(5, Number(event.target.value) || 25)) }))}
               className="w-full px-3 py-2 rounded-lg"
               style={{ background: 'rgba(255,248,240,0.05)', border: '1px solid rgba(139,115,85,0.2)', color: '#f5f0e8' }}
             />
@@ -201,7 +201,7 @@ export default function PomodoroTimer() {
               min={1}
               max={30}
               value={preferences.breakMinutes}
-              onChange={(event) => setPreferences((current) => ({ ...current, breakMinutes: Math.max(1, Number(event.target.value) || 5) }))}
+              onChange={(event) => setPreferences((current) => ({ ...current, breakMinutes: Math.min(30, Math.max(1, Number(event.target.value) || 5)) }))}
               className="w-full px-3 py-2 rounded-lg"
               style={{ background: 'rgba(255,248,240,0.05)', border: '1px solid rgba(139,115,85,0.2)', color: '#f5f0e8' }}
             />
