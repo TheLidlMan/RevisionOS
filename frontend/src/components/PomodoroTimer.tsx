@@ -95,7 +95,7 @@ export default function PomodoroTimer() {
     return () => window.clearInterval(id);
   }, [breakSeconds, focusSeconds, isBreak, running, setAnalytics]);
 
-  const displaySeconds = running ? seconds : total;
+  const displaySeconds = seconds;
   const pct = ((total - displaySeconds) / total) * 100;
   const mm = String(Math.floor(displaySeconds / 60)).padStart(2, '0');
   const ss = String(displaySeconds % 60).padStart(2, '0');
@@ -234,9 +234,6 @@ export default function PomodoroTimer() {
       <div className="flex items-center justify-center gap-2 mt-2">
         <button
           onClick={() => {
-            if (!running) {
-              setSeconds(total);
-            }
             setRunning((current) => !current);
           }}
           style={{
