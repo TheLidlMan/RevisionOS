@@ -117,6 +117,8 @@ export default function PomodoroTimer() {
   if (!open) {
     return (
       <button
+        type="button"
+        aria-label="Open Pomodoro timer"
         onClick={() => setOpen(true)}
         style={{
           position: 'fixed',
@@ -166,12 +168,13 @@ export default function PomodoroTimer() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            aria-label="Toggle Pomodoro settings"
             onClick={() => setShowSettings((current) => !current)}
             style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.55)', cursor: 'pointer' }}
           >
             <SlidersHorizontal className="w-4 h-4" />
           </button>
-          <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}>
+          <button type="button" aria-label="Close Pomodoro timer" onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(245,240,232,0.4)', cursor: 'pointer' }}>
             <X className="w-4 h-4" />
           </button>
         </div>
