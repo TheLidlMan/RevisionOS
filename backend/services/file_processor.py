@@ -23,6 +23,34 @@ def _validate_path(file_path: str) -> str:
     return resolved
 
 
+def safe_remove_upload_file(file_path: str | None) -> bool:
+    """Remove an uploaded file only after proving it lives under UPLOAD_DIR.
+
+    Database rows can outlive old upload code and are not a safe source of
+    filesystem authority. Deletion paths must therefore re-validate stored
+    paths before unlinking them.
+    """
+    if not file_path:
+        return False
+    try:
+        safe_path = _validate_path(file_path)
+    except ValueError:
+        logger.warning("Refusing to delete file outside upload directory: %s", file_path)
+        return False
+
+    if not os.path.isfile(safe_path):
+        return False
+
+    try:
+        os.remove(safe_path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        logger.warning("Unable to delete upload file: %s", safe_path, exc_info=True)
+        return False
+    return True
+
+
 def extract_text(file_path: str, file_type: str) -> str:
     """Extract text from a file based on its type."""
     safe_path = _validate_path(file_path)

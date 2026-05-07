@@ -18,6 +18,7 @@ from models.user import User
 from services import ai_service
 from services.auth_service import get_current_user, require_user
 from services.content_indexer import backfill_document_summaries
+from services.file_processor import safe_remove_upload_file
 from services.pipeline_service import ACTIVE_JOB_STATUSES, rebuild_module_outputs, sync_module_pipeline_state
 from typing import Optional as OptionalType
 
@@ -292,8 +293,7 @@ def delete_module(module_id: str, db: Session = Depends(get_db), user: User = De
         raise HTTPException(status_code=404, detail="Module not found")
 
     for document in list(module.documents):
-        if document.file_path and os.path.exists(document.file_path):
-            os.remove(document.file_path)
+        safe_remove_upload_file(document.file_path)
 
     db.delete(module)
     db.commit()

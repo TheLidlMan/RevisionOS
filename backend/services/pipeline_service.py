@@ -19,7 +19,7 @@ from models.module import Module
 from models.module_job import ModuleJob
 from services import ai_service
 from services.content_indexer import index_document, summarize_document
-from services.file_processor import extract_image_text, extract_text, transcribe_audio
+from services.file_processor import extract_image_text, extract_text, safe_remove_upload_file, transcribe_audio
 from services.quota_service import ai_quota_scope
 from services.rag_service import build_rag_context
 from services.graph_service import sync_module_graph
@@ -498,8 +498,7 @@ async def _generate_missing_flashcards(
 
 
 def _remove_document_file(doc: Document) -> None:
-    if doc.file_path and os.path.exists(doc.file_path):
-        os.remove(doc.file_path)
+    safe_remove_upload_file(doc.file_path)
 
 
 def _rollback_pipeline_run(

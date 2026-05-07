@@ -17,7 +17,7 @@ from models.document import Document
 from models.module import Module
 from models.module_job import ModuleJob
 from services.content_indexer import backfill_document_summaries
-from services.file_processor import extract_text, transcribe_audio, extract_image_text
+from services.file_processor import extract_text, transcribe_audio, extract_image_text, safe_remove_upload_file
 from services.pipeline_service import ACTIVE_JOB_STATUSES, PIPELINE_TOTAL_STEPS, create_module_job, process_document_pipeline, sync_module_pipeline_state
 from services.graph_service import sync_module_graph
 from services import ai_service
@@ -445,8 +445,7 @@ def delete_document(document_id: str, db: Session = Depends(get_db), user: User 
         active_job.cancel_requested_at = now
         active_job.cancelled_at = now
         active_job.finished_at = now
-        if doc.file_path and os.path.exists(doc.file_path):
-            os.remove(doc.file_path)
+        safe_remove_upload_file(doc.file_path)
         db.delete(doc)
         if module:
             sync_module_pipeline_state(db, module.id)
@@ -469,8 +468,7 @@ def delete_document(document_id: str, db: Session = Depends(get_db), user: User 
         db.commit()
         return None
 
-    if doc.file_path and os.path.exists(doc.file_path):
-        os.remove(doc.file_path)
+    safe_remove_upload_file(doc.file_path)
     if module:
         module.updated_at = now
         module.pipeline_updated_at = now
