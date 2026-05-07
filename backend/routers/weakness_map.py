@@ -14,8 +14,7 @@ from models.flashcard import Flashcard
 from models.quiz_question import QuizQuestion
 from models.review_log import ReviewLog
 from models.module import Module
-from typing import Optional as OptionalType
-from services.auth_service import get_current_user
+from services.auth_service import require_user
 from models.user import User
 
 router = APIRouter(prefix="/api/weakness-map", tags=["weakness-map"])
@@ -134,20 +133,17 @@ def _compute_concept_confidence(concept: Concept, logs_by_item_id: dict[str, lis
 def get_weakness_map(
     module_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """Compute confidence scores per concept for the weakness map."""
-    query = db.query(Concept)
-    if user:
-        query = query.filter(Concept.user_id == user.id)
+    query = db.query(Concept).filter(Concept.user_id == user.id)
     if module_id:
-        module = db.query(Module).filter(Module.id == module_id).first()
+        module = db.query(Module).filter(Module.id == module_id, Module.user_id == user.id).first()
         if not module:
             raise HTTPException(status_code=404, detail="Module not found")
         query = query.filter(Concept.module_id == module_id)
 
-    user_id = user.id if user else "anonymous"
-    cache_key = f"cache:weakness-map:{user_id}:{module_id or 'all'}"
+    cache_key = f"cache:weakness-map:{user.id}:{module_id or 'all'}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
@@ -205,14 +201,12 @@ def get_optimal_session(
     module_id: Optional[str] = Query(None),
     max_items: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
     """Generate optimal study session from weakest concepts."""
-    query = db.query(Concept)
-    if user:
-        query = query.filter(Concept.user_id == user.id)
+    query = db.query(Concept).filter(Concept.user_id == user.id)
     if module_id:
-        module = db.query(Module).filter(Module.id == module_id).first()
+        module = db.query(Module).filter(Module.id == module_id, Module.user_id == user.id).first()
         if not module:
             raise HTTPException(status_code=404, detail="Module not found")
         query = query.filter(Concept.module_id == module_id)

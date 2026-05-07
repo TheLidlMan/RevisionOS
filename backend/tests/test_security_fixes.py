@@ -152,6 +152,41 @@ class SecurityFixesTestCase(unittest.TestCase):
             db.refresh(card)
             return module.id, card.id
 
+    def _create_module_with_concept_items(self, user_id: str):
+        with SessionLocal() as db:
+            module = Module(user_id=user_id, name="Private Biology")
+            db.add(module)
+            db.flush()
+            concept = Concept(
+                user_id=user_id,
+                module_id=module.id,
+                name="Cell respiration",
+                definition="Private concept",
+                importance_score=0.9,
+            )
+            db.add(concept)
+            db.flush()
+            card = Flashcard(
+                user_id=user_id,
+                module_id=module.id,
+                concept_id=concept.id,
+                front="ATP prompt",
+                back="ATP answer",
+                card_type="BASIC",
+                state="NEW",
+            )
+            question = QuizQuestion(
+                user_id=user_id,
+                module_id=module.id,
+                concept_id=concept.id,
+                question_text="What produces ATP?",
+                question_type="SHORT",
+                correct_answer="Respiration",
+            )
+            db.add_all([card, question])
+            db.commit()
+            return module.id, concept.id
+
     def _create_module_with_due_flashcards(self, user_id: str):
         with SessionLocal() as db:
             module = Module(user_id=user_id, name="Chemistry")
@@ -734,6 +769,97 @@ class SecurityFixesTestCase(unittest.TestCase):
         self.assertEqual(anonymous.status_code, 401)
         self.assertEqual(attacker.status_code, 404)
         self.assertEqual(owner.status_code, 200)
+
+    def test_private_concept_endpoints_require_owner(self):
+        owner_id, owner_token = self._create_user("concept-owner@example.com")
+        _, attacker_token = self._create_user("concept-attacker@example.com")
+        module_id, concept_id = self._create_module_with_concept_items(owner_id)
+
+        cases = [
+            ("get", "/api/concepts", {"module_id": module_id}),
+            ("get", f"/api/concepts/{concept_id}", None),
+            ("post", f"/api/concepts/{concept_id}/drill", None),
+        ]
+        for method, url, params in cases:
+            with self.subTest(url=url):
+                anonymous = getattr(self.client, method)(url, params=params)
+                attacker = getattr(self.client, method)(
+                    url,
+                    cookies={SESSION_COOKIE_NAME: attacker_token},
+                    params=params,
+                )
+                owner = getattr(self.client, method)(
+                    url,
+                    cookies={SESSION_COOKIE_NAME: owner_token},
+                    params=params,
+                )
+
+                self.assertEqual(anonymous.status_code, 401)
+                self.assertEqual(attacker.status_code, 404)
+                self.assertEqual(owner.status_code, 200)
+
+    def test_private_graph_and_weakness_endpoints_require_owner(self):
+        owner_id, owner_token = self._create_user("graph-owner@example.com")
+        _, attacker_token = self._create_user("graph-attacker@example.com")
+        module_id, _concept_id = self._create_module_with_concept_items(owner_id)
+
+        cases = [
+            ("/api/modules/{module_id}/knowledge-graph", None),
+            ("/api/weakness-map", {"module_id": module_id}),
+            ("/api/weakness-map/optimal-session", {"module_id": module_id}),
+        ]
+        for url_template, params in cases:
+            url = url_template.format(module_id=module_id)
+            with self.subTest(url=url):
+                anonymous = self.client.get(url, params=params)
+                attacker = self.client.get(
+                    url,
+                    cookies={SESSION_COOKIE_NAME: attacker_token},
+                    params=params,
+                )
+                owner = self.client.get(
+                    url,
+                    cookies={SESSION_COOKIE_NAME: owner_token},
+                    params=params,
+                )
+
+                self.assertEqual(anonymous.status_code, 401)
+                self.assertEqual(attacker.status_code, 404)
+                self.assertEqual(owner.status_code, 200)
+
+    def test_unfiltered_private_concept_and_weakness_lists_are_user_scoped(self):
+        owner_id, _owner_token = self._create_user("list-owner@example.com")
+        attacker_id, attacker_token = self._create_user("list-attacker@example.com")
+        _owner_module_id, owner_concept_id = self._create_module_with_concept_items(owner_id)
+        _attacker_module_id, attacker_concept_id = self._create_module_with_concept_items(attacker_id)
+
+        concept_response = self.client.get(
+            "/api/concepts",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+        )
+        weakness_response = self.client.get(
+            "/api/weakness-map",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+        )
+        session_response = self.client.get(
+            "/api/weakness-map/optimal-session",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+        )
+
+        self.assertEqual(concept_response.status_code, 200)
+        concept_ids = {item["id"] for item in concept_response.json()}
+        self.assertIn(attacker_concept_id, concept_ids)
+        self.assertNotIn(owner_concept_id, concept_ids)
+
+        self.assertEqual(weakness_response.status_code, 200)
+        weakness_ids = {item["id"] for item in weakness_response.json()["concepts"]}
+        self.assertIn(attacker_concept_id, weakness_ids)
+        self.assertNotIn(owner_concept_id, weakness_ids)
+
+        self.assertEqual(session_response.status_code, 200)
+        session_ids = {item["concept_id"] for item in session_response.json()["items"]}
+        self.assertIn(attacker_concept_id, session_ids)
+        self.assertNotIn(owner_concept_id, session_ids)
 
     def test_create_collaboration_room_requires_owned_module(self):
         owner_id, owner_token = self._create_user("collab-module-owner@example.com")
