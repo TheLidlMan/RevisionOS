@@ -86,6 +86,8 @@ export default function FlashcardReview() {
   const [answerFeedback, setAnswerFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [outOfHearts, setOutOfHearts] = useState(false);
   const [sessionTimer, setSessionTimer] = useState<SessionTimerState | null>(null);
+  const latestSessionTimerRef = useRef<SessionTimerState | null>(null);
+  const sessionCompletedRef = useRef(false);
   const elaborationLoadingRef = useRef(false);
   const startTimeRef = useRef<number>(0);
 
@@ -105,26 +107,36 @@ export default function FlashcardReview() {
     if (!moduleId || !cards || cards.length === 0 || sessionTimer) {
       return;
     }
+    sessionCompletedRef.current = false;
     startFlashcardSession(moduleId, cards.length).then(setSessionTimer).catch((error) => {
       console.error('Failed to start session timer:', error);
     });
   }, [cards, moduleId, sessionTimer]);
 
   useEffect(() => {
-    if (!sessionTimer || sessionTimer.timer_state !== 'running') {
+    latestSessionTimerRef.current = sessionTimer;
+  }, [sessionTimer]);
+
+  const sessionTimerId = sessionTimer?.id;
+  const sessionTimerState = sessionTimer?.timer_state;
+
+  useEffect(() => {
+    if (!sessionTimerId || sessionTimerState !== 'running') {
       return;
     }
     const interval = window.setInterval(() => {
       setSessionTimer((current) => current ? { ...current, active_duration_sec: current.active_duration_sec + 1 } : current);
     }, 1000);
     return () => window.clearInterval(interval);
-  }, [sessionTimer]);
+  }, [sessionTimerId, sessionTimerState]);
 
   useEffect(() => () => {
-    if (sessionTimer && sessionTimer.timer_state === 'running') {
-      completeSessionTimer(sessionTimer.id).catch(() => undefined);
+    const latestTimer = latestSessionTimerRef.current;
+    if (latestTimer && latestTimer.timer_state === 'running' && !sessionCompletedRef.current) {
+      sessionCompletedRef.current = true;
+      completeSessionTimer(latestTimer.id).catch(() => undefined);
     }
-  }, [sessionTimer]);
+  }, []);
 
   // Memoized derived values — avoid recomputing on every render
   const totalCards = useMemo(() => cards?.length ?? 0, [cards]);
@@ -203,7 +215,8 @@ export default function FlashcardReview() {
       setShowTutor(false);
       elaborationLoadingRef.current = false;
       if (cards && currentIdx + 1 >= totalCards) {
-        if (sessionTimer) {
+        if (sessionTimer && !sessionCompletedRef.current) {
+          sessionCompletedRef.current = true;
           completeSessionTimer(sessionTimer.id).then(setSessionTimer).catch(() => undefined);
         }
         if (typeof performance !== 'undefined') {
@@ -240,7 +253,7 @@ export default function FlashcardReview() {
 
   const handleRate = useCallback(
     (rating: Rating) => {
-      if (!cards) return;
+      if (!cards || reviewMutation.isPending) return;
       reviewMutation.mutate({ id: cards[currentIdx].id, rating });
     },
     [cards, currentIdx, reviewMutation]
