@@ -6,8 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.module import Module
-from typing import Optional as OptionalType
-from services.auth_service import get_current_user
+from services.auth_service import require_user
 from services.graph_service import get_module_graph
 from models.user import User
 
@@ -47,16 +46,13 @@ class KnowledgeGraphResponse(BaseModel):
 # ---------- Endpoints ----------
 
 @router.get("/api/modules/{module_id}/knowledge-graph", response_model=KnowledgeGraphResponse)
-def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def get_knowledge_graph(module_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Return nodes + edges JSON for D3 visualization."""
-    query = db.query(Module).filter(Module.id == module_id)
-    if user:
-        query = query.filter(Module.user_id == user.id)
-    module = query.first()
+    module = db.query(Module).filter(Module.id == module_id, Module.user_id == user.id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    graph = get_module_graph(db, module_id, user.id if user else None)
+    graph = get_module_graph(db, module_id, user.id)
     return KnowledgeGraphResponse(
         module_name=graph.get("module_name") or module.name,
         nodes=[GraphNode(**node) for node in graph.get("nodes", [])],

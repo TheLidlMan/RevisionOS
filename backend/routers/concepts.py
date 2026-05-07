@@ -15,8 +15,7 @@ from models.module import Module
 from models.quiz_question import QuizQuestion
 from models.quiz_session import StudySession
 from models.review_log import ReviewLog
-from typing import Optional as OptionalType
-from services.auth_service import get_current_user, require_user
+from services.auth_service import require_user
 from models.user import User
 
 router = APIRouter(prefix="/api/concepts", tags=["concepts"])
@@ -100,12 +99,13 @@ def list_concepts(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
-    user: OptionalType[User] = Depends(get_current_user),
+    user: User = Depends(require_user),
 ):
-    query = db.query(Concept)
-    if user:
-        query = query.filter(Concept.user_id == user.id)
+    query = db.query(Concept).filter(Concept.user_id == user.id)
     if module_id:
+        module = db.query(Module.id).filter(Module.id == module_id, Module.user_id == user.id).first()
+        if not module:
+            raise HTTPException(status_code=404, detail="Module not found")
         query = query.filter(Concept.module_id == module_id)
     concepts = (
         query.with_entities(
@@ -139,12 +139,9 @@ def list_concepts(
 
 
 @router.get("/{concept_id}", response_model=ConceptDetailResponse)
-def get_concept_detail(concept_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def get_concept_detail(concept_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Return concept with linked flashcards, questions, and accuracy stats."""
-    query = db.query(Concept).filter(Concept.id == concept_id)
-    if user:
-        query = query.filter(Concept.user_id == user.id)
-    concept = query.first()
+    concept = db.query(Concept).filter(Concept.id == concept_id, Concept.user_id == user.id).first()
     if not concept:
         raise HTTPException(status_code=404, detail="Concept not found")
 
@@ -211,12 +208,9 @@ def get_concept_detail(concept_id: str, db: Session = Depends(get_db), user: Opt
 
 
 @router.post("/{concept_id}/drill", response_model=DrillSessionResponse)
-def create_drill_session(concept_id: str, db: Session = Depends(get_db), user: OptionalType[User] = Depends(get_current_user)):
+def create_drill_session(concept_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Create a WEAKNESS_DRILL session targeting this concept's questions and flashcards."""
-    query = db.query(Concept).filter(Concept.id == concept_id)
-    if user:
-        query = query.filter(Concept.user_id == user.id)
-    concept = query.first()
+    concept = db.query(Concept).filter(Concept.id == concept_id, Concept.user_id == user.id).first()
     if not concept:
         raise HTTPException(status_code=404, detail="Concept not found")
 
@@ -234,7 +228,7 @@ def create_drill_session(concept_id: str, db: Session = Depends(get_db), user: O
         session_type="WEAKNESS_DRILL",
         started_at=datetime.utcnow(),
         total_items=len(question_ids) + len(flashcard_ids),
-        user_id=user.id if user else None,
+        user_id=user.id,
     )
     db.add(session)
     db.commit()
