@@ -59,6 +59,14 @@ function getErrorStatus(error: unknown): number | undefined {
     ?? errorWithStatus.response?.data?.status;
 }
 
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(target.closest('button, input, textarea, select, a, [role="button"], [contenteditable="true"]'));
+}
+
 export default function FlashcardReview() {
   const { moduleId } = useParams<{ moduleId: string }>();
   const navigate = useNavigate();
@@ -261,6 +269,9 @@ export default function FlashcardReview() {
           return;
         }
         navigate(-1);
+        return;
+      }
+      if (isEditableShortcutTarget(e.target)) {
         return;
       }
       if ((e.key === ' ' || e.key === 'Enter') && !flipped) {
@@ -520,7 +531,7 @@ export default function FlashcardReview() {
       )}
 
       {/* Card */}
-      <div className="perspective-[1200px] mb-8" onClick={handleFlip}>
+      <div className="perspective-[1200px] mb-8" onClick={!flipped ? handleFlip : undefined}>
         <AnimatePresence mode="wait">
           <motion.div
             key={`${card.id}-${flipped}`}
@@ -544,7 +555,16 @@ export default function FlashcardReview() {
                 : 'none',
               transition: 'box-shadow 0.3s ease',
             }}
-            className="p-8 min-h-[300px] flex flex-col items-center justify-center"
+            className="p-8 min-h-[300px] flex flex-col items-center justify-center focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--surface)]"
+            role={!flipped ? 'button' : undefined}
+            tabIndex={!flipped ? 0 : undefined}
+            aria-label={!flipped ? 'Show answer' : undefined}
+            onKeyDown={(event) => {
+              if (!flipped && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                handleFlip();
+              }
+            }}
           >
             <p style={{ color: 'var(--text-tertiary)', fontWeight: 300, fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase' }} className="mb-4">
               {flipped ? 'Answer' : 'Question'}

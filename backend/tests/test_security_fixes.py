@@ -28,6 +28,7 @@ from main import app, fastapi_app
 from models.concept import Concept
 from models.document import Document
 from models.flashcard import Flashcard
+from models.flashcard_asset import FlashcardAsset
 from models.module import Module
 from models.quiz_question import QuizQuestion
 from models.quiz_session import StudySession
@@ -790,6 +791,74 @@ class SecurityFixesTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_delete_document_does_not_remove_file_outside_upload_dir(self):
+        owner_id, owner_token = self._create_user("delete-doc-owner@example.com")
+        _module_id, document_id = self._create_module_with_document(owner_id)
+        sentinel = self.test_dir / "outside-document.txt"
+        sentinel.write_text("do not delete", encoding="utf-8")
+
+        with SessionLocal() as db:
+            document = db.query(Document).filter(Document.id == document_id).one()
+            document.file_path = str(sentinel)
+            db.commit()
+
+        response = self.client.delete(
+            f"/api/documents/{document_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(sentinel.exists())
+        with SessionLocal() as db:
+            self.assertIsNone(db.query(Document).filter(Document.id == document_id).first())
+
+    def test_delete_module_does_not_remove_document_file_outside_upload_dir(self):
+        owner_id, owner_token = self._create_user("delete-module-owner@example.com")
+        module_id, document_id = self._create_module_with_document(owner_id)
+        sentinel = self.test_dir / "outside-module.txt"
+        sentinel.write_text("do not delete", encoding="utf-8")
+
+        with SessionLocal() as db:
+            document = db.query(Document).filter(Document.id == document_id).one()
+            document.file_path = str(sentinel)
+            db.commit()
+
+        response = self.client.delete(
+            f"/api/modules/{module_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(sentinel.exists())
+
+    def test_delete_flashcard_asset_does_not_remove_file_outside_upload_dir(self):
+        owner_id, owner_token = self._create_user("delete-asset-owner@example.com")
+        _, card_id = self._create_module_with_flashcard(owner_id)
+        sentinel = self.test_dir / "outside-asset.png"
+        sentinel.write_bytes(b"not really an image")
+
+        with SessionLocal() as db:
+            asset = FlashcardAsset(
+                flashcard_id=card_id,
+                file_path=str(sentinel),
+                mime_type="image/png",
+                original_filename="outside.png",
+            )
+            db.add(asset)
+            db.commit()
+            db.refresh(asset)
+            asset_id = asset.id
+
+        response = self.client.delete(
+            f"/api/flashcards/assets/{asset_id}",
+            cookies={SESSION_COOKIE_NAME: owner_token},
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(sentinel.exists())
+        with SessionLocal() as db:
+            self.assertIsNone(db.query(FlashcardAsset).filter(FlashcardAsset.id == asset_id).first())
 
     def test_document_upload_enforces_maximum_size(self):
         owner_id, owner_token = self._create_user("upload-owner@example.com")

@@ -24,7 +24,7 @@ from services.fsrs_service import schedule_review
 from services import ai_service
 from services.quota_service import ai_quota_scope
 from services.auth_service import get_current_user, require_user
-from services.file_processor import _validate_path
+from services.file_processor import _validate_path, safe_remove_upload_file
 from models.user import User
 
 router = APIRouter(tags=["flashcards"])
@@ -758,8 +758,7 @@ def delete_flashcard_asset(
     owner_id = current_user.id
     db.delete(asset)
     db.commit()
-    if file_path and os.path.exists(file_path):
-        os.remove(file_path)
+    safe_remove_upload_file(file_path)
     _invalidate_flashcard_caches(owner_id)
     return None
 
