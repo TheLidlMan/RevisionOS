@@ -68,6 +68,8 @@ interface SearchDialogProps {
 function SearchDialog({ onClose }: SearchDialogProps) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -92,8 +94,31 @@ function SearchDialog({ onClose }: SearchDialogProps) {
   }, [query]);
 
   useEffect(() => {
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const timeout = window.setTimeout(() => inputRef.current?.focus(), 50);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      restoreFocusRef.current?.focus();
+    };
+  }, []);
+
+  const trapTabKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab') return;
+
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable || focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }, []);
 
   const highlightedIdx = results.length === 0 ? -1 : Math.min(selectedIdx, results.length - 1);
@@ -110,6 +135,8 @@ function SearchDialog({ onClose }: SearchDialogProps) {
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
+      } else if (e.key === 'Tab') {
+        trapTabKey(e);
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         setSelectedIdx((i) => Math.min(i + 1, results.length - 1));
@@ -120,7 +147,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
         handleSelect(results[highlightedIdx]);
       }
     },
-    [highlightedIdx, results, onClose, handleSelect],
+    [highlightedIdx, results, onClose, handleSelect, trapTabKey],
   );
 
   return (
@@ -138,6 +165,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
         initial={{ opacity: 0, scale: 0.95, y: -10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: -10 }}
+        ref={dialogRef}
         className="w-full max-w-xl shadow-2xl overflow-hidden"
         style={sg.glass}
         onKeyDown={handleKeyDown}
@@ -153,7 +181,14 @@ function SearchDialog({ onClose }: SearchDialogProps) {
               <MagnifyingGlass size={20} style={{ color: sg.accent, flexShrink: 0 }} />
               <input
                 ref={inputRef}
+                id="global-search-input"
                 type="text"
+                role="combobox"
+                aria-label="Search RevisionOS"
+                aria-expanded={debouncedQuery.length >= 2}
+                aria-controls="global-search-results"
+                aria-activedescendant={highlightedIdx >= 0 ? `global-search-result-${results[highlightedIdx]?.type}-${results[highlightedIdx]?.id}` : undefined}
+                aria-autocomplete="list"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -171,6 +206,7 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 }}
               />
               <select
+                aria-label="Filter search results by module"
                 value={moduleFilter}
                 onChange={(e) => {
                   setModuleFilter(e.target.value);
@@ -185,6 +221,8 @@ function SearchDialog({ onClose }: SearchDialogProps) {
                 ))}
               </select>
               <button
+                type="button"
+                aria-label="Close search"
                 onClick={onClose}
                 className="transition-colors"
                 style={{ color: sg.secondary }}
@@ -198,18 +236,22 @@ function SearchDialog({ onClose }: SearchDialogProps) {
             {debouncedQuery.length >= 2 && (
               <div className="max-h-80 overflow-y-auto">
                 {searchLoading ? (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>Searching…</div>
+                  <div role="status" aria-live="polite" className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>Searching…</div>
                 ) : searchError ? (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: '#dc7864' }}>Search failed. Try again.</div>
+                  <div role="status" aria-live="polite" className="px-4 py-8 text-center text-sm" style={{ color: '#dc7864' }}>Search failed. Try again.</div>
                 ) : results.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>
+                  <div role="status" aria-live="polite" className="px-4 py-8 text-center text-sm" style={{ color: sg.secondary }}>
                     No results found.
                   </div>
                 ) : (
-                  <ul>
+                  <ul id="global-search-results" role="listbox" aria-label="Search results">
                     {results.map((result, idx) => (
-                      <li key={`${result.type}-${result.id}`}>
+                      <li key={`${result.type}-${result.id}`} role="presentation">
                         <button
+                          id={`global-search-result-${result.type}-${result.id}`}
+                          type="button"
+                          role="option"
+                          aria-selected={idx === highlightedIdx}
                           onClick={() => handleSelect(result)}
                           className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
                           style={{
