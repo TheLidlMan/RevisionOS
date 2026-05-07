@@ -941,6 +941,68 @@ class SecurityFixesTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 413)
 
+    def test_ai_feature_routes_scope_private_modules(self):
+        owner_id, _ = self._create_user("feature-owner@example.com")
+        _, attacker_token = self._create_user("feature-attacker@example.com")
+        module_id, _ = self._create_module_with_document(owner_id)
+        original_key = settings.GROQ_API_KEY
+        settings.GROQ_API_KEY = "test-key"
+        try:
+            routes = [
+                ("/api/modules/{module_id}/free-recall", {"topic": "History", "user_text": "notes"}),
+                ("/api/modules/{module_id}/free-recall/stream", {"topic": "History", "user_text": "notes"}),
+                ("/api/modules/{module_id}/writing-prompt", None),
+                ("/api/modules/{module_id}/writing-prompt/stream", None),
+                ("/api/modules/{module_id}/exam-timeline", {"exam_date": "2099-01-01"}),
+            ]
+            for path_template, payload in routes:
+                path = path_template.format(module_id=module_id)
+                kwargs = {"cookies": {SESSION_COOKIE_NAME: attacker_token}}
+                if payload is not None:
+                    kwargs["json"] = payload
+                attacker = self.client.post(path, **kwargs)
+                self.assertEqual(attacker.status_code, 404, path)
+        finally:
+            settings.GROQ_API_KEY = original_key
+
+    def test_clip_url_cannot_write_to_another_users_module(self):
+        owner_id, _ = self._create_user("clip-owner@example.com")
+        _, attacker_token = self._create_user("clip-attacker@example.com")
+        module_id = self._create_module_with_document(owner_id)[0]
+
+        response = self.client.post(
+            "/api/documents/clip-url",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json={"module_id": module_id, "url": "https://example.com/notes"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        with SessionLocal() as db:
+            docs = db.query(Document).filter(Document.module_id == module_id).all()
+            self.assertEqual(len(docs), 1)
+            self.assertEqual(docs[0].user_id, owner_id)
+
+    def test_image_occlusion_cannot_write_to_another_users_module(self):
+        owner_id, _ = self._create_user("occlusion-owner@example.com")
+        _, attacker_token = self._create_user("occlusion-attacker@example.com")
+        module_id = self._create_module_with_flashcard(owner_id)[0]
+
+        response = self.client.post(
+            "/api/flashcards/image-occlusion",
+            cookies={SESSION_COOKIE_NAME: attacker_token},
+            json={
+                "module_id": module_id,
+                "image_url": "https://example.com/diagram.png",
+                "occlusions": [{"x": 1, "y": 2, "width": 3, "height": 4, "label": "Nucleus"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        with SessionLocal() as db:
+            cards = db.query(Flashcard).filter(Flashcard.module_id == module_id).all()
+            self.assertEqual(len(cards), 1)
+            self.assertEqual(cards[0].user_id, owner_id)
+
     def test_serialized_ai_request_rejects_invalid_lock_names(self):
         with self.assertRaises(ValueError):
             asyncio.run(self._acquire_invalid_ai_lock())

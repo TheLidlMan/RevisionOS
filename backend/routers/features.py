@@ -1007,7 +1007,7 @@ async def free_recall(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = _scope_module_query(db, module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     if not settings.GROQ_API_KEY:
@@ -1072,7 +1072,7 @@ async def free_recall_stream(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = _scope_module_query(db, module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     if not settings.GROQ_API_KEY:
@@ -1144,12 +1144,12 @@ async def clip_url(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    module = _scope_module_query(db, body.module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
     module_id = module.id
-    user_id = user.id if user else None
+    user_id = module.user_id
     db.close()
 
     validated_url = _validate_external_url(body.url)
@@ -1516,7 +1516,7 @@ async def writing_prompt(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = _scope_module_query(db, module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     if not settings.GROQ_API_KEY:
@@ -1567,7 +1567,7 @@ async def writing_prompt_stream(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = _scope_module_query(db, module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     if not settings.GROQ_API_KEY:
@@ -1706,7 +1706,7 @@ def exam_timeline(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == module_id).first()
+    module = _scope_module_query(db, module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -1926,7 +1926,7 @@ def image_occlusion(
     db: Session = Depends(get_db),
     user: OptionalType[User] = Depends(get_current_user),
 ):
-    module = db.query(Module).filter(Module.id == body.module_id).first()
+    module = _scope_module_query(db, body.module_id, user).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
 
@@ -1946,7 +1946,7 @@ def image_occlusion(
 
         card = Flashcard(
             id=str(uuid.uuid4()),
-            user_id=user.id if user else None,
+            user_id=module.user_id,
             module_id=body.module_id,
             front=f"[Image Occlusion] What is hidden at region ({occ.x}, {occ.y})? "
                   f"Image: {body.image_url}",
