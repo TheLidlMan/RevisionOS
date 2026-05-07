@@ -135,13 +135,22 @@ export function UploadDocumentsPane({ moduleId, moduleName, onUploaded }: Upload
       </div>
 
       <div
-        className="p-8 text-center cursor-pointer transition-colors"
+        className="p-8 text-center cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--surface)]"
         style={{
           ...glass,
           border: dragOver ? '1px solid var(--accent)' : '1px dashed var(--border)',
           background: dragOver ? 'var(--accent-soft)' : 'var(--surface)',
         }}
+        role="button"
+        tabIndex={0}
+        aria-label="Upload documents"
         onClick={() => fileRef.current?.click()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            fileRef.current?.click();
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           setDragOver(true);
@@ -247,6 +256,9 @@ export default function UploadDocumentsModal({ open, onClose, ...paneProps }: Up
     <div
       className="fixed inset-0 z-50 overflow-y-auto p-4"
       style={{ background: 'rgba(15, 15, 15, 0.75)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="upload-documents-title"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -257,7 +269,7 @@ export default function UploadDocumentsModal({ open, onClose, ...paneProps }: Up
         <div className="w-full max-w-3xl p-6 my-6 max-h-[calc(100vh-3rem)] flex flex-col" style={glass}>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.35rem' }}>Upload Documents</h2>
+              <h2 id="upload-documents-title" style={{ fontFamily: 'var(--heading)', color: 'var(--text)', fontSize: '1.35rem' }}>Upload Documents</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Everything after upload happens automatically.</p>
             </div>
             <button
